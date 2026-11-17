@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SportsChannel, RealSportsEvent, BigMatchFixture } from '../sports/sports-service';
-import { fetchSportsEPG, extractRealSportsEvents, TODAY_BIG_MATCHES } from '../sports/sports-service';
+import { fetchSportsEPG, extractRealSportsEvents, fetchSportsFixtures, TODAY_BIG_MATCHES } from '../sports/sports-service';
 import { SportsPlayer } from '../sports/SportsPlayer';
 import { useI18n } from '../i18n';
 import {
@@ -24,11 +24,12 @@ export function SportsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<TabCategory>('all');
   const [matchFilter, setMatchFilter] = useState<MatchFilter>('all');
+  const [matches, setMatches] = useState<BigMatchFixture[]>(TODAY_BIG_MATCHES);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeChannel, setActiveChannel] = useState<SportsChannel | null>(null);
   const [expandedScheduleChannelId, setExpandedScheduleChannelId] = useState<string | null>(null);
 
-  // Load EPG data on mount
+  // Load EPG data & live match fixtures on mount
   useEffect(() => {
     let mounted = true;
     fetchSportsEPG()
@@ -41,6 +42,15 @@ export function SportsPage() {
       .catch(() => {
         if (mounted) setLoading(false);
       });
+
+    fetchSportsFixtures()
+      .then((f) => {
+        if (mounted && f && f.length > 0) {
+          setMatches(f);
+        }
+      })
+      .catch(() => {});
+
     return () => {
       mounted = false;
     };
@@ -49,8 +59,12 @@ export function SportsPage() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      const data = await fetchSportsEPG(true);
+      const [data, f] = await Promise.all([
+        fetchSportsEPG(true),
+        fetchSportsFixtures(),
+      ]);
       setChannels(data);
+      if (f && f.length > 0) setMatches(f);
     } finally {
       setRefreshing(false);
     }
@@ -69,17 +83,17 @@ export function SportsPage() {
     return extractRealSportsEvents(channels, lang);
   }, [channels, lang]);
 
-  // Featured Marquee Match (First match in TODAY_BIG_MATCHES)
-  const marqueeMatch: BigMatchFixture = TODAY_BIG_MATCHES[0];
+  // Featured Marquee Match (First live or top upcoming match)
+  const marqueeMatch: BigMatchFixture = matches[0] || TODAY_BIG_MATCHES[0];
 
   // Filtered Matches based on matchFilter
   const filteredMatches = useMemo(() => {
-    return TODAY_BIG_MATCHES.filter((m) => {
+    return matches.filter((m) => {
       if (matchFilter === 'all') return true;
       if (matchFilter === 'live') return m.status === 'live';
       return m.leagueKey === matchFilter;
     });
-  }, [matchFilter]);
+  }, [matches, matchFilter]);
 
   // Filter channels based on selected tab and search query
   const filteredChannels = useMemo(() => {

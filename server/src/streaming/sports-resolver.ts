@@ -8,6 +8,8 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { Readable } from 'node:stream';
+import { getSportsFixtures } from './sports-fixtures.js';
 
 interface CachedStream {
   streamUrl: string;
@@ -381,7 +383,7 @@ sportsRouter.get('/stream/:channelKey/segment.ts', async (req: Request, res: Res
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
     if (contentLength) {
       res.setHeader('Content-Length', contentLength);
     }
@@ -390,25 +392,30 @@ sportsRouter.get('/stream/:channelKey/segment.ts', async (req: Request, res: Res
       return res.end();
     }
 
-    // Direct stream piping without buffering
-    const reader = upstreamRes.body.getReader();
-    const pump = async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(value);
-        }
-        res.end();
-      } catch (pipeErr) {
-        res.destroy();
-      }
-    };
-    void pump();
+    // Direct kernel stream piping with automatic backpressure management
+    Readable.fromWeb(upstreamRes.body as any).pipe(res);
   } catch (err: any) {
     if (!res.headersSent) {
       res.status(502).send('Failed to fetch segment');
     }
+  }
+});
+
+/**
+ * GET /api/sports/fixtures
+ * Real-time matches schedule & live fixtures extracted from authentic beIN EPG
+ */
+sportsRouter.get('/fixtures', async (req: Request, res: Response) => {
+  try {
+    const forceRefresh = req.query.refresh === 'true';
+    const fixtures = await getSportsFixtures(forceRefresh);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+    res.json(fixtures);
+  } catch (err: any) {
+    console.error('[SportsFixtures] Error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch sports fixtures', message: err.message });
   }
 });
 

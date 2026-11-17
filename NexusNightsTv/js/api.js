@@ -392,6 +392,15 @@
         },
 
         // Sports: channels & live streams
+        getSportsFixtures: function () {
+            var isLocalDev = window.location && (window.location.port === '8080' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+            var endpoint = isLocalDev ? '/api/sports/fixtures' : backendUrl('/api/sports/fixtures');
+            return this.request(endpoint).catch(function (err) {
+                console.warn('[NexusAPI] Live fixtures fetch failed:', err && err.message);
+                return null;
+            });
+        },
+
         getSportsChannels: function () {
             return this.request('/api/sports/status').then(function (data) {
                 var keys = data && Array.isArray(data.channels) ? data.channels : [];
