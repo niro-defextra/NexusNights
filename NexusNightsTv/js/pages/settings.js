@@ -58,7 +58,7 @@
             html += '</div>';
             html += '<div class="settings-item">';
             html += '<div class="settings-item-label">' + NexusConfig.t('settings_engine') + '</div>';
-            html += '<div class="settings-item-value" style="color: #10b981;">' + (typeof webapis !== 'undefined' && webapis.avplay ? 'Samsung AVPlay Engine (Hardware Accelerated)' : 'HTML5 + Hls.js Cinema Engine') + '</div>';
+            html += '<div class="settings-item-value" style="color: var(--color-brand-gold);">' + (typeof webapis !== 'undefined' && webapis.avplay ? 'Samsung AVPlay Engine (Hardware Accelerated)' : 'HTML5 + Hls.js Cinema Engine') + '</div>';
             html += '</div>';
             html += '</div>';
             
@@ -105,7 +105,7 @@
                 NexusConfig.setBackendUrl(url);
                 var valEl = document.getElementById('current-backend-val');
                 if (valEl) valEl.textContent = url;
-                alert((NexusConfig.getLanguage() === 'ar' ? 'تم حفظ عنوان الخادم: ' : 'Server URL saved: ') + url);
+                NexusApp.showToast((NexusConfig.getLanguage() === 'ar' ? 'تم حفظ عنوان الخادم: ' : 'Server URL saved: ') + url);
                 this.testConnection();
             }
         },
@@ -128,11 +128,11 @@
             NexusAPI.testConnection()
                 .then(function(success) {
                     if (success) {
-                        valueEl.textContent = isAr ? '✓ الاتصال ناجح (Online)' : '✓ Connected (Online)';
-                        valueEl.style.color = '#10b981';
+                        valueEl.textContent = isAr ? 'الاتصال ناجح (Online)' : 'Connected (Online)';
+                        valueEl.style.color = 'var(--color-brand-gold)';
                     } else {
-                        valueEl.textContent = isAr ? '✗ فشل الاتصال بالخادم' : '✗ Connection Failed';
-                        valueEl.style.color = '#ef4444';
+                        valueEl.textContent = isAr ? 'فشل الاتصال بالخادم' : 'Connection Failed';
+                        valueEl.style.color = 'var(--color-text-primary)';
                     }
                     setTimeout(function() {
                         if (valueEl) {
@@ -142,8 +142,8 @@
                     }, 4000);
                 })
                 .catch(function(err) {
-                    valueEl.textContent = (isAr ? '✗ تعذر الاتصال (' : '✗ Failed (') + (err.message || 'Error') + ')';
-                    valueEl.style.color = '#ef4444';
+                    valueEl.textContent = (isAr ? 'تعذر الاتصال (' : 'Failed (') + (err.message || 'Error') + ')';
+                    valueEl.style.color = 'var(--color-text-primary)';
                     setTimeout(function() {
                         if (valueEl) {
                             valueEl.textContent = NexusConfig.t('settings_test_server_hint');

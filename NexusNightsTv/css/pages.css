@@ -175,7 +175,7 @@
 }
 
 .episode-card.focused {
-    outline: var(--focus-border) solid var(--color-focus);
+    background: var(--color-bg-elevated);
     -webkit-transform: scale(1.02);
     transform: scale(1.02);
 }
@@ -359,7 +359,6 @@ html[dir="rtl"] .settings-section-title::before {
 }
 
 .settings-item.focused {
-    outline: var(--focus-border) solid var(--color-focus);
     background: var(--color-bg-elevated);
 }
 
@@ -385,9 +384,9 @@ html[dir="rtl"] .settings-section-title::before {
 }
 
 .settings-button.focused {
+    background: var(--color-brand-red-hover);
     -webkit-transform: scale(1.04);
     transform: scale(1.04);
-    box-shadow: 0 0 0 4px rgba(196, 30, 58, 0.4);
 }
 
 /* ============================================
@@ -398,13 +397,37 @@ html[dir="rtl"] .settings-section-title::before {
    CINEMA PLAYER (Samsung Smart TV 10-foot UI)
    ============================================ */
 
+/* Samsung TV AVPlay & Cinema Player Surface:
+   When player is open, layers must be 100% transparent so Tizen hardware video layer shines through */
+html.player-open,
+body.player-open,
+body.player-open #app,
+body.player-open .app-container,
+body.player-open .player-page,
+body.player-open .player-container,
+body.player-open #player-video {
+    background: transparent !important;
+    background-color: transparent !important;
+}
+
+body.player-open #main-content,
+body.player-open #nav-tabs {
+    display: none !important;
+}
+
+.player-modal-backdrop.hidden,
+.player-error.hidden,
+.player-loading.hidden {
+    display: none !important;
+}
+
 .player-page {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background: #000000;
+    background: transparent;
     z-index: 1000;
     overflow: hidden;
     -webkit-animation: fadeIn var(--transition-normal);
@@ -415,14 +438,24 @@ html[dir="rtl"] .settings-section-title::before {
     width: 100%;
     height: 100%;
     position: relative;
-    background: #000000;
+    background: transparent;
 }
 
 #player-video {
     width: 100%;
     height: 100%;
     position: absolute;
-    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: transparent;
+}
+
+#player-video video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
     background: #000000;
 }
 
@@ -488,9 +521,9 @@ html[dir="rtl"] .settings-section-title::before {
 }
 
 .player-badge.live-badge {
-    background: rgba(179, 32, 47, 0.2);
+    background: var(--color-brand-red);
     border-color: var(--color-brand-red);
-    color: #fca5a5;
+    color: var(--color-text-primary);
 }
 
 .player-badge.live-badge::before {
@@ -498,10 +531,10 @@ html[dir="rtl"] .settings-section-title::before {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #ef4444;
+    background: var(--color-text-primary);
     margin-left: 8px;
     display: inline-block;
-    box-shadow: 0 0 8px #ef4444;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.7);
 }
 
 /* Custom Cinema Subtitle Overlay */
@@ -574,10 +607,6 @@ html[dir="rtl"] .settings-section-title::before {
     -webkit-align-items: center;
     align-items: center;
     margin-bottom: 18px;
-}
-
-.player-page.is-live .player-timeline {
-    display: none !important;
 }
 
 .player-time {
@@ -675,10 +704,9 @@ html[dir="rtl"] .settings-section-title::before {
 }
 
 .player-button.focused {
-    background: linear-gradient(135deg, #b3202f 0%, #8c1925 100%) !important;
-    border-color: #ffffff !important;
-    color: #ffffff !important;
-    box-shadow: 0 0 24px rgba(179, 32, 47, 0.6), 0 0 0 3px rgba(255, 255, 255, 0.3);
+    background: linear-gradient(135deg, #b3202f 0%, #8c1925 100%);
+    border-color: #ffffff;
+    color: #ffffff;
     -webkit-transform: scale(1.08);
     transform: scale(1.08);
 }
@@ -686,7 +714,6 @@ html[dir="rtl"] .settings-section-title::before {
 .player-button-play.focused {
     -webkit-transform: scale(1.14);
     transform: scale(1.14);
-    box-shadow: 0 0 30px rgba(179, 32, 47, 0.8), 0 0 0 4px rgba(255, 255, 255, 0.4);
 }
 
 .player-button:disabled {
@@ -697,7 +724,10 @@ html[dir="rtl"] .settings-section-title::before {
 /* Subtitle & Source Modals */
 .player-modal-backdrop {
     position: absolute;
-    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background: rgba(0, 0, 0, 0.7);
     z-index: 40;
     display: -webkit-flex;
@@ -756,8 +786,8 @@ html[dir="rtl"] .settings-section-title::before {
 }
 
 .player-modal-item.focused {
-    background: var(--color-brand-red) !important;
-    color: #ffffff !important;
+    background: var(--color-brand-red);
+    color: #ffffff;
     -webkit-transform: scale(1.02);
     transform: scale(1.02);
 }
@@ -1012,7 +1042,7 @@ html[dir="rtl"] .settings-item.focused {
 .player-badge {
     display: inline-block;
     padding: 8px 18px;
-    background: rgba(196, 30, 58, 0.85);
+    background: rgba(179, 32, 47, 0.85);
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 24px;
     font-size: 18px;
@@ -1020,7 +1050,7 @@ html[dir="rtl"] .settings-item.focused {
     color: #ffffff;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    box-shadow: 0 4px 16px rgba(196, 30, 58, 0.4);
+    box-shadow: 0 4px 16px rgba(179, 32, 47, 0.4);
 }
 
 /* Premium Subtitle Overlay */
@@ -1068,7 +1098,7 @@ html[dir="rtl"] .settings-item.focused {
     position: absolute;
     width: 100%;
     height: 100%;
-    border: 5px solid rgba(196, 30, 58, 0.2);
+    border: 5px solid rgba(179, 32, 47, 0.2);
     border-top-color: var(--color-brand-red);
     border-radius: 50%;
     -webkit-animation: spin 1.2s linear infinite;
@@ -1081,7 +1111,7 @@ html[dir="rtl"] .settings-item.focused {
     left: 10px;
     width: 68px;
     height: 68px;
-    border: 3px solid rgba(212, 175, 55, 0.15);
+    border: 3px solid rgba(212, 175, 106, 0.15);
     border-right-color: var(--color-brand-gold);
     border-radius: 50%;
     -webkit-animation: spin 0.8s linear infinite reverse;
@@ -1103,7 +1133,7 @@ html[dir="rtl"] .settings-item.focused {
     -webkit-backdrop-filter: blur(20px);
     border-radius: 24px;
     padding: 48px;
-    border: 1px solid rgba(196, 30, 58, 0.3);
+    border: 1px solid rgba(179, 32, 47, 0.3);
     box-shadow: 0 12px 48px rgba(0, 0, 0, 0.8);
     text-align: center;
 }
@@ -1112,7 +1142,7 @@ html[dir="rtl"] .settings-item.focused {
     font-size: 64px;
     margin-bottom: 28px;
     color: var(--color-brand-red);
-    text-shadow: 0 4px 16px rgba(196, 30, 58, 0.6);
+    text-shadow: 0 4px 16px rgba(179, 32, 47, 0.6);
 }
 
 .player-error .error-message {
@@ -1129,7 +1159,15 @@ html[dir="rtl"] .settings-item.focused {
     display: flex;
     -webkit-justify-content: center;
     justify-content: center;
-    gap: 20px;
+}
+
+.error-actions > * + * {
+    margin-left: 20px;
+}
+
+html[dir="rtl"] .error-actions > * + * {
+    margin-left: 0;
+    margin-right: 20px;
 }
 
 /* Premium Timeline */
@@ -1217,9 +1255,17 @@ html[dir="rtl"] .settings-item.focused {
     align-items: center;
     -webkit-justify-content: center;
     justify-content: center;
-    gap: 10px;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+}
+
+.cinematic-button > * + * {
+    margin-left: 10px;
+}
+
+html[dir="rtl"] .cinematic-button > * + * {
+    margin-left: 0;
+    margin-right: 10px;
 }
 
 .cinematic-button:hover {
@@ -1231,11 +1277,10 @@ html[dir="rtl"] .settings-item.focused {
 }
 
 .cinematic-button.focused {
-    background: linear-gradient(135deg, var(--color-brand-red), var(--color-accent-burgundy)) !important;
-    border-color: #ffffff !important;
+    background: linear-gradient(135deg, var(--color-brand-red), var(--color-accent-burgundy));
+    border-color: #ffffff;
     -webkit-transform: scale(1.08);
     transform: scale(1.08);
-    box-shadow: 0 12px 32px rgba(196, 30, 58, 0.5);
 }
 
 .player-button-play.cinematic-button {
@@ -1304,7 +1349,6 @@ html[dir="rtl"] .settings-item.focused {
     display: flex;
     -webkit-flex-direction: column;
     flex-direction: column;
-    gap: 8px;
 }
 
 .cinematic-list .player-modal-item {
@@ -1331,24 +1375,29 @@ html[dir="rtl"] .settings-item.focused {
 }
 
 .cinematic-list .player-modal-item.focused {
-    background: rgba(196, 30, 58, 0.2) !important;
-    border-color: var(--color-brand-red) !important;
-    color: #ffffff !important;
+    background: rgba(179, 32, 47, 0.2);
+    border-color: var(--color-brand-red);
+    color: #ffffff;
     -webkit-transform: translateX(4px);
     transform: translateX(4px);
 }
 
 .cinematic-list .player-modal-item.active {
-    background: rgba(212, 175, 55, 0.15) !important;
-    border-color: var(--color-brand-gold) !important;
-    color: var(--color-brand-gold) !important;
+    background: rgba(212, 175, 106, 0.15);
+    border-color: var(--color-brand-gold);
+    color: var(--color-brand-gold);
 }
 
 .cinematic-list .player-modal-item.active::after {
-    content: '✓';
-    color: var(--color-brand-gold);
-    font-weight: 700;
-    font-size: 28px;
+    content: '';
+    width: 24px;
+    height: 24px;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 24px 24px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23D4AF6A' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6L9 17l-5-5'/%3E%3C/svg%3E");
 }
 
 .cinematic-modal-footer {
@@ -1368,8 +1417,8 @@ html[dir="rtl"] .settings-item.focused {
 }
 
 .modal-close.focused {
-    background: var(--color-brand-red) !important;
-    border-color: #ffffff !important;
+    background: var(--color-brand-red);
+    border-color: #ffffff;
 }
 
 /* RTL Support for Cinema Design */
@@ -1381,10 +1430,6 @@ html[dir="rtl"] .player-header {
 html[dir="rtl"] .cinematic-list .player-modal-item.focused {
     -webkit-transform: translateX(-4px);
     transform: translateX(-4px);
-}
-
-html[dir="rtl"] .player-buttons {
-    gap: var(--spacing-md);
 }
 
 html[dir="rtl"] .button-label {
@@ -1412,21 +1457,123 @@ html[dir="rtl"] .player-button-play.cinematic-button svg {
 }
 
 .player-external-sub-notification {
+    position: absolute;
+    top: 104px;
+    right: 40px;
+    z-index: 1000;
+    max-width: 380px;
+    padding: 16px 22px;
+    border-radius: 12px;
+    background: rgba(11, 11, 13, 0.92);
+    border: 1px solid rgba(212, 175, 106, 0.4);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+    color: #F5F6F8;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 0.4s ease;
     animation: slideInRight 0.4s ease forwards;
+}
+
+.player-external-sub-notification.is-leaving {
+    opacity: 0;
+}
+
+.player-external-sub-notification-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.player-external-sub-notification-body {
+    font-size: 18px;
+    color: var(--color-brand-gold);
+    margin-bottom: 4px;
+}
+
+.player-external-sub-notification-hint {
+    font-size: 16px;
+    color: rgba(245, 246, 248, 0.6);
+}
+
+/* --- Player modal states (loading / empty / error) --- */
+.player-modal-state {
+    padding: 44px 32px;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 20px;
+    line-height: 1.6;
+}
+
+.player-modal-state-icon {
+    line-height: 0;
+    margin-bottom: 20px;
+    color: var(--color-brand-gold);
+}
+
+.player-modal-state-actions {
+    margin-top: 24px;
+}
+
+.player-modal-empty {
+    padding: 20px 8px;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 18px;
+}
+
+/* Sub-label under a modal row label (provider • quality • downloads) */
+.player-modal-item-note {
+    display: block;
+    margin-top: 4px;
+    font-size: 16px;
+    opacity: 0.7;
+}
+
+/* Gold "External" tag on a subtitle row */
+.player-modal-item-badge {
+    margin-right: 8px;
+    font-size: 15px;
+    letter-spacing: 0.02em;
+    color: var(--color-brand-gold);
+    opacity: 0.9;
+}
+
+/* Trailing action word on a row (Load / Loaded) */
+.player-modal-item-action-label {
+    color: var(--color-brand-gold);
+    font-size: 18px;
+}
+
+/* Trailing check + "Active" on an audio row */
+.player-modal-item-check {
+    color: var(--color-brand-gold);
+    font-size: 18px;
+}
+
+.player-modal-item-action {
+    margin-top: 12px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 /* External subtitle loaded badge */
 .player-modal-item.loaded {
-    background: rgba(212, 175, 55, 0.08) !important;
-    border-color: rgba(212, 175, 55, 0.2) !important;
-    color: var(--color-brand-gold) !important;
+    background: rgba(212, 175, 106, 0.08);
+    border-color: rgba(212, 175, 106, 0.2);
+    color: var(--color-brand-gold);
 }
 
 .player-modal-item.loaded::before {
-    content: '✓';
-    color: var(--color-brand-gold);
+    content: '';
+    width: 20px;
+    height: 20px;
     margin-left: 8px;
-    font-weight: bold;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 20px 20px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23D4AF6A' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6L9 17l-5-5'/%3E%3C/svg%3E");
 }
 
 /* Responsive adjustments for TV */

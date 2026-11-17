@@ -12,7 +12,7 @@ import { streamResolver, type ResolvedStream } from './stream-resolver';
 
 export const streamProxyRouter = express.Router();
 
-function rewriteManifest(manifestText: string, baseUrl: string, streamId: string): string {
+function rewriteManifest(manifestText: string, baseUrl: string, streamId: string, serverOrigin = ''): string {
   const lines = manifestText.split('\n');
   const rewrittenLines: string[] = [];
 
@@ -24,7 +24,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, streamId: string
       const rewrittenTag = trimmed.replace(/URI="([^"]+)"/g, (_match, uri) => {
         try {
           const absoluteUrl = new URL(uri, baseUrl).href;
-          const proxiedUrl = `/api/stream-proxy/segment?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}`;
+          const proxiedUrl = `${serverOrigin}/api/stream-proxy/segment?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}`;
           return `URI="${proxiedUrl}"`;
         } catch {
           return `URI="${uri}"`;
@@ -43,7 +43,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, streamId: string
     // Rewrite media segment or sub-playlist URL
     try {
       const absoluteUrl = new URL(trimmed, baseUrl).href;
-      const proxiedUrl = `/api/stream-proxy/segment?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}`;
+      const proxiedUrl = `${serverOrigin}/api/stream-proxy/segment?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}`;
       rewrittenLines.push(proxiedUrl);
     } catch {
       rewrittenLines.push(line);
@@ -91,6 +91,9 @@ function isTokenExpired(status: number): boolean {
  */
 streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) => {
   const { id } = req.params;
+  const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
+  const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
+  const serverOrigin = `${protoHeader}://${hostHeader}`;
   let stream = streamResolver.getById(id);
 
   if (!stream) {
@@ -124,7 +127,7 @@ streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) =>
               return;
             }
             const manifestText = await freshUpstream.text();
-            const rewritten = rewriteManifest(manifestText, freshStream.playlistUrl, freshStream.id);
+            const rewritten = rewriteManifest(manifestText, freshStream.playlistUrl, freshStream.id, serverOrigin);
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -143,7 +146,7 @@ streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) =>
     }
 
     const manifestText = await upstream.text();
-    const rewritten = rewriteManifest(manifestText, stream.playlistUrl, stream.id);
+    const rewritten = rewriteManifest(manifestText, stream.playlistUrl, stream.id, serverOrigin);
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -208,7 +211,10 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
       const manifestText = await upstream.text();
       // If it has #EXTM3U, rewrite it
       if (manifestText.includes('#EXTM3U')) {
-        const rewritten = rewriteManifest(manifestText, url, stream.id);
+        const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
+        const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
+        const serverOrigin = `${protoHeader}://${hostHeader}`;
+        const rewritten = rewriteManifest(manifestText, url, stream.id, serverOrigin);
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Cache-Control', 'no-cache');

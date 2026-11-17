@@ -1,106 +1,110 @@
 /*
- * NEXUSNIGHT TV - Global Styles
- * Samsung Tizen 5.0 / Chromium M63
- * Premium cinematic streaming UI — no glassmorphism, no glow borders, no slop.
+ * NEXUSNIGHT — Global foundation
+ * A live-first cinema. One tonal ramp, one crimson, one gold, one focus.
+ * Samsung Tizen 5.0 / Chromium M63 — no gap, no aspect-ratio, no :is()/:where(), no clamp(), no inset.
  */
 
+/* ============================================
+   TOKENS — the measured four-step ramp
+   page < band < card < raised
+   ============================================ */
+
 :root {
-    /* NEXUSNIGHT Premium Cinematic Palette */
-    --color-brand-red: #c41e3a;
-    --color-brand-red-hover: #a01829;
-    --color-brand-gold: #d4af37;
-    --color-accent-burgundy: #8b1e3f;
-    --color-accent-crimson: #dc143c;
+    /* Ground: a measured four-step ramp, never pure black, never washed grey */
+    --color-bg-black: #0B0B0D;     /* page */
+    --color-bg-deep: #131317;      /* band  */
+    --color-bg-dark: #131317;      /* band  */
+    --color-bg-charcoal: #191920;  /* card  */
+    --color-bg-panel: #191920;     /* card  */
+    --color-bg-elevated: #232329;  /* raised */
 
-    /* Deep Cinematic Blacks & Grays */
-    --color-bg-black: #000000;
-    --color-bg-deep: #050505;
-    --color-bg-dark: #0a0a0a;
-    --color-bg-charcoal: #0f0f0f;
-    --color-bg-panel: #151515;
-    --color-bg-elevated: #1a1a1a;
+    /* Identity — crimson owns action, gold owns merit */
+    --color-brand-red: #B3202F;
+    --color-brand-red-hover: #8C1925;
+    --color-brand-gold: #D4AF6A;
+    --color-accent-burgundy: #8C1925;
+    --color-accent-crimson: #B3202F;
 
-    /* Typography Colors */
-    --color-text-primary: #ffffff;
-    --color-text-bright: #f5f5f5;
-    --color-text-secondary: #b8b8b8;
-    --color-text-muted: #707070;
-    --color-text-dim: #4a4a4a;
+    /* Type */
+    --color-text-primary: #FFFFFF;
+    --color-text-bright: #F5F6F8;
+    --color-text-secondary: #C7C7CF;
+    --color-text-muted: #9A9AA3;
+    --color-text-dim: #6E6E78;
 
-    /* Focus & Interaction */
-    --color-focus: var(--color-brand-red);
-    --color-focus-glow: rgba(196, 30, 58, 0.8);
-    --color-focus-shadow: 0 0 0 4px rgba(196, 30, 58, 0.5);
-    --color-hover-overlay: rgba(255, 255, 255, 0.08);
+    /* Focus is neutral white — never crimson */
+    --color-focus: #F5F6F8;
+    --color-hover-overlay: rgba(255, 255, 255, 0.06);
 
-    /* Overlays & Gradients */
+    /* Overlays */
     --color-overlay-dark: rgba(0, 0, 0, 0.9);
     --color-overlay-medium: rgba(0, 0, 0, 0.6);
-    --gradient-hero-overlay: linear-gradient(to top, #000000 0%, rgba(0, 0, 0, 0.85) 25%, rgba(0, 0, 0, 0.4) 55%, transparent 100%);
-    --gradient-card-overlay: linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, transparent 60%);
+    --gradient-hero-overlay: linear-gradient(to top, #0B0B0D 0%, rgba(11, 11, 13, 0.94) 20%, rgba(11, 11, 13, 0.55) 52%, rgba(11, 11, 13, 0) 100%);
+    --gradient-card-overlay: linear-gradient(to top, rgba(0, 0, 0, 0.94) 0%, rgba(0, 0, 0, 0.5) 55%, rgba(0, 0, 0, 0) 100%);
 
-    /* Spacing (TV-optimized) */
+    /* Spacing — one 8px rhythm */
     --spacing-xs: 10px;
-    --spacing-sm: 18px;
-    --spacing-md: 28px;
-    --spacing-lg: 40px;
-    --spacing-xl: 56px;
-    --spacing-2xl: 80px;
-    --spacing-3xl: 120px;
+    --spacing-sm: 16px;
+    --spacing-md: 24px;
+    --spacing-lg: 32px;
+    --spacing-xl: 48px;
+    --spacing-2xl: 64px;
+    --spacing-3xl: 96px;
 
-    /* Typography Scale (readable from 3m) */
+    /* Type scale — legible from three metres */
     --font-size-xs: 20px;
     --font-size-sm: 24px;
     --font-size-base: 28px;
     --font-size-md: 32px;
     --font-size-lg: 40px;
     --font-size-xl: 52px;
-    --font-size-2xl: 68px;
-    --font-size-hero: 92px;
-    --font-size-display: 112px;
+    --font-size-2xl: 64px;
+    --font-size-hero: 88px;
+    --font-size-display: 104px;
 
-    /* Font Weights */
     --font-weight-normal: 400;
     --font-weight-medium: 500;
     --font-weight-semibold: 600;
     --font-weight-bold: 700;
     --font-weight-black: 900;
 
-    /* Line Heights */
     --line-height-tight: 1.1;
     --line-height-snug: 1.25;
     --line-height-normal: 1.5;
     --line-height-relaxed: 1.7;
 
-    /* Component Sizes */
-    --poster-width: 200px;
-    --poster-height: 300px;
-    --backdrop-width: 420px;
-    --backdrop-height: 236px;
-    --hero-height: 580px;
+    /* Component sizes */
+    --nav-height: 96px;
+    --live-band-height: 128px;
+    --poster-width: 208px;
+    --poster-height: 312px;
+    --backdrop-width: 432px;
+    --backdrop-height: 243px;
+    --hero-height: 720px;
 
-    /* Borders & Radius */
-    --focus-border: 5px;
-    --border-radius-sm: 4px;
+    /* One radius language: 8 for surfaces, pill for chips */
+    --focus-border: 4px;
+    --border-radius-sm: 6px;
     --border-radius: 8px;
-    --border-radius-lg: 12px;
-    --border-radius-xl: 16px;
+    --border-radius-lg: 8px;
+    --border-radius-xl: 8px;
+    --border-radius-pill: 999px;
 
-    /* Transitions */
-    --transition-fast: 180ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-normal: 300ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-slow: 450ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-focus: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    /* Motion */
+    --transition-fast: 160ms cubic-bezier(0.2, 0, 0.2, 1);
+    --transition-normal: 240ms cubic-bezier(0.2, 0, 0.2, 1);
+    --transition-slow: 420ms cubic-bezier(0.2, 0, 0.2, 1);
+    --transition-focus: 180ms cubic-bezier(0.2, 0, 0.2, 1);
 
-    /* Shadows */
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
-    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
-    --shadow-xl: 0 12px 48px rgba(0, 0, 0, 0.7);
+    /* Depth */
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.45);
+    --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.55);
+    --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.65);
+    --shadow-xl: 0 20px 56px rgba(0, 0, 0, 0.72);
 }
 
 /* ============================================
-   RESET & BASE
+   RESET & BASE — fluid, never wider than the screen
    ============================================ */
 
 * {
@@ -109,13 +113,21 @@
     box-sizing: border-box;
 }
 
-html, body {
-    width: 1920px;
-    height: 1080px;
+html {
+    width: 100%;
+    height: 100%;
+}
+
+body {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     overflow: hidden;
     background: var(--color-bg-black);
     color: var(--color-text-primary);
-    font-family: 'IBM Plex Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    font-family: 'IBM Plex Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
     font-size: var(--font-size-base);
     font-weight: var(--font-weight-normal);
     line-height: var(--line-height-normal);
@@ -125,28 +137,7 @@ html, body {
 }
 
 :lang(ar), html[dir="rtl"] {
-    letter-spacing: normal !important;
-}
-
-.sidebar-logo, .loading-logo {
-    font-family: 'Cinzel', serif;
-}
-
-html[dir="rtl"] h1, html[dir="rtl"] h2, html[dir="rtl"] h3 {
-    font-family: 'Amiri', 'IBM Plex Sans Arabic', serif;
-    letter-spacing: normal !important;
-}
-
-body {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-}
-
-*:focus {
-    outline: none;
+    letter-spacing: normal;
 }
 
 .app-container {
@@ -156,12 +147,21 @@ body {
     overflow: hidden;
 }
 
-.hidden {
+/* One visibility utility. Compound selectors keep it above component display rules
+   without ever reaching for a priority override. */
+.hidden,
+.nav-tabs.hidden,
+.main-content.hidden,
+.live-chip.hidden,
+.live-band.hidden,
+.player-modal-backdrop.hidden,
+.player-error.hidden,
+.player-loading.hidden {
     display: none !important;
 }
 
 /* ============================================
-   KEYFRAME ANIMATIONS
+   KEYFRAMES
    ============================================ */
 
 @keyframes fadeIn {
@@ -174,29 +174,18 @@ body {
     to   { opacity: 0; }
 }
 
-@keyframes slideInLeft {
-    from { -webkit-transform: translateX(-80px); transform: translateX(-80px); opacity: 0; }
-    to   { -webkit-transform: translateX(0);     transform: translateX(0);     opacity: 1; }
-}
-
-@keyframes slideInRight {
-    from { -webkit-transform: translateX(80px); transform: translateX(80px); opacity: 0; }
-    to   { -webkit-transform: translateX(0);    transform: translateX(0);    opacity: 1; }
-}
-
 @keyframes slideInUp {
     from { -webkit-transform: translateY(40px); transform: translateY(40px); opacity: 0; }
     to   { -webkit-transform: translateY(0);    transform: translateY(0);    opacity: 1; }
 }
 
 @keyframes scaleIn {
-    from { -webkit-transform: scale(0.95); transform: scale(0.95); opacity: 0; }
+    from { -webkit-transform: scale(0.97); transform: scale(0.97); opacity: 0; }
     to   { -webkit-transform: scale(1);    transform: scale(1);    opacity: 1; }
 }
 
-/* BUG FIX: was "@keyframes cinematic Entrance" (space broke the name) */
 @keyframes cinematicEntrance {
-    from { -webkit-transform: translateY(30px); transform: translateY(30px); opacity: 0; }
+    from { -webkit-transform: translateY(24px); transform: translateY(24px); opacity: 0; }
     to   { -webkit-transform: translateY(0);    transform: translateY(0);    opacity: 1; }
 }
 
@@ -207,7 +196,7 @@ body {
 
 @keyframes pulse {
     0%, 100% { opacity: 1; }
-    50%      { opacity: 0.5; }
+    50%      { opacity: 0.45; }
 }
 
 @keyframes shimmer {
@@ -222,14 +211,13 @@ body {
 h1, h2, h3, h4, h5, h6 {
     font-weight: var(--font-weight-bold);
     line-height: var(--line-height-tight);
-    letter-spacing: -0.02em;
     color: var(--color-text-primary);
 }
 
 h1 {
     font-size: var(--font-size-hero);
     font-weight: var(--font-weight-black);
-    letter-spacing: -0.03em;
+    letter-spacing: -0.02em;
 }
 
 h2 { font-size: var(--font-size-2xl); }
@@ -243,7 +231,12 @@ p {
     color: var(--color-text-secondary);
 }
 
-/* Text utilities */
+html[dir="rtl"] h1,
+html[dir="rtl"] h2,
+html[dir="rtl"] h3 {
+    letter-spacing: normal;
+}
+
 .text-primary   { color: var(--color-text-primary); }
 .text-bright    { color: var(--color-text-bright); }
 .text-secondary { color: var(--color-text-secondary); }
@@ -300,19 +293,34 @@ p {
     z-index: 9999;
 }
 
-.loading-logo {
-    font-size: var(--font-size-display);
-    font-weight: var(--font-weight-black);
-    letter-spacing: 8px;
-    color: var(--color-brand-red);
+/* In-page loading sits inside the content area and never covers the tab bar */
+.main-content .loading-screen {
+    position: absolute;
+    z-index: 5;
+}
+
+.loading-logo-crest {
+    width: 72px;
+    height: 72px;
+    margin-bottom: var(--spacing-md);
+    -webkit-animation: fadeIn var(--transition-slow);
+    animation: fadeIn var(--transition-slow);
+}
+
+.loading-wordmark {
+    font-size: var(--font-size-2xl);
+    font-weight: var(--font-weight-bold);
+    letter-spacing: 0.26em;
+    text-indent: 0.26em;
+    color: var(--color-text-primary);
     margin-bottom: var(--spacing-xl);
     text-transform: uppercase;
 }
 
 .loading-spinner {
-    width: 64px;
-    height: 64px;
-    border: 5px solid var(--color-bg-elevated);
+    width: 56px;
+    height: 56px;
+    border: 4px solid var(--color-bg-elevated);
     border-top-color: var(--color-brand-red);
     border-radius: 50%;
     -webkit-animation: spin 0.9s linear infinite;
@@ -325,7 +333,7 @@ p {
     color: var(--color-text-muted);
     font-weight: var(--font-weight-medium);
     text-align: center;
-    max-width: 600px;
+    max-width: 640px;
     padding: 0 var(--spacing-xl);
 }
 
@@ -334,11 +342,13 @@ p {
    ============================================ */
 
 .error-message {
+    margin: var(--spacing-xl) auto;
+    max-width: 900px;
     padding: var(--spacing-lg) var(--spacing-xl);
-    background: rgba(196, 30, 58, 0.1);
+    background: rgba(179, 32, 47, 0.14);
     border: 2px solid var(--color-brand-red);
-    border-radius: var(--border-radius-lg);
-    color: var(--color-brand-red);
+    border-radius: var(--border-radius);
+    color: var(--color-text-bright);
     font-size: var(--font-size-base);
     text-align: center;
     line-height: var(--line-height-relaxed);
@@ -353,38 +363,68 @@ p {
     align-items: center;
     -webkit-justify-content: center;
     justify-content: center;
-    padding: var(--spacing-3xl);
+    padding: var(--spacing-3xl) var(--spacing-xl);
     text-align: center;
     color: var(--color-text-secondary);
-    min-height: 500px;
+    min-height: 480px;
 }
 
 .empty-state-icon {
-    font-size: 100px;
-    margin-bottom: var(--spacing-xl);
-    opacity: 0.35;
+    width: 96px;
+    height: 96px;
+    margin-bottom: var(--spacing-lg);
+    opacity: 0.4;
+}
+
+/* The icon slot holds an authored stroke SVG; let it fill the box */
+.empty-state-icon svg {
+    display: block;
+    width: 100%;
+    height: 100%;
 }
 
 .empty-state-text {
     font-size: var(--font-size-xl);
     font-weight: var(--font-weight-bold);
-    margin-bottom: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
     color: var(--color-text-primary);
 }
 
 .empty-state-subtext {
     font-size: var(--font-size-base);
     color: var(--color-text-muted);
-    max-width: 600px;
+    max-width: 700px;
     line-height: var(--line-height-relaxed);
+    word-break: break-word;
+}
+
+/* The one action a dead-end state offers — retry, back, re-scan */
+.state-actions {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    margin-top: var(--spacing-xl);
+}
+
+.state-actions > * + * {
+    margin-left: var(--spacing-sm);
+}
+
+html[dir="rtl"] .state-actions > * + * {
+    margin-left: 0;
+    margin-right: var(--spacing-sm);
 }
 
 /* ============================================
-   SCROLLBAR HIDE
+   SCROLL CONTAINER
    ============================================ */
 
 .scroll-container {
     overflow-y: auto;
+    overflow-x: hidden;
     scrollbar-width: none;
     -ms-overflow-style: none;
 }

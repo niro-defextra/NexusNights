@@ -246,7 +246,11 @@ sportsRouter.get('/stream/:channelKey/manifest.m3u8', async (req: Request, res: 
       }
     }
 
-    // Rewrite sub-playlist URLs
+    // Rewrite sub-playlist URLs to fully-qualified absolute URLs for TV and AVPlay players
+    const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
+    const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const serverOrigin = `${protoHeader}://${hostHeader}`;
+
     const lines = manifestText.split('\n');
     const rewrittenLines: string[] = [];
 
@@ -259,7 +263,7 @@ sportsRouter.get('/stream/:channelKey/manifest.m3u8', async (req: Request, res: 
 
       try {
         const absoluteUrl = new URL(trimmed, baseUrl).href;
-        const proxiedSubUrl = `/api/sports/stream/${encodeURIComponent(channelKey)}/sub-playlist.m3u8?url=${encodeURIComponent(absoluteUrl)}`;
+        const proxiedSubUrl = `${serverOrigin}/api/sports/stream/${encodeURIComponent(channelKey)}/sub-playlist.m3u8?url=${encodeURIComponent(absoluteUrl)}`;
         rewrittenLines.push(proxiedSubUrl);
       } catch {
         rewrittenLines.push(line);
@@ -301,6 +305,10 @@ sportsRouter.get('/stream/:channelKey/sub-playlist.m3u8', async (req: Request, r
       return res.status(upstreamRes.status).send(`Upstream sub-playlist returned ${upstreamRes.status}`);
     }
 
+    const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
+    const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const serverOrigin = `${protoHeader}://${hostHeader}`;
+
     const playlistText = await upstreamRes.text();
     const lines = playlistText.split('\n');
     const rewrittenLines: string[] = [];
@@ -313,7 +321,7 @@ sportsRouter.get('/stream/:channelKey/sub-playlist.m3u8', async (req: Request, r
           const rewrittenTag = trimmed.replace(/URI="([^"]+)"/g, (_match, uri) => {
             try {
               const absKeyUrl = new URL(uri, targetUrl).href;
-              return `URI="/api/sports/stream/${encodeURIComponent(channelKey)}/segment.ts?url=${encodeURIComponent(absKeyUrl)}"`;
+              return `URI="${serverOrigin}/api/sports/stream/${encodeURIComponent(channelKey)}/segment.ts?url=${encodeURIComponent(absKeyUrl)}"`;
             } catch {
               return `URI="${uri}"`;
             }
@@ -327,7 +335,7 @@ sportsRouter.get('/stream/:channelKey/sub-playlist.m3u8', async (req: Request, r
 
       try {
         const absoluteSegUrl = new URL(trimmed, targetUrl).href;
-        const proxiedSegUrl = `/api/sports/stream/${encodeURIComponent(channelKey)}/segment.ts?url=${encodeURIComponent(absoluteSegUrl)}`;
+        const proxiedSegUrl = `${serverOrigin}/api/sports/stream/${encodeURIComponent(channelKey)}/segment.ts?url=${encodeURIComponent(absoluteSegUrl)}`;
         rewrittenLines.push(proxiedSegUrl);
       } catch {
         rewrittenLines.push(line);

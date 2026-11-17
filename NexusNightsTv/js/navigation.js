@@ -60,10 +60,8 @@
                 }
             }
             
-            // Clear focus
-            FocusManager.clear();
-            
-            // Update active menu item
+            // Land focus on the tab that was chosen — the page's content takes it next
+            this.focusTab(pageName);
             this.updateActiveMenuItem(pageName);
             
             // Reset scroll to top for the new page
@@ -76,6 +74,18 @@
             page.render(params);
         },
         
+        /**
+         * Land focus on a tab. The tab bar is never torn down, so it is always a
+         * safe place to hold focus while a page renders.
+         */
+        focusTab: function(pageName) {
+            if (typeof FocusManager === 'undefined' || !FocusManager.focus) return;
+            var tab = document.querySelector('#nav-tabs .tab[data-page="' + pageName + '"]') ||
+                      document.querySelector('#nav-tabs .tab.active') ||
+                      document.querySelector('#nav-tabs .tab');
+            if (tab) FocusManager.focus(tab);
+        },
+
         /**
          * Go back to previous page
          */
@@ -97,10 +107,8 @@
                 }
             }
             
-            // Clear focus
-            FocusManager.clear();
-            
-            // Update active menu item
+            // Land focus on the tab we are returning to
+            this.focusTab(previous.name);
             this.updateActiveMenuItem(previous.name);
             
             // Render previous page
@@ -139,16 +147,19 @@
         },
         
         /**
-         * Update active menu item
+         * Update the active tab in the top tab bar
          */
         updateActiveMenuItem: function(pageName) {
-            var menuItems = document.querySelectorAll('.menu-item');
-            for (var i = 0; i < menuItems.length; i++) {
-                var item = menuItems[i];
-                if (item.getAttribute('data-page') === pageName) {
-                    item.classList.add('active');
+            var tabs = document.querySelectorAll('#nav-tabs .tab');
+            for (var i = 0; i < tabs.length; i++) {
+                var tab = tabs[i];
+                var page = tab.getAttribute('data-page');
+                if (page === pageName) {
+                    tab.classList.add('active');
+                    tab.setAttribute('aria-selected', 'true');
                 } else {
-                    item.classList.remove('active');
+                    tab.classList.remove('active');
+                    tab.setAttribute('aria-selected', 'false');
                 }
             }
         },

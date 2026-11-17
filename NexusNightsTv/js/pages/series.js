@@ -10,7 +10,7 @@
         heroSeries: null,
 
         render: function () {
-            document.getElementById('main-content').innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div></div>';
+            document.getElementById('main-content').innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><div class="loading-text">' + NexusConfig.t('loading') + '</div></div>';
             this.loadSeries();
         },
 
@@ -68,14 +68,11 @@
             var localId = hero.localId || '';
             var tmdbId = hero.tmdbId || 0;
 
-            var html = '<div class="hero-section" style="height: 520px; margin-bottom: var(--spacing-xl);">';
+            var html = '<div class="hero-section hero-spotlight">';
             if (backdropUrl) {
                 html += '<div class="hero-backdrop" style="background-image: url(\'' + NexusConfig.escapeHtml(backdropUrl) + '\')"></div>';
             }
             html += '<div class="hero-content">';
-
-            // Tag
-            html += '<div style="margin-bottom: 12px;"><span style="background: rgba(196,30,58,0.25); border: 1px solid var(--color-brand-red); color: #f87171; padding: 4px 14px; border-radius: 12px; font-size: 14px; font-weight: 700;">مسلسل مميز</span></div>';
 
             if (logoUrl) {
                 html += '<img class="hero-logo" src="' + NexusConfig.escapeHtml(logoUrl) + '" alt="' + NexusConfig.escapeHtml(hero.title) + '">';
@@ -147,14 +144,27 @@
                     if (action === 'details') {
                         Navigator.navigateTo('details', { kind: 'series', tmdbId: tmdbId, localId: localId });
                     } else if (action === 'play') {
-                        var mainContent = document.getElementById('main-content');
-                        mainContent.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><div class="loading-text">جاري التحميل...</div></div>';
+                        // Non-destructive: resolve the stream in place so the
+                        // page and its focusable survive a failed lookup.
+                        NexusApp.showToast(NexusConfig.getLanguage() === 'ar' ? 'جاري تحضير التشغيل…' : 'Preparing playback…', 0);
                         NexusAPI.getPreferredPlayback('series', tmdbId, localId, 1, 1).then(function (playback) {
-                            if (playback && playback.source) NexusPlayer.play(playback.source, playback.alternatives, playback.subtitles);
-                            else throw new Error('لا تتوفر مصادر تشغيل');
+                            if (!playback || !playback.source) throw new Error('لا تتوفر مصادر تشغيل');
+                            var meta = {
+                                tmdbId: tmdbId,
+                                localId: localId,
+                                type: 'series',
+                                season: 1,
+                                episode: 1,
+                                title: playback.title || 'NEXUSNIGHT',
+                                year: playback.releaseYear,
+                                posterUrl: playback.posterUrl,
+                                backdropUrl: playback.backdropUrl
+                            };
+                            NexusApp.hideToast();
+                            NexusPlayer.play(playback.source, playback.alternatives, playback.subtitles, meta);
                         }).catch(function (err) {
-                            alert(err.message || 'فشل التشغيل');
-                            Navigator.goBack();
+                            console.error('[SeriesPage] Playback error:', err);
+                            NexusApp.showToast(err.message || 'فشل التشغيل');
                         });
                     }
                 };
@@ -164,7 +174,11 @@
         },
 
         showError: function (error) {
-            document.getElementById('main-content').innerHTML = '<div class="page-container"><div class="empty-state"><div class="empty-state-icon">⚠</div><div class="empty-state-text">فشل تحميل المسلسلات</div><div class="empty-state-subtext">' + NexusConfig.escapeHtml(error && error.message) + '</div></div></div>';
+            NexusApp.showErrorState({
+                title: 'فشل تحميل المسلسلات',
+                message: error && error.message,
+                onAction: function () { SeriesPage.render(); }
+            });
         },
         cleanup: function () {}
     };

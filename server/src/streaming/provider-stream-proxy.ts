@@ -76,7 +76,7 @@ function isPlaylistUrl(url: string): boolean {
  * - Video/audio segments on CORS-enabled CDN → leave direct (fast, no server overhead)
  * - Segments on restricted host → proxy
  */
-function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string): string {
+function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string, serverOrigin = ''): string {
   const lines = manifestText.split('\n');
   const rewrittenLines: string[] = [];
 
@@ -89,7 +89,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string
         try {
           const absoluteUrl = new URL(uri, baseUrl).href;
           // URI in tags are always playlists or keys → always proxy
-          const proxiedUrl = `/api/provider-stream-proxy/segment?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
+          const proxiedUrl = `${serverOrigin}/api/provider-stream-proxy/segment?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
           return `URI="${proxiedUrl}"`;
         } catch {
           return `URI="${uri}"`;
@@ -111,7 +111,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string
 
       if (isPlaylistUrl(absoluteUrl)) {
         // Sub-playlists must be proxied so their inner URLs get rewritten
-        const proxiedUrl = `/api/provider-stream-proxy/segment?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
+        const proxiedUrl = `${serverOrigin}/api/provider-stream-proxy/segment?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
         rewrittenLines.push(proxiedUrl);
       } else if (isCorsEnabledCdn(absoluteUrl, baseUrl)) {
         // Media segment on CDN with CORS → let the browser fetch directly!
@@ -119,7 +119,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string
         rewrittenLines.push(absoluteUrl);
       } else {
         // Segment on restricted host → proxy it
-        const proxiedUrl = `/api/provider-stream-proxy/segment?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
+        const proxiedUrl = `${serverOrigin}/api/provider-stream-proxy/segment?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
         rewrittenLines.push(proxiedUrl);
       }
     } catch {
@@ -161,10 +161,11 @@ providerStreamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Resp
     const manifestText = await upstream.text();
     console.log(`[ProviderStreamProxy] Master playlist fetched: ${manifestText.length} bytes`);
     
-    // Use the full source URL as the base so that relative paths in the manifest
-    // (e.g. "stream.php?v=...&p=...") resolve correctly against query-string URLs.
+    const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
+    const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const serverOrigin = `${protoHeader}://${hostHeader}`;
     const baseUrl = source.url;
-    const rewritten = rewriteManifest(manifestText, baseUrl, id);
+    const rewritten = rewriteManifest(manifestText, baseUrl, id, serverOrigin);
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -222,9 +223,11 @@ providerStreamProxyRouter.get('/segment', async (req: Request, res: Response) =>
 
       // Verify it's actually an HLS playlist (stream.php may return different content types)
       if (manifestText.includes('#EXTM3U')) {
-        // Use the full URL as base so relative segment URLs resolve correctly
+        const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
+        const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
+        const serverOrigin = `${protoHeader}://${hostHeader}`;
         const baseUrl = url;
-        const rewritten = rewriteManifest(manifestText, baseUrl, id);
+        const rewritten = rewriteManifest(manifestText, baseUrl, id, serverOrigin);
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Cache-Control', 'no-cache');

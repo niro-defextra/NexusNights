@@ -118,6 +118,8 @@ const server = http.createServer(async (req, res) => {
 
             let manifestText = await upstreamRes.text();
             let baseUrl = streamUrl;
+            const serverHost = req.headers.host || ('localhost:' + PORT);
+            const serverOrigin = 'http://' + serverHost;
 
             // Rewrite sub-playlist URLs
             const lines = manifestText.split('\n');
@@ -131,7 +133,7 @@ const server = http.createServer(async (req, res) => {
                 }
                 try {
                     const abs = new URL(trimmed, baseUrl).href;
-                    rewritten.push('/api/sports/stream/' + encodeURIComponent(channelKey) + '/sub-playlist.m3u8?url=' + encodeURIComponent(abs));
+                    rewritten.push(serverOrigin + '/api/sports/stream/' + encodeURIComponent(channelKey) + '/sub-playlist.m3u8?url=' + encodeURIComponent(abs));
                 } catch (e) {
                     rewritten.push(line);
                 }
@@ -175,6 +177,8 @@ const server = http.createServer(async (req, res) => {
                 return;
             }
 
+            const serverHost = req.headers.host || ('localhost:' + PORT);
+            const serverOrigin = 'http://' + serverHost;
             const text = await upstreamRes.text();
             const lines = text.split('\n');
             const rewritten = [];
@@ -187,7 +191,7 @@ const server = http.createServer(async (req, res) => {
                         const rwTag = trimmed.replace(/URI="([^"]+)"/g, (m, u) => {
                             try {
                                 const absKey = new URL(u, targetUrl).href;
-                                return 'URI="/api/sports/stream/' + encodeURIComponent(channelKey) + '/segment.ts?url=' + encodeURIComponent(absKey) + '"';
+                                return 'URI="' + serverOrigin + '/api/sports/stream/' + encodeURIComponent(channelKey) + '/segment.ts?url=' + encodeURIComponent(absKey) + '"';
                             } catch (e) { return 'URI="' + u + '"'; }
                         });
                         rewritten.push(rwTag);
@@ -199,7 +203,7 @@ const server = http.createServer(async (req, res) => {
 
                 try {
                     const absSeg = new URL(trimmed, targetUrl).href;
-                    rewritten.push('/api/sports/stream/' + encodeURIComponent(channelKey) + '/segment.ts?url=' + encodeURIComponent(absSeg));
+                    rewritten.push(serverOrigin + '/api/sports/stream/' + encodeURIComponent(channelKey) + '/segment.ts?url=' + encodeURIComponent(absSeg));
                 } catch (e) {
                     rewritten.push(line);
                 }

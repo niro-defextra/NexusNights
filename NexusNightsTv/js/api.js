@@ -145,7 +145,10 @@
                         reject(new Error(message));
                     }
                 };
-                xhr.onerror = function () { reject(new Error('Network error: تعذّر الاتصال بالخادم')); };
+                xhr.onerror = function () {
+                    var msg = (window.NexusConfig && NexusConfig.t) ? NexusConfig.t('network_error') : 'Network error';
+                    reject(new Error(msg));
+                };
                 xhr.ontimeout = function () { reject(new Error('Request timeout')); };
                 xhr.onabort = function () { reject(new Error('Request aborted')); };
 
@@ -358,16 +361,16 @@
             }).catch(function () { return remotePlayback(); });
         },
 
-        // Subtitles Search & Download
+        // Subtitles Search & Download (Unified from OpenSubtitles, SubDL, etc.)
         getSubtitles: function (tmdbId, type, season, episode) {
             if (!tmdbId) return Promise.resolve([]);
-            var endpoint = '/api/subtitles/search?tmdbId=' + encodeURIComponent(tmdbId) + '&type=' + encodeURIComponent(type || 'movie');
+            var endpoint = '/api/subtitles/search?tmdbId=' + encodeURIComponent(tmdbId) + '&type=' + encodeURIComponent(type || 'movie') + '&languages=ar,en';
             if (season) endpoint += '&season=' + encodeURIComponent(season);
             if (episode) endpoint += '&episode=' + encodeURIComponent(episode);
             return this.request(endpoint, { timeout: 15000 }).then(function (res) {
                 return (res && Array.isArray(res.subtitles)) ? res.subtitles : [];
             }).catch(function (err) {
-                console.warn('[NexusAPI] Subtitles search failed:', err.message);
+                console.warn('[NexusAPI] Subtitles search failed:', err && err.message);
                 return [];
             });
         },
@@ -377,49 +380,9 @@
             return this.request('/api/subtitles/download/' + encodeURIComponent(fileId), { timeout: 15000 });
         },
 
-        // Enhanced External Subtitles Search (Multiple Sources)
-        searchExternalSubtitles: function (tmdbId, title, type) {
-            if (!tmdbId && !title) return Promise.resolve([]);
-
-            var queryParams = [];
-            if (tmdbId) queryParams.push('tmdbId=' + encodeURIComponent(tmdbId));
-            if (title) queryParams.push('title=' + encodeURIComponent(title));
-            if (type) queryParams.push('type=' + encodeURIComponent(type));
-
-            var endpoint = '/api/subtitles/search/external?' + queryParams.join('&');
-
-            return this.request(endpoint, { timeout: 20000 }).then(function (res) {
-                if (!res || !Array.isArray(res.results)) return [];
-
-                // Process and normalize results
-                return res.results.map(function (item) {
-                    return {
-                        id: item.id || item.subID || Math.random().toString(36).substr(2, 9),
-                        language: item.language || 'en',
-                        languageName: item.languageName || (item.language === 'ar' ? 'العربية' : 'English'),
-                        provider: item.provider || 'OpenSubtitles',
-                        quality: item.quality || (item.rating > 8 ? 'Excellent' : (item.rating > 6 ? 'Good' : 'Normal')),
-                        downloads: item.downloads || item.downloadCount || 0,
-                        rating: item.rating || item.score || 0,
-                        url: item.url || item.downloadLink,
-                        format: item.format || 'srt'
-                    };
-                }).filter(function (item) {
-                    // Filter by language preference (Arabic or English)
-                    var prefLang = NexusConfig.getLanguage();
-                    return item.language === prefLang || item.language === 'en' || item.language === 'ar';
-                }).sort(function (a, b) {
-                    // Sort by: language match first, then downloads, then rating
-                    var prefLang = NexusConfig.getLanguage();
-                    if (a.language === prefLang && b.language !== prefLang) return -1;
-                    if (b.language === prefLang && a.language !== prefLang) return 1;
-                    if (a.downloads !== b.downloads) return b.downloads - a.downloads;
-                    return b.rating - a.rating;
-                });
-            }).catch(function (err) {
-                console.warn('[NexusAPI] External subtitles search failed:', err.message);
-                return [];
-            });
+        // Search subtitles on demand (calls standard search endpoint)
+        searchExternalSubtitles: function (tmdbId, title, type, season, episode) {
+            return this.getSubtitles(tmdbId, type, season, episode);
         },
 
         // Get detailed subtitle information
@@ -475,26 +438,31 @@
                 isLive: true
             };
 
+            // Alternative HLS feed (failover to alternate commentary / feed)
+            var failoverKey = (channelKey === 'bein-1') ? 'bein-fr-1' : 'bein-1';
+            var failoverUrl = isLocalDev
+                ? '/api/sports/stream/' + encodeURIComponent(failoverKey) + '/manifest.m3u8'
+                : backendUrl('/api/sports/stream/' + encodeURIComponent(failoverKey) + '/manifest.m3u8');
+
             var alternatives = [
+                {
+                    url: failoverUrl,
+                    type: 'hls',
+                    provider: 'سيرفر البث المباشر الاحتياطي (HD HLS Backup)',
+                    isLive: true
+                },
                 {
                     url: 'https://thedaddy.li/player/stream-' + daddyId + '.php',
                     embedUrl: 'https://thedaddy.li/player/stream-' + daddyId + '.php',
                     type: 'embed',
-                    provider: 'Daddy Fast Stream (سيرفر البث الاحتياطي 1)',
+                    provider: 'Daddy Fast Stream (سيرفر البث 2)',
                     isLive: true
                 },
                 {
                     url: 'https://thedaddy.li/stream/stream-' + daddyId + '.php',
                     embedUrl: 'https://thedaddy.li/stream/stream-' + daddyId + '.php',
                     type: 'embed',
-                    provider: 'Daddy Live Stream (سيرفر البث المباشر 2)',
-                    isLive: true
-                },
-                {
-                    url: 'https://thedaddy.li/cast/stream-' + daddyId + '.php',
-                    embedUrl: 'https://thedaddy.li/cast/stream-' + daddyId + '.php',
-                    type: 'embed',
-                    provider: 'Daddy Cast (سيرفر البث الذكي 3)',
+                    provider: 'Daddy Live Stream (سيرفر البث 3)',
                     isLive: true
                 }
             ];

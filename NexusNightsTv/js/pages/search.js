@@ -34,7 +34,7 @@
             html += '<div class="search-header">';
             html += '<h1 class="search-title" style="font-size: 36px; margin-bottom: 20px;">' + (isAr ? 'البحث عن فيلم أو مسلسل' : 'Search Movies & TV Shows') + '</h1>';
             html += '<div class="search-input-wrapper">';
-            html += '<input type="text" id="search-input" class="search-input focusable" readonly value="' + NexusConfig.escapeHtml(this.query) + '" placeholder="' + (isAr ? 'اكتب اسم الفيلم أو المسلسل...' : 'Type title to search...') + '">';
+            html += '<input type="text" id="search-input" class="search-input focusable" readonly aria-label="' + (isAr ? 'حقل البحث' : 'Search field') + '" value="' + NexusConfig.escapeHtml(this.query) + '" placeholder="' + (isAr ? 'اكتب اسم الفيلم أو المسلسل...' : 'Type title to search...') + '">';
             html += '</div>';
             html += '</div>';
 
@@ -59,7 +59,7 @@
                 html += '<div class="keyboard-row">';
                 for (var j = 0; j < keyboard[i].length; j++) {
                     var key = keyboard[i][j];
-                    html += '<button class="keyboard-key focusable" data-key="' + NexusConfig.escapeHtml(key) + '">' + NexusConfig.escapeHtml(key) + '</button>';
+                    html += '<button class="keyboard-key focusable" data-key="' + NexusConfig.escapeHtml(key) + '" aria-label="' + NexusConfig.escapeHtml(key) + '">' + NexusConfig.escapeHtml(key) + '</button>';
                 }
                 html += '</div>';
             }

@@ -32,6 +32,7 @@
             player_rewind: '10 ثوانٍ للخلف',
             player_forward: '10 ثوانٍ للأمام',
             player_subtitles: 'الترجمة',
+            player_audio: 'الصوت',
             player_subtitles_off: 'إيقاف الترجمة',
             player_subtitles_ar: 'العربية (Arabic)',
             player_subtitles_en: 'الإنجليزية (English)',
@@ -41,11 +42,48 @@
             player_error: 'تعذّر تشغيل مصدر الفيديو',
             player_retry: 'إعادة المحاولة',
             player_exit: 'خروج',
+            player_back: 'رجوع',
+            player_close_short: 'إغلاق',
+            player_cancel: 'إلغاء',
+            player_loading_stream: 'جاري تحميل البث السينمائي...',
+            player_subs_title: 'اختيار الترجمة',
+            player_subs_hint: 'اختر لغة الترجمة المناسبة',
+            player_subs_off_option: 'إيقاف الترجمة',
+            player_subs_off_note: 'بدون ترجمة',
+            player_subs_external: 'خارجي',
+            player_subs_load_more: 'تحميل ترجمات إضافية من الإنترنت',
+            player_subs_searching: 'جاري البحث عن ترجمات متاحة...',
+            player_subs_none: 'لا توجد ترجمات إضافية متاحة لهذا العمل',
+            player_subs_error: 'تعذّر إكمال البحث عن الترجمات',
+            player_subs_unavailable: 'خدمة الترجمات غير متوفرة حالياً',
+            player_subs_retry: 'إعادة البحث',
+            player_subs_added: 'تمت إضافة الترجمة',
+            player_subs_added_hint: 'يمكنك اختيارها من قائمة الترجمات',
+            player_subs_toast_new: 'تم تحميل ترجمات جديدة',
+            player_subs_toast_hint: 'اضغط على زر الترجمة للاختيار',
+            player_subs_ar_track: 'ترجمة عربية',
+            player_subs_en_track: 'ترجمة إنجليزية',
+            player_subs_download: 'تحميل',
+            player_subs_downloaded: 'محمّلة',
+            player_audio_title: 'اختيار مسار الصوت',
+            player_audio_hint: 'اختر لغة أو نوع الصوت المناسب',
+            player_audio_none: 'لا تتوفر مسارات صوت متعددة',
+            player_no_source: 'لا يوجد مصدر تشغيل صالح لهذا المحتوى',
+            player_buffering: 'جاري تحميل البث',
+            player_now_playing: 'يعمل الآن',
+            player_server: 'سيرفر',
+            player_err_embed: 'مصدر Embed يحتاج تفاعلاً خارجياً — جاري تجربة مصدر بديل',
+            player_err_source: 'فشل تشغيل المصدر الحالي',
+            player_err_start: 'تعذّر بدء تشغيل الفيديو',
+            player_err_prepare: 'تعذّر تجهيز مصدر الفيديو',
+            player_err_open: 'تعذّر فتح مصدر الفيديو',
+            player_err_decoder: 'تعذّر تشغيل الملف باستخدام المشغّل',
+            player_err_hls: 'تعذّر فك تشفير بث HLS',
             settings_title: 'الإعدادات',
             settings_lang_section: 'اللغة (Language)',
             settings_lang_ar: 'العربية (RTL)',
             settings_lang_en: 'English (LTR)',
-            settings_active: '✓ مفعّل',
+            settings_active: 'مفعّل',
             settings_activate: 'تفعيل',
             settings_server_section: 'الاتصال بالسيرفر (Server Connection)',
             settings_current_server: 'عنوان الخادم الحالي',
@@ -56,7 +94,8 @@
             settings_about_section: 'حول التطبيق (About)',
             settings_app_name: 'اسم التطبيق',
             settings_version: 'الإصدار',
-            settings_engine: 'حالة محرك العرض'
+            settings_engine: 'حالة محرك العرض',
+            network_error: 'تعذّر الاتصال بالخادم'
         },
         en: {
             app_name: 'NEXUSNIGHT',
@@ -82,6 +121,7 @@
             player_rewind: '10s Rewind',
             player_forward: '10s Forward',
             player_subtitles: 'Subtitles',
+            player_audio: 'Audio',
             player_subtitles_off: 'Subtitles Off',
             player_subtitles_ar: 'Arabic (العربية)',
             player_subtitles_en: 'English',
@@ -91,11 +131,48 @@
             player_error: 'Unable to play video source',
             player_retry: 'Retry',
             player_exit: 'Exit',
+            player_back: 'Back',
+            player_close_short: 'Close',
+            player_cancel: 'Cancel',
+            player_loading_stream: 'Loading cinematic stream...',
+            player_subs_title: 'Choose Subtitles',
+            player_subs_hint: 'Select your preferred subtitle language',
+            player_subs_off_option: 'Turn Off Subtitles',
+            player_subs_off_note: 'No subtitles',
+            player_subs_external: 'External',
+            player_subs_load_more: 'Load more subtitles from the internet',
+            player_subs_searching: 'Searching for available subtitles...',
+            player_subs_none: 'No additional subtitles are available for this title',
+            player_subs_error: 'Could not complete the subtitle search',
+            player_subs_unavailable: 'Subtitle service is unavailable right now',
+            player_subs_retry: 'Search again',
+            player_subs_added: 'Subtitle added',
+            player_subs_added_hint: 'Pick it from the subtitles list',
+            player_subs_toast_new: 'New subtitles loaded',
+            player_subs_toast_hint: 'Press Subtitles to choose one',
+            player_subs_ar_track: 'Arabic subtitle',
+            player_subs_en_track: 'English subtitle',
+            player_subs_download: 'Load',
+            player_subs_downloaded: 'Loaded',
+            player_audio_title: 'Choose Audio Track',
+            player_audio_hint: 'Select your preferred audio language or type',
+            player_audio_none: 'No multiple audio tracks available',
+            player_no_source: 'No playable source for this title',
+            player_buffering: 'Buffering stream',
+            player_now_playing: 'Now playing',
+            player_server: 'Server',
+            player_err_embed: 'Embed source needs external interaction — trying an alternative source',
+            player_err_source: 'Current source failed to play',
+            player_err_start: 'Could not start video playback',
+            player_err_prepare: 'Could not prepare the video source',
+            player_err_open: 'Could not open the video source',
+            player_err_decoder: 'Could not play the file with the player',
+            player_err_hls: 'Could not decode the HLS stream',
             settings_title: 'Settings',
             settings_lang_section: 'Language',
             settings_lang_ar: 'Arabic (العربية RTL)',
             settings_lang_en: 'English (LTR)',
-            settings_active: '✓ Active',
+            settings_active: 'Active',
             settings_activate: 'Activate',
             settings_server_section: 'Server Connection',
             settings_current_server: 'Current Server URL',
@@ -106,7 +183,8 @@
             settings_about_section: 'About Application',
             settings_app_name: 'Application Name',
             settings_version: 'Version',
-            settings_engine: 'Playback Engine Status'
+            settings_engine: 'Playback Engine Status',
+            network_error: 'Cannot reach the server'
         }
     };
 
@@ -302,29 +380,14 @@
             'settings': this.t('nav_settings')
         };
         
-        var menuItems = document.querySelectorAll('.menu-item');
-        console.log('[NexusConfig] Found menu items:', menuItems.length);
+        var tabs = document.querySelectorAll('#nav-tabs .tab');
+        console.log('[NexusConfig] Found tabs:', tabs.length);
         
-        for (var i = 0; i < menuItems.length; i++) {
-            var page = menuItems[i].getAttribute('data-page');
-            var labelEl = menuItems[i].querySelector('.menu-label');
-            if (page && labels[page]) {
-                if (labelEl) {
-                    labelEl.textContent = labels[page];
-                } else {
-                    // If label doesn't exist yet, create it
-                    var span = document.createElement('span');
-                    span.className = 'menu-label';
-                    span.textContent = labels[page];
-                    span.style.display = 'inline-block';
-                    span.style.marginLeft = '12px';
-                    span.style.fontSize = '24px';
-                    span.style.fontWeight = '500';
-                    span.style.opacity = '0.9';
-                    span.style.transition = 'opacity 0.3s ease';
-                    menuItems[i].appendChild(span);
-                }
-                console.log('[NexusConfig] Updated label for:', page, '->', labels[page]);
+        for (var i = 0; i < tabs.length; i++) {
+            var page = tabs[i].getAttribute('data-page');
+            var labelEl = tabs[i].querySelector('.tab-label');
+            if (page && labels[page] && labelEl) {
+                labelEl.textContent = labels[page];
             }
         }
         
@@ -335,18 +398,6 @@
             var translation = this.t(key);
             if (translation !== key) {
                 buttons[j].textContent = translation;
-            }
-        }
-        
-        // Force sidebar expansion temporarily to ensure labels are visible for update
-        var sidebar = document.getElementById('sidebar');
-        if (sidebar) {
-            var wasExpanded = sidebar.classList.contains('expanded');
-            if (!wasExpanded) {
-                sidebar.classList.add('expanded');
-                setTimeout(function() {
-                    sidebar.classList.remove('expanded');
-                }, 100);
             }
         }
     };

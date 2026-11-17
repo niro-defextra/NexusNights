@@ -7,6 +7,12 @@
 (function (window) {
     'use strict';
 
+    // Authored icons — never unicode glyphs standing in for an icon system.
+    function playerIconCheck(size) {
+        return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 6L9 17l-5-5"/></svg>';
+    }
+    var PLAYER_ICON_DOWNLOAD = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="vertical-align: -2px;"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>';
+
     window.NexusPlayer = {
         currentSource: null,
         alternatives: [],
@@ -29,6 +35,7 @@
         isLive: false,
         stopping: false,
         skippedEmbedSources: 0,
+        lastProgressSaveTime: 0,
 
         init: function () {
             this.useAVPlay = typeof webapis !== 'undefined' && !!webapis.avplay;
@@ -36,8 +43,11 @@
         },
 
         play: function (source, alternatives, subtitles, meta) {
+            if (typeof webapis !== 'undefined' && !!webapis.avplay) {
+                this.useAVPlay = true;
+            }
             if (!source || (!source.url && !source.embedUrl)) {
-                alert('لا يوجد مصدر تشغيل صالح لهذا المحتوى');
+                if (window.NexusApp && NexusApp.showToast) NexusApp.showToast(NexusConfig.t('player_no_source'));
                 return;
             }
             this.primarySource = source;
@@ -68,103 +78,122 @@
         fetchExternalSubtitles: function () {
             var self = this;
             if (!this.meta || !this.meta.tmdbId || !window.NexusAPI || !NexusAPI.getSubtitles) return;
-            
-            console.log('[NexusPlayer] Fetching external subtitles for TMDB ID:', this.meta.tmdbId);
-            
+
+            console.log('[NexusPlayer] Fetching subtitles for TMDB ID:', this.meta.tmdbId);
+
             NexusAPI.getSubtitles(this.meta.tmdbId, this.meta.type || 'movie')
                 .then(function (extSubs) {
                     if (!extSubs || !extSubs.length) {
-                        console.log('[NexusPlayer] No external subtitles found');
+                        console.log('[NexusPlayer] No subtitles returned');
                         return;
                     }
-                    
-                    // Create array of new subtitles
+
                     var newSubtitles = [];
                     for (var i = 0; i < extSubs.length; i++) {
                         var item = extSubs[i];
-                        var sub = {
+                        var lang = self.normalizeLang(item.language);
+                        var provider = item.provider || 'OpenSubtitles';
+
+                        // De-duplicate against the live list AND the batch being built,
+                        // otherwise a provider that returns N identical tracks adds all N.
+                        var duplicate = self.subtitles.some(function (existing) {
+                            return self.normalizeLang(existing.language) === lang &&
+                                   (existing.provider || '') === provider;
+                        }) || newSubtitles.some(function (added) {
+                            return added.language === lang && added.provider === provider;
+                        });
+                        if (duplicate) continue;
+
+                        newSubtitles.push({
                             id: item.id,
                             url: item.url || null,
-                            language: item.language || 'ar',
-                            label: item.languageName || item.fileName || (item.language === 'ar' ? 'العربية' : 'English'),
+                            language: lang,
+                            label: self.subtitleLabel(lang, item.languageName || item.fileName),
                             isExternal: true,
-                            provider: item.provider || 'OpenSubtitles',
+                            provider: provider,
                             quality: item.quality || 'Good',
                             downloads: item.downloads || 0,
                             rating: item.rating || 0
-                        };
-                        
-                        // Only add if not already in the list
-                        var exists = self.subtitles.some(function(existing) {
-                            return existing.language === sub.language && existing.provider === sub.provider;
                         });
-                        
-                        if (!exists) {
-                            newSubtitles.push(sub);
-                        }
                     }
-                    
+
                     if (newSubtitles.length > 0) {
-                        console.log('[NexusPlayer] Adding', newSubtitles.length, 'external subtitle tracks');
+                        console.log('[NexusPlayer] Adding', newSubtitles.length, 'subtitle track(s)');
                         self.subtitles = self.subtitles.concat(newSubtitles);
-                        
-                        // Show notification about new external subtitles
                         self.showExternalSubtitleNotification(newSubtitles);
-                        
-                        // Automatically activate preferred Arabic subtitle if not already active
                         self.autoSelectPreferredSubtitle();
                     }
                 })
                 .catch(function (err) {
-                    console.warn('[NexusPlayer] External subtitle fetch error:', err.message);
+                    console.warn('[NexusPlayer] Subtitle fetch error:', err && err.message);
                 });
+        },
+
+        // Map provider language values ("en-US", "ara", "English"...) to 'ar' / 'en'.
+        normalizeLang: function (value) {
+            var v = String(value || '').trim().toLowerCase();
+            if (!v) return 'en';
+            if (v === 'ar' || v === 'ara' || v === 'arabic' || v.indexOf('ar-') === 0 || v.indexOf('ar_') === 0) return 'ar';
+            if (v === 'en' || v === 'eng' || v === 'english' || v.indexOf('en-') === 0 || v.indexOf('en_') === 0) return 'en';
+            return v;
+        },
+
+        subtitleLabel: function (lang, fallback) {
+            if (fallback && String(fallback).trim()) return String(fallback).trim();
+            if (lang === 'ar') return 'العربية';
+            if (lang === 'en') return 'English';
+            return String(lang || '').toUpperCase();
         },
         
         showExternalSubtitleNotification: function(newSubtitles) {
             if (!newSubtitles || newSubtitles.length === 0) return;
-            
-            // Create a temporary notification
+
+            // Only ever show one at a time.
+            var stale = document.querySelector('.player-external-sub-notification');
+            if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+
+            var playerPage = document.getElementById('player-page');
+            if (!playerPage) return;
+
+            var arCount = 0, enCount = 0;
+            for (var i = 0; i < newSubtitles.length; i++) {
+                if (newSubtitles[i].language === 'ar') arCount++;
+                else if (newSubtitles[i].language === 'en') enCount++;
+            }
+
+            var parts = [];
+            if (arCount > 0) parts.push(arCount + ' ' + NexusConfig.t('player_subs_ar_track'));
+            if (enCount > 0) parts.push(enCount + ' ' + NexusConfig.t('player_subs_en_track'));
+            if (parts.length === 0) parts.push(String(newSubtitles.length));
+
             var notification = document.createElement('div');
             notification.className = 'player-external-sub-notification';
-            notification.style.cssText = 'position: absolute; top: 100px; right: 32px; background: rgba(0,0,0,0.9); ' +
-                'border: 1px solid rgba(212,175,55,0.5); border-radius: 12px; padding: 16px 24px; ' +
-                'color: #ffffff; font-size: 22px; z-index: 1000; backdrop-filter: blur(10px); ' +
-                'max-width: 400px; box-shadow: 0 8px 32px rgba(0,0,0,0.6); animation: slideInRight 0.4s ease;';
-            
-            var arCount = newSubtitles.filter(function(s) { return s.language === 'ar'; }).length;
-            var enCount = newSubtitles.filter(function(s) { return s.language === 'en'; }).length;
-            
-            var message = 'تم تحميل ترجمات خارجية جديدة:';
-            if (arCount > 0) message += '<br>• ' + arCount + ' ترجمة عربية';
-            if (enCount > 0) message += '<br>• ' + enCount + ' English subtitles';
-            
-            notification.innerHTML = '<div style="margin-bottom: 8px; font-weight: 600;">' + message + '</div>' +
-                                   '<div style="font-size: 18px; opacity: 0.8;">اضغط على زر الترجمة للاختيار</div>';
-            
-            var playerPage = document.getElementById('player-page');
-            if (playerPage) {
-                playerPage.appendChild(notification);
-                
-                // Auto-remove after 5 seconds
-                setTimeout(function() {
-                    if (notification.parentNode) {
-                        notification.style.animation = 'fadeOut 0.4s ease forwards';
-                        setTimeout(function() {
-                            if (notification.parentNode) notification.parentNode.removeChild(notification);
-                        }, 400);
-                    }
-                }, 5000);
-            }
+            notification.setAttribute('role', 'status');
+            notification.innerHTML =
+                '<div class="player-external-sub-notification-title">' + NexusConfig.escapeHtml(NexusConfig.t('player_subs_toast_new')) + '</div>' +
+                '<div class="player-external-sub-notification-body">' + NexusConfig.escapeHtml(parts.join(' • ')) + '</div>' +
+                '<div class="player-external-sub-notification-hint">' + NexusConfig.escapeHtml(NexusConfig.t('player_subs_toast_hint')) + '</div>';
+
+            playerPage.appendChild(notification);
+
+            // Auto-dismiss (guaranteed: the node is removed even if animation is unsupported).
+            setTimeout(function () {
+                if (!notification.parentNode) return;
+                notification.classList.add('is-leaving');
+                setTimeout(function () {
+                    if (notification.parentNode) notification.parentNode.removeChild(notification);
+                }, 400);
+            }, 4200);
         },
 
         autoSelectPreferredSubtitle: function () {
             if (this.activeSubtitleIndex !== -1 || !this.subtitles.length) return;
             var preferredLang = NexusConfig.getLanguage(); // 'ar' or 'en'
             for (var i = 0; i < this.subtitles.length; i++) {
-                var lang = String(this.subtitles[i].language || this.subtitles[i].lang || '').toLowerCase();
-                if (lang === preferredLang || lang.indexOf(preferredLang) === 0) {
+                var lang = this.normalizeLang(this.subtitles[i].language || this.subtitles[i].lang);
+                if (lang === preferredLang) {
                     this.selectSubtitle(i);
-                    break;
+                    return;
                 }
             }
         },
@@ -177,7 +206,7 @@
 
             if (index < 0 || index >= this.subtitles.length) {
                 this.activeSubtitleIndex = -1;
-                if (badge) badge.textContent = NexusConfig.t('player_subtitles') + ' (Off)';
+                if (badge) badge.textContent = NexusConfig.t('player_subtitles_off');
                 var overlay = document.getElementById('player-subtitle-overlay');
                 if (overlay) overlay.classList.remove('active');
                 return;
@@ -257,6 +286,9 @@
                 this.showError(NexusConfig.t('player_error'));
                 return;
             }
+            if (typeof webapis !== 'undefined' && !!webapis.avplay) {
+                this.useAVPlay = true;
+            }
             this.currentSource = source;
             this.isLive = !!(source.isLive || (this.meta && this.meta.isLive));
             var attemptId = ++this.playAttemptId;
@@ -266,14 +298,20 @@
 
             var titleEl = document.getElementById('player-title');
             if (titleEl) {
-                titleEl.textContent = (this.meta && this.meta.title) || source.title || source.provider || 'NEXUSNIGHT';
+                var computedTitle = (this.meta && this.meta.title) || source.title || (this.isLive ? 'بث مباشر' : 'NEXUSNIGHT');
+                if (this.meta && this.meta.season && this.meta.episode) {
+                    computedTitle += ' • S' + this.meta.season + 'E' + this.meta.episode;
+                } else if (this.meta && this.meta.year) {
+                    computedTitle += ' (' + this.meta.year + ')';
+                }
+                titleEl.textContent = computedTitle;
             }
 
             var badgeEl = document.getElementById('player-badge');
             if (badgeEl) {
                 if (this.isLive) {
                     badgeEl.className = 'player-badge live-badge';
-                    badgeEl.textContent = NexusConfig.t('player_live_badge');
+                    badgeEl.innerHTML = '<span class="live-dot"></span> ' + NexusConfig.t('player_live_badge');
                 } else {
                     badgeEl.className = 'player-badge';
                     badgeEl.textContent = (source.quality || '1080p') + ' • ' + (source.provider || 'HD');
@@ -283,7 +321,7 @@
             if (source.type === 'embed' || source.embedUrl) {
                 if (typeof tizen !== 'undefined' && tizen.application) {
                     this.skippedEmbedSources += 1;
-                    this.tryNextSource('مصدر Embed يحتاج تفاعل خارجي. جاري تجربة مصدر مباشر بديل.', attemptId);
+                    this.tryNextSource(NexusConfig.t('player_err_embed'), attemptId);
                 } else {
                     this.playEmbed(source);
                 }
@@ -298,23 +336,42 @@
             var self = this;
             var avplay = webapis.avplay;
             this.activeEngine = 'avplay';
+
+            // Ensure AVPlay object exists in DOM
+            var container = document.getElementById('player-video');
+            if (container) {
+                container.innerHTML = '<object id="avplay-obj" type="application/avplayer" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;background:transparent;pointer-events:none;"></object>';
+            }
+
             try {
                 avplay.open(source.url);
-                avplay.setDisplayRect(0, 0, 1920, 1080);
+                try {
+                    avplay.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX');
+                    avplay.setDisplayRect(0, 0, 1920, 1080);
+                } catch (ignoreDisplayMethod) {}
+
                 avplay.setListener({
                     onbufferingstart: function () { self.showLoading(); },
-                    onbufferingprogress: function (percent) { self.updateLoadingText('جاري تحميل البث ' + percent + '%'); },
+                    onbufferingprogress: function (percent) { self.updateLoadingText(NexusConfig.t('player_buffering') + ' ' + percent + '%'); },
                     onbufferingcomplete: function () { self.hideLoading(); },
                     oncurrentplaytime: function (time) {
                         self.currentTime = Number(time) || 0;
-                        try { self.duration = Number(avplay.getDuration()) || 0; } catch (ignore) {}
+                        if (!self.isLive) {
+                            try { self.duration = Number(avplay.getDuration()) || 0; } catch (ignore) {}
+                        } else {
+                            self.duration = 0;
+                        }
                         self.updateProgress();
+                        if (self.currentTime - self.lastProgressSaveTime > 15000) {
+                            self.lastProgressSaveTime = self.currentTime;
+                            self.saveWatchProgress();
+                        }
                     },
                     onstreamcompleted: function () { self.stop(); },
                     onerror: function (error) {
                         if (attemptId !== self.playAttemptId) return;
-                        console.error('[AVPlay] Playback error:', error);
-                        self.tryNextSource('فشل تشغيل المصدر الحالي', attemptId);
+                        console.warn('[AVPlay] Playback error encountered, falling back to HTML5 engine:', error);
+                        self.playWithHTML5(source, attemptId);
                     },
                     onevent: function (event, data) { console.log('[AVPlay] Event:', event, data); }
                 });
@@ -322,23 +379,28 @@
                 avplay.prepareAsync(function () {
                     if (attemptId !== self.playAttemptId) return;
                     try {
+                        try {
+                            avplay.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX');
+                            avplay.setDisplayRect(0, 0, 1920, 1080);
+                        } catch (eGeom) {}
+
                         avplay.play();
                         self.isPlaying = true;
                         self.hideLoading();
                         self.showControls();
                         self.updatePlayPauseIcon();
                     } catch (error) {
-                        console.error('[AVPlay] Play error:', error);
-                        self.tryNextSource('تعذّر بدء تشغيل الفيديو', attemptId);
+                        console.warn('[AVPlay] Play invocation error, falling back to HTML5:', error);
+                        self.playWithHTML5(source, attemptId);
                     }
                 }, function (error) {
                     if (attemptId !== self.playAttemptId) return;
-                    console.error('[AVPlay] Prepare error:', error);
-                    self.tryNextSource('تعذّر تجهيز مصدر الفيديو', attemptId);
+                    console.warn('[AVPlay] Prepare error, falling back to HTML5 engine:', error);
+                    self.playWithHTML5(source, attemptId);
                 });
             } catch (error) {
-                console.error('[AVPlay] Open error:', error);
-                this.tryNextSource('تعذّر فتح مصدر الفيديو', attemptId);
+                console.warn('[AVPlay] Open error, falling back to HTML5 engine:', error);
+                this.playWithHTML5(source, attemptId);
             }
         },
 
@@ -379,12 +441,16 @@
                 self.currentTime = Math.floor(video.currentTime * 1000);
                 self.duration = isFinite(video.duration) ? Math.floor(video.duration * 1000) : 0;
                 self.updateProgress();
+                if (self.currentTime - self.lastProgressSaveTime > 15000) {
+                    self.lastProgressSaveTime = self.currentTime;
+                    self.saveWatchProgress();
+                }
             });
             video.addEventListener('ended', function () { self.stop(); });
             video.addEventListener('error', function () {
                 if (attemptId !== self.playAttemptId) return;
                 console.error('[HTML5] Video error:', video.error);
-                self.tryNextSource('تعذّر تشغيل الملف باستخدام المشغّل', attemptId);
+                self.tryNextSource(NexusConfig.t('player_err_decoder'), attemptId);
             });
 
             container.appendChild(video);
@@ -423,7 +489,7 @@
                                 console.error('[HLS] Fatal unrecoverable error:', data);
                                 hls.destroy();
                                 self.hlsInstance = null;
-                                self.tryNextSource('تعذّر فك تشفير بث HLS', attemptId);
+                                self.tryNextSource(NexusConfig.t('player_err_hls'), attemptId);
                                 break;
                         }
                     }
@@ -529,6 +595,7 @@
             if (this.stopping) return;
             this.stopping = true;
             console.log('[NexusPlayer] Stopping playback');
+            this.saveWatchProgress();
             clearTimeout(this.controlsTimeout);
             this.cleanupEngine();
             this.playAttemptId += 1;
@@ -543,6 +610,38 @@
             this.hidePlayerPage();
             this.stopping = false;
             if (window.Navigator && Navigator.restoreCurrent) Navigator.restoreCurrent();
+        },
+
+        saveWatchProgress: function () {
+            if (!this.meta || this.isLive || !this.duration || this.duration <= 0) return;
+            try {
+                var storageKey = (NexusConfig.storage && NexusConfig.storage.watchProgress) || 'nexus_watch_progress';
+                var raw = window.localStorage.getItem(storageKey);
+                var progress = raw ? JSON.parse(raw) : {};
+                var kind = this.meta.type || this.meta.kind || 'movie';
+                var id = this.meta.tmdbId || this.meta.localId || '';
+                if (!id) return;
+                var entryKey = (kind === 'series' ? 's' : 'm') + '_' + id;
+                var posSec = Math.floor(this.currentTime / 1000);
+                var durSec = Math.floor(this.duration / 1000);
+                if (posSec < 10) return;
+                progress[entryKey] = {
+                    tmdbId: this.meta.tmdbId || 0,
+                    localId: this.meta.localId || '',
+                    kind: kind,
+                    title: this.meta.title || '',
+                    posterUrl: this.meta.posterUrl || null,
+                    backdropUrl: this.meta.backdropUrl || null,
+                    rating: this.meta.rating || null,
+                    year: this.meta.year || null,
+                    position: posSec,
+                    duration: durSec,
+                    timestamp: Date.now()
+                };
+                window.localStorage.setItem(storageKey, JSON.stringify(progress));
+            } catch (e) {
+                console.warn('[NexusPlayer] Failed to save watch progress:', e);
+            }
         },
 
         seek: function (positionMs) {
@@ -574,6 +673,8 @@
 
         showPlayerPage: function () {
             this.hidePlayerPage();
+            document.documentElement.classList.add('player-open');
+            document.body.classList.add('player-open');
 
             // Build player title with metadata
             var titleText = 'NEXUSNIGHT';
@@ -617,7 +718,7 @@
                 '<div class="player-gradient-overlay"></div>' +
                 '<div class="player-header visible" id="player-header">' +
                 '<div class="player-header-info">' +
-                '<button class="player-button player-button-icon-only focusable" id="btn-player-back" title="رجوع">' + backSvg + '</button>' +
+                '<button class="player-button player-button-icon-only focusable" id="btn-player-back" title="' + NexusConfig.t('player_back') + '">' + backSvg + '</button>' +
                 '<div class="player-title-artwork">' +
                 '<span class="player-title" id="player-title">' + NexusConfig.escapeHtml(titleText) + '</span>' +
                 '<span class="player-badge" id="player-badge">' + NexusConfig.escapeHtml(badgeText) + '</span>' +
@@ -639,17 +740,17 @@
                 '<div class="spinner-ring"></div>' +
                 '<div class="spinner-ring-inner"></div>' +
                 '</div>' +
-                '<div class="loading-text" id="player-loading-text">جاري تحميل البث السينمائي...</div>' +
+                '<div class="loading-text" id="player-loading-text">' + NexusConfig.t('player_loading_stream') + '</div>' +
                 '</div>' +
 
                 // Cinema Error Overlay
                 '<div class="player-error hidden" id="player-error">' +
                 '<div class="cinematic-error-container">' +
-                '<div class="error-icon">⚠</div>' +
+                '<div class="error-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>' +
                 '<div class="error-message" id="player-error-message"></div>' +
                 '<div class="error-actions">' +
-                '<button class="player-button focusable cinematic-button" id="btn-player-retry">إعادة المحاولة</button>' +
-                '<button class="player-button focusable cinematic-button" id="btn-player-exit">خروج</button>' +
+                '<button class="player-button focusable cinematic-button" id="btn-player-retry">' + NexusConfig.t('player_retry') + '</button>' +
+                '<button class="player-button focusable cinematic-button" id="btn-player-exit">' + NexusConfig.t('player_exit') + '</button>' +
                 '</div>' +
                 '</div>' +
                 '</div>' +
@@ -670,12 +771,12 @@
 
                 // Premium Buttons Row - Cinema Style
                 '<div class="player-buttons" id="player-buttons">' +
-                '<button class="player-button cinematic-button focusable" id="btn-rewind" title="10 ثوان للخلف">' + rewindSvg + '<span class="button-label">10s</span></button>' +
-                '<button class="player-button player-button-play cinematic-button focusable" id="btn-play-pause" title="تشغيل / إيقاف">' + playSvg + '</button>' +
-                '<button class="player-button cinematic-button focusable" id="btn-forward" title="10 ثوان للأمام"><span class="button-label">10s</span>' + forwardSvg + '</button>' +
-                '<button class="player-button cinematic-button focusable" id="btn-subtitles">' + ccSvg + '<span class="button-label" id="btn-subtitles-label">الترجمة</span></button>' +
-                '<button class="player-button cinematic-button focusable" id="btn-audio">' + audioSvg + '<span class="button-label" id="btn-audio-label">الصوت</span></button>' +
-                '<button class="player-button player-button-icon-only cinematic-button focusable" id="btn-close-player" title="إغلاق">' + closeSvg + '</button>' +
+                '<button class="player-button cinematic-button focusable" id="btn-rewind" title="' + NexusConfig.t('player_rewind') + '">' + rewindSvg + '<span class="button-label">10s</span></button>' +
+                '<button class="player-button player-button-play cinematic-button focusable" id="btn-play-pause" title="' + NexusConfig.t('player_play') + ' / ' + NexusConfig.t('player_pause') + '">' + playSvg + '</button>' +
+                '<button class="player-button cinematic-button focusable" id="btn-forward" title="' + NexusConfig.t('player_forward') + '"><span class="button-label">10s</span>' + forwardSvg + '</button>' +
+                '<button class="player-button cinematic-button focusable" id="btn-subtitles">' + ccSvg + '<span class="button-label" id="btn-subtitles-label">' + NexusConfig.t('player_subtitles') + '</span></button>' +
+                '<button class="player-button cinematic-button focusable" id="btn-audio">' + audioSvg + '<span class="button-label" id="btn-audio-label">' + NexusConfig.t('player_audio') + '</span></button>' +
+                '<button class="player-button player-button-icon-only cinematic-button focusable" id="btn-close-player" title="' + NexusConfig.t('player_close_short') + '">' + closeSvg + '</button>' +
                 '</div>' +
 
                 '</div>' + // player-controls
@@ -685,14 +786,14 @@
                 '<div class="player-modal-backdrop hidden" id="player-subtitles-modal">' +
                 '<div class="cinematic-modal">' +
                 '<div class="cinematic-modal-header">' +
-                '<h3 class="modal-title">🎬 اختيار الترجمة</h3>' +
-                '<div class="modal-subtitle">اختر لغة الترجمة المناسبة</div>' +
+                '<h3 class="modal-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-left:8px;"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="7" y1="4" x2="7" y2="20"/><line x1="17" y1="4" x2="17" y2="20"/><line x1="2" y1="12" x2="22" y2="12"/></svg>' + NexusConfig.t('player_subs_title') + '</h3>' +
+                '<div class="modal-subtitle">' + NexusConfig.t('player_subs_hint') + '</div>' +
                 '</div>' +
                 '<div class="cinematic-modal-body">' +
                 '<div id="player-subtitles-list" class="cinematic-list"></div>' +
                 '</div>' +
                 '<div class="cinematic-modal-footer">' +
-                '<button class="player-button focusable cinematic-button modal-close" id="btn-close-sub-modal">إغلاق</button>' +
+                '<button class="player-button focusable cinematic-button modal-close" id="btn-close-sub-modal">' + NexusConfig.t('player_close_short') + '</button>' +
                 '</div>' +
                 '</div>' +
                 '</div>' +
@@ -701,14 +802,14 @@
                 '<div class="player-modal-backdrop hidden" id="player-audio-modal">' +
                 '<div class="cinematic-modal">' +
                 '<div class="cinematic-modal-header">' +
-                '<h3 class="modal-title">🎵 اختيار مسار الصوت</h3>' +
-                '<div class="modal-subtitle">اختر لغة أو نوع الصوت المناسب</div>' +
+                '<h3 class="modal-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-left:8px;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>' + NexusConfig.t('player_audio_title') + '</h3>' +
+                '<div class="modal-subtitle">' + NexusConfig.t('player_audio_hint') + '</div>' +
                 '</div>' +
                 '<div class="cinematic-modal-body">' +
                 '<div id="player-audio-list" class="cinematic-list"></div>' +
                 '</div>' +
                 '<div class="cinematic-modal-footer">' +
-                '<button class="player-button focusable cinematic-button modal-close" id="btn-close-audio-modal">إغلاق</button>' +
+                '<button class="player-button focusable cinematic-button modal-close" id="btn-close-audio-modal">' + NexusConfig.t('player_close_short') + '</button>' +
                 '</div>' +
                 '</div>' +
                 '</div>' +
@@ -717,14 +818,14 @@
                 '<div class="player-modal-backdrop hidden" id="player-external-subs-modal">' +
                 '<div class="cinematic-modal">' +
                 '<div class="cinematic-modal-header">' +
-                '<h3 class="modal-title">📥 تحميل ترجمات خارجية</h3>' +
-                '<div class="modal-subtitle">جاري البحث عن ترجمات متاحة...</div>' +
+                '<h3 class="modal-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-left:8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' + NexusConfig.t('player_subs_load_more') + '</h3>' +
+                '<div class="modal-subtitle" id="player-external-subs-status">' + NexusConfig.t('player_subs_searching') + '</div>' +
                 '</div>' +
                 '<div class="cinematic-modal-body">' +
                 '<div id="player-external-subs-list" class="cinematic-list"></div>' +
                 '</div>' +
                 '<div class="cinematic-modal-footer">' +
-                '<button class="player-button focusable cinematic-button modal-close" id="btn-close-external-subs-modal">إلغاء</button>' +
+                '<button class="player-button focusable cinematic-button modal-close" id="btn-close-external-subs-modal">' + NexusConfig.t('player_cancel') + '</button>' +
                 '</div>' +
                 '</div>' +
                 '</div>' +
@@ -736,6 +837,8 @@
         },
 
         hidePlayerPage: function () {
+            document.documentElement.classList.remove('player-open');
+            document.body.classList.remove('player-open');
             var page = document.getElementById('player-page');
             if (page && page.parentNode) page.parentNode.removeChild(page);
         },
@@ -773,6 +876,11 @@
             
             if (closeSubModal) closeSubModal.onclick = function () { self.closeModals(); };
 
+            var closeSrcModalBtn = document.getElementById('btn-close-sources-modal');
+            if (closeSrcModalBtn) closeSrcModalBtn.onclick = function () { self.closeModals(); };
+
+            var closeExtSubsModal = document.getElementById('btn-close-external-subs-modal');
+            if (closeExtSubsModal) closeExtSubsModal.onclick = function () { self.closeModals(); };
 
             if (progressBar) {
                 progressBar.onclick = function (e) {
@@ -799,34 +907,40 @@
             // Option: Turn Off Subtitles
             var isOff = this.activeSubtitleIndex === -1;
             html += '<div class="player-modal-item focusable ' + (isOff ? 'active' : '') + '" data-sub-idx="-1" tabindex="0">';
-            html += '<span>إيقاف الترجمة (Subtitles Off)</span>';
-            if (isOff) html += '<span>✓</span>';
+            html += '<span>' + NexusConfig.escapeHtml(NexusConfig.t('player_subtitles_off')) +
+                    '<span class="player-modal-item-note">' + NexusConfig.escapeHtml(NexusConfig.t('player_subs_off_note')) + '</span></span>';
+            if (isOff) html += '<span>' + playerIconCheck(20) + '</span>';
             html += '</div>';
 
             // Available Subtitle Tracks
             for (var i = 0; i < this.subtitles.length; i++) {
                 var item = this.subtitles[i];
                 var isSelected = this.activeSubtitleIndex === i;
-                var langBadge = (item.language === 'ar' || item.lang === 'ar') ? 'العربية' : (item.language || 'English');
+                var langBadge = this.subtitleLabel(this.normalizeLang(item.language || item.lang), item.label);
                 html += '<div class="player-modal-item focusable ' + (isSelected ? 'active' : '') + '" data-sub-idx="' + i + '" tabindex="0">';
                 html += '<span>' + NexusConfig.escapeHtml(item.label || langBadge);
-                
+
                 // Add external subtitle badge
                 if (item.isExternal) {
-                    html += '<span style="margin-right: 8px; font-size: 16px; color: var(--color-brand-gold); opacity: 0.9;">(خارجي)</span>';
+                    html += '<span class="player-modal-item-badge">' + NexusConfig.escapeHtml(NexusConfig.t('player_subs_external')) + '</span>';
                 }
-                
+
                 html += '</span>';
-                if (isSelected) html += '<span>✓</span>';
+                if (isSelected) html += '<span>' + playerIconCheck(20) + '</span>';
                 html += '</div>';
             }
 
+            // Nothing loaded yet — tell the viewer where to get more.
+            if (this.subtitles.length === 0) {
+                html += '<div class="player-modal-empty">' + NexusConfig.escapeHtml(NexusConfig.t('player_subs_none')) + '</div>';
+            }
+
             // Load More Subtitles Option (External)
-            html += '<div class="player-modal-item focusable" style="border-top: 1px solid rgba(255,255,255,0.1); margin-top: 12px; padding-top: 16px;">' +
-                    '<button class="cinematic-button" id="btn-load-more-subs" style="width: 100%; background: rgba(212,175,55,0.1); border-color: rgba(212,175,55,0.3); color: var(--color-brand-gold);">' +
+            html += '<div class="player-modal-item player-modal-item-action focusable">' +
+                    '<button class="cinematic-button" id="btn-load-more-subs" style="width: 100%; background: rgba(212,175,106,0.1); border-color: rgba(212,175,106,0.3); color: var(--color-brand-gold);">' +
                     '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left: 8px;">' +
                     '<path d="M12 5v14M5 12h14"/></svg>' +
-                    'تحميل ترجمات إضافية من الإنترنت' +
+                    NexusConfig.escapeHtml(NexusConfig.t('player_subs_load_more')) +
                     '</button>' +
                     '</div>';
 
@@ -856,114 +970,164 @@
         openExternalSubtitlesModal: function() {
             var modal = document.getElementById('player-external-subs-modal');
             var list = document.getElementById('player-external-subs-list');
+            var status = document.getElementById('player-external-subs-status');
             if (!modal || !list) return;
-            
+
             var self = this;
-            
-            // Show loading state
-            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--color-text-muted);">' +
-                            '<div class="loading-spinner" style="margin: 0 auto 20px;"></div>' +
-                            'جاري البحث عن ترجمات متاحة...</div>';
-            
-            modal.classList.remove('hidden');
-            
-            // Fetch external subtitles from multiple sources
-            if (this.meta && this.meta.tmdbId && window.NexusAPI && NexusAPI.searchExternalSubtitles) {
-                NexusAPI.searchExternalSubtitles(this.meta.tmdbId, this.meta.title, this.meta.type || 'movie')
-                    .then(function(results) {
-                        if (!results || results.length === 0) {
-                            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--color-text-muted);">' +
-                                           'لم يتم العثور على ترجمات إضافية</div>';
-                            return;
-                        }
-                        
-                        var html = '';
-                        var uniqueTracks = {};
-                        
-                        for (var i = 0; i < results.length; i++) {
-                            var item = results[i];
-                            var key = item.language + '_' + item.provider + '_' + item.quality;
-                            
-                            // Avoid duplicates
-                            if (uniqueTracks[key]) continue;
-                            uniqueTracks[key] = true;
-                            
-                            // Check if already loaded
-                            var alreadyLoaded = self.subtitles.some(function(sub) {
-                                return sub.language === item.language && 
-                                       sub.provider === item.provider &&
-                                       sub.quality === item.quality;
-                            });
-                            
-                            html += '<div class="player-modal-item focusable ' + (alreadyLoaded ? 'loaded' : '') + 
-                                   '" data-external-id="' + i + '" tabindex="0">' +
-                                   '<span>' + NexusConfig.escapeHtml(item.languageName || item.language) + 
-                                   '<span style="margin-right: 8px; font-size: 16px; opacity: 0.7;">(' + 
-                                   (item.provider || 'Unknown') + ' • ' + (item.quality || 'Normal') + 
-                                   ' • ⬇' + (item.downloads || 0) + ')</span></span>' +
-                                   '<span>' + (alreadyLoaded ? '✓ تم التحميل' : 'تحميل') + '</span>' +
-                                   '</div>';
-                        }
-                        
-                        list.innerHTML = html;
-                        
-                        // Bind click handlers
-                        var items = list.querySelectorAll('[data-external-id]');
-                        for (var j = 0; j < items.length; j++) {
-                            items[j].onclick = (function(idx) {
-                                return function() {
-                                    var item = results[idx];
-                                    if (!item) return;
-                                    
-                                    // Add to subtitles list
-                                    var newSub = {
-                                        id: item.id,
-                                        url: item.url,
-                                        language: item.language,
-                                        label: item.languageName || item.language,
-                                        isExternal: true,
-                                        provider: item.provider,
-                                        quality: item.quality,
-                                        downloads: item.downloads,
-                                        rating: item.rating
-                                    };
-                                    
-                                    self.subtitles.push(newSub);
-                                    console.log('[NexusPlayer] Added external subtitle:', newSub);
-                                    
-                                    // Show success message
-                                    list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--color-brand-gold);">' +
-                                                   '<div style="font-size: 28px; margin-bottom: 16px;">✓</div>' +
-                                                   'تم إضافة الترجمة بنجاح!<br>' +
-                                                   '<span style="font-size: 18px; opacity: 0.8;">يمكنك اختيارها من قائمة الترجمات</span>' +
-                                                   '</div>';
-                                    
-                                    // Close both modals after 2 seconds
-                                    setTimeout(function() {
-                                        self.closeModals();
-                                        var extModal = document.getElementById('player-external-subs-modal');
-                                        if (extModal) extModal.classList.add('hidden');
-                                        
-                                        // Re-open subtitles modal to show the new addition
-                                        setTimeout(function() {
-                                            self.openSubtitlesModal();
-                                        }, 300);
-                                    }, 2000);
-                                };
-                            })(parseInt(items[j].getAttribute('data-external-id'), 10));
-                        }
-                    })
-                    .catch(function(err) {
-                        console.error('[NexusPlayer] External subtitle search failed:', err);
-                        list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--color-text-muted);">' +
-                                       'حدث خطأ أثناء البحث عن الترجمات</div>';
-                    });
-            } else {
-                list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--color-text-muted);">' +
-                               'خدمة البحث عن الترجمات غير متوفرة حالياً</div>';
+            var settled = false;
+            var guardTimer = null;
+
+            function setStatus(text) { if (status) status.textContent = text; }
+
+            function stateBlock(icon, message, withRetry) {
+                return '<div class="player-modal-state">' +
+                       (icon ? '<div class="player-modal-state-icon">' + icon + '</div>' : '') +
+                       NexusConfig.escapeHtml(message) +
+                       (withRetry ? '<div class="player-modal-state-actions">' +
+                           '<button class="cinematic-button focusable" id="btn-retry-external-subs">' +
+                           NexusConfig.escapeHtml(NexusConfig.t('player_subs_retry')) + '</button></div>' : '') +
+                       '</div>';
             }
-            
-            FocusManager.register(modal.querySelectorAll('.focusable'));
+
+            function settle(finish) {
+                if (settled) return;
+                settled = true;
+                if (guardTimer) { clearTimeout(guardTimer); guardTimer = null; }
+                try { finish(); } catch (eFinish) { console.error(eFinish); }
+                FocusManager.register(modal.querySelectorAll('.focusable'));
+            }
+
+            function renderResults(results) {
+                var html = '';
+                var uniqueTracks = {};
+
+                for (var i = 0; i < results.length; i++) {
+                    var item = results[i];
+                    var lang = self.normalizeLang(item.language);
+                    var provider = item.provider || 'OpenSubtitles';
+                    var quality = item.quality || (item.rating > 8 ? 'HD' : 'Normal');
+                    var key = lang + '_' + (item.id || i);
+                    if (uniqueTracks[key]) continue;
+                    uniqueTracks[key] = true;
+
+                    var alreadyLoaded = self.subtitles.some(function (sub) {
+                        return sub.id && sub.id === item.id;
+                    });
+
+                    var downloadsText = String(item.downloads || item.downloadCount || 0);
+
+                    html += '<div class="player-modal-item focusable ' + (alreadyLoaded ? 'loaded' : '') +
+                            '" data-external-id="' + i + '" tabindex="0">' +
+                            '<span>' + NexusConfig.escapeHtml(self.subtitleLabel(lang, item.languageName || item.fileName)) +
+                            '<span class="player-modal-item-note">' +
+                            NexusConfig.escapeHtml(provider + ' • ' + quality + ' • ') + PLAYER_ICON_DOWNLOAD + ' ' +
+                            NexusConfig.escapeHtml(downloadsText) + '</span></span>' +
+                            '<span class="player-modal-item-action-label">' +
+                            NexusConfig.escapeHtml(alreadyLoaded ? NexusConfig.t('player_subs_downloaded') : NexusConfig.t('player_subs_download')) +
+                            '</span>' +
+                            '</div>';
+                }
+
+                setStatus(NexusConfig.t('player_subs_title'));
+                list.innerHTML = html;
+
+                var items = list.querySelectorAll('[data-external-id]');
+                for (var j = 0; j < items.length; j++) {
+                    items[j].onclick = (function (idx) {
+                        return function () {
+                            var item = results[idx];
+                            if (!item) return;
+
+                            var lang = self.normalizeLang(item.language);
+                            var provider = item.provider || 'OpenSubtitles';
+
+                            var existingIndex = -1;
+                            for (var k = 0; k < self.subtitles.length; k++) {
+                                if (self.subtitles[k].id === item.id) { existingIndex = k; break; }
+                            }
+
+                            if (existingIndex === -1) {
+                                var newSub = {
+                                    id: item.id,
+                                    url: item.url || null,
+                                    language: lang,
+                                    label: self.subtitleLabel(lang, item.languageName || item.fileName),
+                                    isExternal: true,
+                                    provider: provider,
+                                    quality: item.quality || 'Good',
+                                    downloads: item.downloads || item.downloadCount || 0,
+                                    rating: item.rating || 0
+                                };
+                                self.subtitles.push(newSub);
+                                existingIndex = self.subtitles.length - 1;
+                            }
+
+                            self.selectSubtitle(existingIndex);
+                            if (window.NexusApp && NexusApp.showToast) {
+                                NexusApp.showToast(NexusConfig.t('player_subs_added'));
+                            }
+
+                            self.closeModals();
+                        };
+                    })(parseInt(items[j].getAttribute('data-external-id'), 10));
+                }
+            }
+
+            function run() {
+                settled = false;
+                if (guardTimer) { clearTimeout(guardTimer); guardTimer = null; }
+
+                setStatus(NexusConfig.t('player_subs_searching'));
+                list.innerHTML = stateBlock('<div class="loading-spinner" style="margin: 0 auto;"></div>', NexusConfig.t('player_subs_searching'), false);
+                FocusManager.register(modal.querySelectorAll('.focusable'));
+
+                if (!self.meta || !self.meta.tmdbId || !window.NexusAPI || !NexusAPI.getSubtitles) {
+                    settle(function () {
+                        setStatus(NexusConfig.t('player_subs_unavailable'));
+                        list.innerHTML = stateBlock('', NexusConfig.t('player_subs_unavailable'), false);
+                    });
+                    return;
+                }
+
+                // Hard settle guard: never stay on spinner longer than 4.5s
+                guardTimer = setTimeout(function () {
+                    settle(function () {
+                        setStatus(NexusConfig.t('player_subs_none'));
+                        list.innerHTML = stateBlock('', NexusConfig.t('player_subs_none'), true);
+                    });
+                }, 4500);
+
+                NexusAPI.getSubtitles(self.meta.tmdbId, self.meta.type || 'movie', self.meta.season, self.meta.episode)
+                    .then(function (results) {
+                        settle(function () {
+                            if (!results || results.length === 0) {
+                                setStatus(NexusConfig.t('player_subs_none'));
+                                list.innerHTML = stateBlock('', NexusConfig.t('player_subs_none'), true);
+                                return;
+                            }
+                            renderResults(results);
+                        });
+                    })
+                    .catch(function (err) {
+                        console.warn('[NexusPlayer] Subtitle search failed:', err && err.message);
+                        settle(function () {
+                            setStatus(NexusConfig.t('player_subs_error'));
+                            list.innerHTML = stateBlock('', NexusConfig.t('player_subs_error'), true);
+                        });
+                    });
+            }
+
+            // Delegated retry handler
+            list.onclick = function (e) {
+                var node = e.target;
+                while (node && node !== list) {
+                    if (node.id === 'btn-retry-external-subs') { run(); return; }
+                    node = node.parentNode;
+                }
+            };
+
+            modal.classList.remove('hidden');
+            run();
         },
 
         openSourcesModal: function () {
@@ -985,8 +1149,8 @@
                 var src = allSources[i];
                 var isCurrent = self.currentSource && (self.currentSource.url === src.url || self.currentSource.provider === src.provider);
                 html += '<div class="player-modal-item focusable ' + (isCurrent ? 'active' : '') + '" data-src-idx="' + i + '" tabindex="0">';
-                html += '<span>' + NexusConfig.escapeHtml(src.provider || ('سيرفر ' + (i + 1))) + '</span>';
-                if (isCurrent) html += '<span>(يعمل الآن ✓)</span>';
+                html += '<span>' + NexusConfig.escapeHtml(src.provider || (NexusConfig.t('player_server') + ' ' + (i + 1))) + '</span>';
+                if (isCurrent) html += '<span class="player-modal-item-check">' + playerIconCheck(18) + NexusConfig.escapeHtml(NexusConfig.t('player_now_playing')) + '</span>';
                 html += '</div>';
             }
 
@@ -1011,10 +1175,21 @@
             var subModal = document.getElementById('player-subtitles-modal');
             var audioModal = document.getElementById('player-audio-modal');
             var extSubsModal = document.getElementById('player-external-subs-modal');
+            var srcModal = document.getElementById('player-sources-modal');
             if (subModal) subModal.classList.add('hidden');
             if (audioModal) audioModal.classList.add('hidden');
             if (extSubsModal) extSubsModal.classList.add('hidden');
+            if (srcModal) srcModal.classList.add('hidden');
             FocusManager.register(document.querySelectorAll('#player-controls .focusable'));
+        },
+
+        isAnyModalOpen: function () {
+            var ids = ['player-subtitles-modal', 'player-audio-modal', 'player-external-subs-modal', 'player-sources-modal'];
+            for (var i = 0; i < ids.length; i++) {
+                var el = document.getElementById(ids[i]);
+                if (el && !el.classList.contains('hidden')) return true;
+            }
+            return false;
         },
 
         openAudioModal: function () {
@@ -1052,14 +1227,14 @@
             }
 
             if (audioTracks.length === 0) {
-                html = '<div style="padding: 20px; text-align: center; color: var(--color-text-muted);">لا تتوفر مسارات صوت متعددة</div>';
+                html = '<div class="player-modal-empty">' + NexusConfig.escapeHtml(NexusConfig.t('player_audio_none')) + '</div>';
             } else {
                 for (var k = 0; k < audioTracks.length; k++) {
                     var audio = audioTracks[k];
                     var isActive = audio.enabled;
                     html += '<div class="player-modal-item focusable ' + (isActive ? 'active' : '') + '" data-audio-idx="' + k + '" tabindex="0">';
                     html += '<span>' + NexusConfig.escapeHtml(audio.label) + '</span>';
-                    if (isActive) html += '<span style="margin-right: auto; color: var(--color-brand-gold);">✓ مُفعّل</span>';
+                    if (isActive) html += '<span class="player-modal-item-check">' + playerIconCheck(18) + NexusConfig.escapeHtml(NexusConfig.t('settings_active')) + '</span>';
                     html += '</div>';
                 }
             }

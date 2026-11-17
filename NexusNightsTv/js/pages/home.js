@@ -14,7 +14,7 @@
          */
         render: function() {
             var mainContent = document.getElementById('main-content');
-            mainContent.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div></div>';
+            mainContent.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><div class="loading-text">' + NexusConfig.t('loading') + '</div></div>';
             
             // Safety check: Ensure NexusAPI is loaded
             if (typeof NexusAPI === 'undefined') {
@@ -50,6 +50,9 @@
             
             var html = '<div class="page-container">';
             
+            // Live band slot — what is on right now, ahead of the hero
+            html += '<div class="live-band-slot" id="home-live-band-slot"></div>';
+            
             // Hero Section
             if (data.hero) {
                 html += this.renderHero(data.hero);
@@ -74,6 +77,56 @@
             
             // Register focusable elements
             this.registerFocusables();
+            
+            // Fill the live band once channel data resolves
+            this.loadLiveBand();
+        },
+        
+        /**
+         * Live band — what is on right now, ahead of the hero.
+         * Rendered only when live channel data exists; silent otherwise.
+         */
+        loadLiveBand: function() {
+            if (!NexusConfig.features.sports) return;
+            var slot = document.getElementById('home-live-band-slot');
+            if (!slot) return;
+            if (typeof SportsPage === 'undefined' || typeof SportsPage.getLiveBandData !== 'function') return;
+            var self = this;
+            var isAr = NexusConfig.getLanguage() === 'ar';
+            
+            NexusAPI.getSportsChannels().then(function(channels) {
+                var items = SportsPage.getLiveBandData(channels, 6);
+                if (!items.length) return;
+                
+                var band = '<div class="live-band">';
+                band += '<div class="live-band-head">';
+                band += '<span class="live-band-title">' + (isAr ? 'قنوات تُبث حالياً' : 'On now') + '</span>';
+                band += '</div>';
+                band += '<div class="live-band-track">';
+                for (var i = 0; i < items.length; i++) {
+                    var it = items[i];
+                    band += '<div class="live-cell focusable" data-action="play-channel" data-channel-id="' + NexusConfig.escapeHtml(it.id) + '">';
+                    if (it.backdrop) {
+                        band += '<img class="live-cell-poster" loading="lazy" src="' + NexusConfig.escapeHtml(it.backdrop) + '" alt="">';
+                    }
+                    band += '<div class="live-cell-body">';
+                    band += '<div class="live-cell-name text-ellipsis">' + NexusConfig.escapeHtml(it.name) + '</div>';
+                    if (it.meta) band += '<div class="live-cell-meta text-ellipsis">' + NexusConfig.escapeHtml(it.meta) + '</div>';
+                    band += '</div>';
+                    band += '<span class="live-cell-badge">LIVE</span>';
+                    band += '</div>';
+                }
+                band += '</div></div>';
+                slot.innerHTML = band;
+                
+                // Re-register so the new cells join the D-pad order in place,
+                // and pick up the shared [data-action] click handling.
+                self.registerFocusables();
+                if (NexusApp.setLiveCount) NexusApp.setLiveCount(items.length);
+            }).catch(function(error) {
+                console.warn('[HomePage] Live band unavailable:', error && error.message);
+                if (NexusApp.setLiveCount) NexusApp.setLiveCount(0);
+            });
         },
         
         /**
@@ -151,8 +204,9 @@
                 html += '<h1 class="hero-title">' + NexusConfig.escapeHtml(hero.title) + '</h1>';
             }
             
-            // Meta line: rating, year, genres
+            // Meta line: badge, rating, year, genres
             html += '<div class="hero-meta">';
+            html += '<div class="hero-meta-item"><span class="hero-quality-badge" style="background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; padding: 2px 8px; font-size: 14px; font-weight: 700; margin-left: 12px; letter-spacing: 0.5px;">4K ULTRA HD</span></div>';
             if (hero.rating) {
                 html += '<div class="hero-meta-item"><span class="hero-rating text-gold">★ ' + Number(hero.rating).toFixed(1) + '</span></div>';
             }
@@ -254,7 +308,7 @@
             // Show progress bar for continue-watching items
             if (item.progressPercent) {
                 html += '<div class="card-progress" style="width:100%;height:3px;background:rgba(255,255,255,0.15);margin-top:4px;border-radius:2px">';
-                html += '<div style="width:' + item.progressPercent + '%;height:100%;background:var(--color-accent, #e50914);border-radius:2px"></div>';
+                html += '<div style="width:' + item.progressPercent + '%;height:100%;background:var(--color-brand-red);border-radius:2px"></div>';
                 html += '</div>';
             }
             
@@ -307,7 +361,33 @@
                 this.playContent(kind, tmdbId, localId);
             } else if (action === 'details') {
                 Navigator.navigateTo('details', { kind: kind, tmdbId: tmdbId, localId: localId || null });
+            } else if (action === 'play-channel') {
+                this.playChannel(button.getAttribute('data-channel-id'));
             }
+        },
+        
+        /**
+         * Play a live channel from the home live band
+         */
+        playChannel: function(channelId) {
+            console.log('[HomePage] Playing channel:', channelId);
+            if (NexusApp.showToast) NexusApp.showToast(NexusConfig.getLanguage() === 'ar' ? 'جاري تحضير البث…' : 'Preparing stream…', 0);
+            NexusAPI.getSportsStream(channelId)
+                .then(function(res) {
+                    var source = (res && res.source) ? res.source : res;
+                    var alternatives = (res && res.alternatives) ? res.alternatives : [];
+                    if (source && (source.url || source.embedUrl)) {
+                        if (NexusApp.hideToast) NexusApp.hideToast();
+                        var channelName = (source.title || channelId).toUpperCase();
+                        NexusPlayer.play(source, alternatives, [], { isLive: true, title: channelName, quality: '1080p HD' });
+                    } else {
+                        NexusApp.showToast('البث غير متاح حالياً للقناة المطلوبة');
+                    }
+                })
+                .catch(function(error) {
+                    console.error('[HomePage] Stream error:', error);
+                    NexusApp.showToast('فشل تحميل البث: ' + (error.message || 'خطأ غير متوقع'));
+                });
         },
         
         /**
@@ -324,9 +404,9 @@
          * Play content
          */
         playContent: function(kind, tmdbId, localId) {
+            var self = this;
             console.log('[HomePage] Playing:', kind, tmdbId, localId);
-            var mainContent = document.getElementById('main-content');
-            mainContent.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><div class="loading-text">جاري تحميل مصادر التشغيل...</div></div>';
+            if (NexusApp.showToast) NexusApp.showToast(NexusConfig.getLanguage() === 'ar' ? 'جاري تحضير التشغيل…' : 'Preparing playback…', 0);
             var apiCall;
             if (tmdbId > 0 || localId) {
                 apiCall = NexusAPI.getPreferredPlayback(kind, tmdbId, localId, 1, 1);
@@ -334,12 +414,21 @@
                 apiCall = Promise.reject(new Error('معرّف المحتوى غير متاح'));
             }
             apiCall.then(function(playback) {
-                if (playback && playback.source) NexusPlayer.play(playback.source, playback.alternatives, playback.subtitles);
-                else throw new Error('لا تتوفر مصادر تشغيل لهذا المحتوى');
+                if (!playback || !playback.source) throw new Error('لا تتوفر مصادر تشغيل لهذا المحتوى');
+                var meta = {
+                    tmdbId: tmdbId,
+                    localId: localId,
+                    type: kind || 'movie',
+                    title: playback.title || (self.data && self.data.hero && self.data.hero.title) || 'NEXUSNIGHT',
+                    year: playback.releaseYear || (self.data && self.data.hero && self.data.hero.year),
+                    posterUrl: playback.posterUrl,
+                    backdropUrl: playback.backdropUrl
+                };
+                NexusApp.hideToast();
+                NexusPlayer.play(playback.source, playback.alternatives, playback.subtitles, meta);
             }).catch(function(error) {
                 console.error('[HomePage] Playback error:', error);
-                alert(error.message || 'فشل تحميل مصادر التشغيل');
-                Navigator.goBack();
+                NexusApp.showToast(error.message || 'فشل تحميل مصادر التشغيل');
             });
         },
         
@@ -348,16 +437,11 @@
          */
         onError: function(error) {
             console.error('[HomePage] Error:', error);
-            
-            var html = '<div class="page-container">' +
-                       '<div class="empty-state">' +
-                       '<div class="empty-state-icon">⚠️</div>' +
-                       '<div class="empty-state-text">فشل تحميل المحتوى</div>' +
-                       '<div class="empty-state-subtext">' + NexusConfig.escapeHtml(error.message) + '</div>' +
-                       '</div>' +
-                       '</div>';
-            
-            document.getElementById('main-content').innerHTML = html;
+            NexusApp.showErrorState({
+                title: 'فشل تحميل المحتوى',
+                message: error && error.message,
+                onAction: function() { HomePage.render(); }
+            });
         },
         
         /**

@@ -12,6 +12,14 @@
     window.NexusApp = {
         initialized: false,
         
+        // "No signal" — one authored stroke weight, no emoji
+        ICON_OFFLINE: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+            '<rect x="6" y="12" width="36" height="24" rx="3"/>' +
+            '<line x1="16" y1="42" x2="32" y2="42"/>' +
+            '<line x1="24" y1="36" x2="24" y2="42"/>' +
+            '<line x1="8" y1="9" x2="40" y2="41"/>' +
+            '</svg>',
+        
         /**
          * Initialize application
          */
@@ -42,15 +50,17 @@
             // Register pages
             this.registerPages();
             
-            // Setup sidebar
-            this.setupSidebar();
+            // Bring up the tab-bar shell
+            this.setupNav();
             
-            // Test backend connection (with delay to ensure everything is loaded)
+            // Start immediately — every page renders its own offline state
+            this.start();
+            
+            // Probe the backend in the background; it never blocks the shell
             var self = this;
             setTimeout(function() {
-                console.log('[App] Starting backend test after initialization...');
-                self.testBackend();
-            }, 100);
+                self.probeBackend();
+            }, 400);
             
             this.initialized = true;
         },
@@ -106,79 +116,138 @@
         },
         
         /**
-         * Setup sidebar navigation
+         * Bring up the top tab bar and bind it to the router
          */
-        setupSidebar: function() {
-            var sidebar = document.getElementById('sidebar');
+        setupNav: function() {
+            var navTabs = document.getElementById('nav-tabs');
             var mainContent = document.getElementById('main-content');
             
-            if (!sidebar || !mainContent) {
-                console.error('[App] Sidebar or main content not found');
+            if (!navTabs || !mainContent) {
+                console.warn('[App] Tab bar or main content not found');
                 return;
             }
             
-            // Show sidebar and main content
-            sidebar.classList.remove('hidden');
+            navTabs.classList.remove('hidden');
             mainContent.classList.remove('hidden');
             
-            // Apply language updates now that DOM is visible
+            // Apply language updates now that the DOM is visible
             NexusConfig.applyLanguageToDom();
             
-            // Bind menu items
-            var menuItems = document.querySelectorAll('.menu-item');
-            for (var i = 0; i < menuItems.length; i++) {
-                menuItems[i].onclick = (function() {
-                    var page = this.getAttribute('data-page');
+            var tabs = navTabs.querySelectorAll('.tab');
+            for (var i = 0; i < tabs.length; i++) {
+                tabs[i].onclick = (function(tab) {
                     return function() {
-                        Navigator.navigateTo(page);
+                        Navigator.navigateTo(tab.getAttribute('data-page'));
                     };
-                }).call(menuItems[i]);
+                })(tabs[i]);
             }
             
-            // Register menu items as focusable
-            FocusManager.register(menuItems);
+            FocusManager.register(tabs);
+
+            // Clock display for TV header
+            function updateClock() {
+                var clockEl = document.getElementById('nav-clock');
+                if (!clockEl) return;
+                var now = new Date();
+                var h = now.getHours();
+                var m = now.getMinutes();
+                clockEl.textContent = (h < 10 ? '0' + h : '' + h) + ':' + (m < 10 ? '0' + m : '' + m);
+            }
+            updateClock();
+            setInterval(updateClock, 10000);
             
-            console.log('[App] Sidebar configured');
+            console.log('[App] Tab bar configured with', tabs.length, 'tabs');
         },
         
         /**
-         * Test backend connection (using fetch directly to avoid NexusAPI dependency issues)
+         * Show or hide the live counter chip in the tab bar
          */
-        testBackend: function() {
-            var self = this;
+        setLiveCount: function(count) {
+            var chip = document.getElementById('nav-live-chip');
+            var text = document.getElementById('nav-live-text');
+            if (!chip) return;
+            count = count || 0;
+            if (count > 0) {
+                if (text) text.textContent = count + ' ' + (NexusConfig.getLanguage() === 'ar' ? 'مباشر' : 'LIVE');
+                chip.classList.remove('hidden');
+            } else {
+                chip.classList.add('hidden');
+            }
+        },
+        
+        /**
+         * A designed offline/empty surface. Always leaves focus on something real.
+         */
+        showErrorState: function(options) {
+            options = options || {};
+            var mainContent = document.getElementById('main-content');
+            if (!mainContent) return;
+            var isAr = NexusConfig.getLanguage() === 'ar';
+            var title = options.title || (isAr ? 'تعذّر تحميل المحتوى' : 'Content unavailable');
+            var message = options.message ? NexusConfig.escapeHtml(options.message) : '';
+            var actionLabel = options.actionLabel || (isAr ? 'إعادة المحاولة' : 'Retry');
+            
+            mainContent.innerHTML =
+                '<div class="page-container">' +
+                '<div class="empty-state">' +
+                '<div class="empty-state-icon">' + NexusApp.ICON_OFFLINE + '</div>' +
+                '<div class="empty-state-text">' + NexusConfig.escapeHtml(title) + '</div>' +
+                '<div class="empty-state-subtext">' + message + '</div>' +
+                '<div class="state-actions">' +
+                '<button class="btn btn-primary focusable" id="state-action">' + NexusConfig.escapeHtml(actionLabel) + '</button>' +
+                '</div>' +
+                '</div></div>';
+            
+            var button = document.getElementById('state-action');
+            if (button && typeof options.onAction === 'function') button.onclick = options.onAction;
+            
+            FocusManager.register(mainContent.querySelectorAll('.focusable'));
+        },
+        
+        /**
+         * A quiet status line. Never steals focus and never tears down the page.
+         */
+        showToast: function(message, duration) {
+            var app = document.getElementById('app');
+            if (!app) return;
+            this.hideToast();
+            var toast = document.createElement('div');
+            toast.id = 'app-toast';
+            toast.className = 'toast';
+            toast.setAttribute('role', 'status');
+            toast.textContent = message;
+            app.appendChild(toast);
+            window.requestAnimationFrame(function() { toast.classList.add('toast-in'); });
+            if (duration !== 0) {
+                var self = this;
+                window.setTimeout(function() { self.hideToast(); }, duration || 2600);
+            }
+        },
+        
+        hideToast: function() {
+            var toast = document.getElementById('app-toast');
+            if (toast && toast.parentElement) toast.parentElement.removeChild(toast);
+        },
+        
+        /**
+         * Probe the backend in the background. A missing backend is an expected
+         * state — every page draws its own offline surface — so this never throws
+         * and never blocks the shell.
+         */
+        probeBackend: function() {
             var backendUrl = NexusConfig.getBackendUrl();
+            console.log('[App] Probing backend at', backendUrl);
             
-            console.log('[App] Testing backend connection to:', backendUrl);
-            
-            // Use fetch directly instead of NexusAPI
             fetch(backendUrl + '/api/health')
                 .then(function(response) {
-                    if (response.ok) {
-                        return response.json().then(function(data) {
-                            return !!(data && (data.ok === true || data.status || data.library));
-                        }).catch(function() {
-                            // If JSON parsing fails, check if we got any response
-                            return response.text().then(function(text) {
-                                return text && text.length > 0;
-                            });
-                        });
-                    }
-                    return false;
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    return response.json();
                 })
-                .then(function(success) {
-                    if (success) {
-                        console.log('[App] ✓ Backend connection successful');
-                        self.start();
-                    } else {
-                        console.warn('[App] ✗ Backend connection failed');
-                        self.showConnectionError();
-                    }
+                .then(function() {
+                    console.log('[App] Backend online');
                 })
-                .catch(function(error) {
-                    console.error('[App] ✗ Backend connection error:', error);
-                    // Try to start anyway - maybe it's a CORS issue but backend works
-                    console.log('[App] Trying to start application anyway...');
-                    self.start();
+                .catch(function() {
+                    console.log('[App] Backend unreachable — running offline');
                 });
         },
         
@@ -202,41 +271,6 @@
             
             console.log('[App] Application started successfully');
             console.log('='.repeat(60));
-        },
-        
-        /**
-         * Show connection error
-         */
-        showConnectionError: function() {
-            var loadingScreen = document.getElementById('loading-screen');
-            if (loadingScreen) {
-                loadingScreen.innerHTML = 
-                    '<div class="empty-state">' +
-                    '<div class="empty-state-icon">⚠️</div>' +
-                    '<div class="empty-state-text">فشل الاتصال بالخادم</div>' +
-                    '<div class="empty-state-subtext">' + NexusConfig.escapeHtml(NexusConfig.getBackendUrl()) + '</div>' +
-                    '<div style="margin-top: 32px;">' +
-                    '<button class="btn btn-primary" id="btn-retry">إعادة المحاولة</button>' +
-                    '</div>' +
-                    '</div>';
-                
-                var retryBtn = document.getElementById('btn-retry');
-                if (retryBtn) {
-                    var self = this;
-                    retryBtn.onclick = function() {
-                        loadingScreen.innerHTML = 
-                            '<div class="loading-logo">NEXUSNIGHT</div>' +
-                            '<div class="loading-spinner"></div>' +
-                            '<div class="loading-text">جاري الاتصال...</div>';
-                        self.testBackend();
-                    };
-                    
-                    // Focus retry button
-                    setTimeout(function() {
-                        FocusManager.register([retryBtn]);
-                    }, 100);
-                }
-            }
         }
     };
     

@@ -120,15 +120,17 @@ if ($Install) {
     $sdb = $sdbCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
     if (-not $sdb) { throw "sdb.exe was not found. The WGT was built, but installation was not attempted." }
 
+    if ($DeviceSerial) {
+        Write-Host "Connecting to $DeviceSerial..." -ForegroundColor Gray
+        & $sdb connect $DeviceSerial 2>&1 | Out-Null
+    }
+
     $devicesOutput = & $sdb devices 2>&1
     Write-Host ($devicesOutput | Out-String) -ForegroundColor Gray
     if (-not (($devicesOutput | Out-String).Contains($DeviceSerial))) {
-        $DeviceSerial = Read-Host "Enter the exact TV serial from 'sdb devices' (example: 192.168.1.3:26101)"
+        & $sdb connect $DeviceSerial 2>&1 | Out-Null
+        $devicesOutput = & $sdb devices 2>&1
     }
-    if ([string]::IsNullOrWhiteSpace($DeviceSerial)) {
-        throw "A connected TV serial is required. The signed WGT remains available in dist."
-    }
-    $devicesOutput = & $sdb devices 2>&1
     if (-not (($devicesOutput | Out-String).Contains($DeviceSerial))) {
         throw "Device '$DeviceSerial' is not currently connected in SDB. The signed WGT remains available in dist."
     }

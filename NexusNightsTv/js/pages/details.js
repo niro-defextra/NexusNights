@@ -17,7 +17,7 @@
             this.localId = params.localId || null;
             this.data = null;
             this.isLocal = !!(this.localId && !this.tmdbId);
-            document.getElementById('main-content').innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div></div>';
+            document.getElementById('main-content').innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><div class="loading-text">' + NexusConfig.t('loading') + '</div></div>';
             this.loadDetails();
         },
 
@@ -225,7 +225,7 @@
                 ? NexusAPI.getLocalPlayback(mediaId)
                 : NexusAPI.getPreferredPlayback('series', this.tmdbId, this.localId, season, episode);
             this.saveWatchProgress();
-            this.startPlayback(request);
+            this.startPlayback(request, { season: season, episode: episode });
         },
 
         /**
@@ -260,31 +260,40 @@
             }
         },
 
-        startPlayback: function (request) {
+        startPlayback: function (request, extraMeta) {
             var self = this;
-            var mainContent = document.getElementById('main-content');
-            mainContent.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><div class="loading-text">جاري تحميل مصادر التشغيل والترجمة...</div></div>';
+            extraMeta = extraMeta || {};
+            // Resolve the stream without dismantling the details page: focus
+            // stays on the play control, and a failed lookup only surfaces a
+            // quiet status line instead of a dead screen.
+            NexusApp.showToast(NexusConfig.getLanguage() === 'ar' ? 'جاري تحضير التشغيل…' : 'Preparing playback…', 0);
             request.then(function (playback) {
-                if (playback && playback.source) {
-                    var meta = {
-                        tmdbId: self.tmdbId,
-                        type: self.kind || 'movie',
-                        title: (self.data && (self.data.title || self.data.name)) || playback.title || 'NEXUSNIGHT',
-                        year: self.data && (self.data.releaseYear || (self.data.release_date && self.data.release_date.split('-')[0]))
-                    };
-                    NexusPlayer.play(playback.source, playback.alternatives, playback.subtitles, meta);
-                } else {
-                    throw new Error('لا تتوفر مصادر تشغيل لهذا المحتوى');
-                }
+                if (!playback || !playback.source) throw new Error('لا تتوفر مصادر تشغيل لهذا المحتوى');
+                var meta = {
+                    tmdbId: self.tmdbId,
+                    localId: self.localId,
+                    type: self.kind || 'movie',
+                    title: (self.data && (self.data.title || self.data.name)) || playback.title || 'NEXUSNIGHT',
+                    year: self.data && (self.data.releaseYear || (self.data.release_date && self.data.release_date.split('-')[0])),
+                    season: extraMeta.season || (self.kind === 'series' ? (self.selectedSeason || 1) : undefined),
+                    episode: extraMeta.episode || (self.kind === 'series' ? 1 : undefined),
+                    posterUrl: playback.posterUrl || (self.data && self.data.posterUrl),
+                    backdropUrl: playback.backdropUrl || (self.data && self.data.backdropUrl)
+                };
+                NexusApp.hideToast();
+                NexusPlayer.play(playback.source, playback.alternatives, playback.subtitles, meta);
             }).catch(function (error) {
                 console.error('[DetailsPage] Playback error:', error);
-                alert(error.message || 'فشل تحميل مصادر التشغيل');
-                Navigator.goBack();
+                NexusApp.showToast(error.message || 'فشل تحميل مصادر التشغيل');
             });
         },
 
         showError: function (error) {
-            document.getElementById('main-content').innerHTML = '<div class="page-container"><div class="empty-state"><div class="empty-state-icon">⚠</div><div class="empty-state-text">فشل تحميل التفاصيل</div><div class="empty-state-subtext">' + NexusConfig.escapeHtml(error && error.message) + '</div></div></div>';
+            NexusApp.showErrorState({
+                title: 'فشل تحميل التفاصيل',
+                message: error && error.message,
+                onAction: function () { Navigator.goBack(); }
+            });
         },
         cleanup: function () { this.data = null; this.kind = null; this.tmdbId = 0; this.localId = null; this.isLocal = false; }
     };

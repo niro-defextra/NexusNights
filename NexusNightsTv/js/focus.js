@@ -96,9 +96,9 @@
             }
             var player = this.isPlayerOpen();
             if (!player) {
-                var menu = document.querySelectorAll('.menu-item');
-                for (var m = 0; m < menu.length; m++) {
-                    if (next.indexOf(menu[m]) === -1) next.push(menu[m]);
+                var tabs = document.querySelectorAll('#nav-tabs .tab');
+                for (var m = 0; m < tabs.length; m++) {
+                    if (next.indexOf(tabs[m]) === -1) next.push(tabs[m]);
                 }
             }
             this.focusableElements = next.filter(function (el) {
@@ -107,10 +107,21 @@
                 return rect.width > 0 && rect.height > 0;
             });
             this.log('Registered', this.focusableElements.length, 'focusable elements');
-            if (this.currentFocused && this.focusableElements.indexOf(this.currentFocused) !== -1) return;
-            if (this.currentFocused) this.currentFocused.classList.remove('focused');
+            var current = this.currentFocused;
+            // A live element that is not a tab keeps focus — the page just re-rendered
+            // around it. A tab is only a waypoint: the page's own content takes it next.
+            if (current && this.focusableElements.indexOf(current) !== -1 &&
+                !current.classList.contains('tab')) {
+                return;
+            }
+            if (current && current.classList.contains('focused')) current.classList.remove('focused');
             this.currentFocused = null;
-            if (this.focusableElements.length > 0) this.focus(this.focusableElements[0]);
+            if (!this.focusableElements.length) return;
+            var preferred = null;
+            for (var i = 0; i < this.focusableElements.length; i++) {
+                if (!this.focusableElements[i].classList.contains('tab')) { preferred = this.focusableElements[i]; break; }
+            }
+            this.focus(preferred || this.focusableElements[0]);
         },
 
         isPlayerOpen: function() {
@@ -140,17 +151,9 @@
             // Add focus to new element
             element.classList.add('focused');
             this.currentFocused = element;
-            
-            // Expand or collapse sidebar based on focus location
-            var sidebar = document.getElementById('sidebar');
-            if (sidebar) {
-                if (element.classList.contains('menu-item') || sidebar.contains(element)) {
-                    sidebar.classList.add('expanded');
-                } else {
-                    sidebar.classList.remove('expanded');
-                }
-            }
-            
+
+            this.updateLitState(element);
+
             // Scroll into view
             this.scrollIntoView(element);
             
@@ -160,17 +163,49 @@
             var event = new CustomEvent('nexusfocus', { detail: { element: element } });
             element.dispatchEvent(event);
         },
+
+        /**
+         * Signature — the surface that owns focus lifts one tone, its siblings settle back.
+         * The tab the visitor is reaching for brightens; the row they are reading stays lit.
+         */
+        updateLitState: function(element) {
+            var tabList = document.querySelector('#nav-tabs .nav-tab-list');
+            if (tabList) {
+                if (element.classList.contains('tab')) tabList.classList.add('tab-lit');
+                else tabList.classList.remove('tab-lit');
+            }
+
+            var main = document.getElementById('main-content');
+            if (!main) return;
+            var sections = main.querySelectorAll('.content-section');
+            var lit = null;
+            var node = element;
+            while (node && node !== main) {
+                if (node.classList && node.classList.contains('content-section')) { lit = node; break; }
+                node = node.parentElement;
+            }
+            for (var i = 0; i < sections.length; i++) {
+                if (sections[i] === lit) sections[i].classList.add('row-lit');
+                else sections[i].classList.remove('row-lit');
+            }
+            if (lit) main.classList.add('has-row-focus');
+            else main.classList.remove('has-row-focus');
+        },
         
         /**
-         * Move focus in a direction
+         * Move focus in a direction with 2D spatial navigation
          */
         move: function(direction) {
             if (!this.currentFocused || this.focusableElements.length === 0) {
+                if (this.focusableElements.length > 0) this.focus(this.focusableElements[0]);
                 return;
             }
             
             var current = this.currentFocused;
             var currentRect = current.getBoundingClientRect();
+            var fromCenterX = (currentRect.left + currentRect.right) / 2;
+            var fromCenterY = (currentRect.top + currentRect.bottom) / 2;
+
             var candidates = [];
             
             // Find candidates in the correct direction
@@ -180,14 +215,56 @@
                 var rect = el.getBoundingClientRect();
                 if (!rect.width || !rect.height) continue;
                 
-                if (this.isInDirection(currentRect, rect, direction)) {
-                    var distance = this.calculateDistance(currentRect, rect, direction);
-                    candidates.push({ element: el, distance: distance });
+                var toCenterX = (rect.left + rect.right) / 2;
+                var toCenterY = (rect.top + rect.bottom) / 2;
+                var isCandidate = false;
+                var score = 0;
+
+                if (direction === 'up') {
+                    if (toCenterY < fromCenterY - 4) {
+                        isCandidate = true;
+                        var dy = Math.max(0, currentRect.top - rect.bottom);
+                        var dx = Math.abs(toCenterX - fromCenterX);
+                        var overlapX = Math.max(0, Math.min(currentRect.right, rect.right) - Math.max(currentRect.left, rect.left));
+                        score = dy * 1.5 + dx * 0.8;
+                        if (overlapX > 0) score -= 100 + overlapX * 0.5;
+                    }
+                } else if (direction === 'down') {
+                    if (toCenterY > fromCenterY + 4) {
+                        isCandidate = true;
+                        var dy = Math.max(0, rect.top - currentRect.bottom);
+                        var dx = Math.abs(toCenterX - fromCenterX);
+                        var overlapX = Math.max(0, Math.min(currentRect.right, rect.right) - Math.max(currentRect.left, rect.left));
+                        score = dy * 1.5 + dx * 0.8;
+                        if (overlapX > 0) score -= 100 + overlapX * 0.5;
+                    }
+                } else if (direction === 'left') {
+                    if (toCenterX < fromCenterX - 4) {
+                        isCandidate = true;
+                        var dx = Math.max(0, currentRect.left - rect.right);
+                        var dy = Math.abs(toCenterY - fromCenterY);
+                        var overlapY = Math.max(0, Math.min(currentRect.bottom, rect.bottom) - Math.max(currentRect.top, rect.top));
+                        score = dx * 1.5 + dy * 1.2;
+                        if (overlapY > 0) score -= 80 + overlapY * 0.5;
+                    }
+                } else if (direction === 'right') {
+                    if (toCenterX > fromCenterX + 4) {
+                        isCandidate = true;
+                        var dx = Math.max(0, rect.left - currentRect.right);
+                        var dy = Math.abs(toCenterY - fromCenterY);
+                        var overlapY = Math.max(0, Math.min(currentRect.bottom, rect.bottom) - Math.max(currentRect.top, rect.top));
+                        score = dx * 1.5 + dy * 1.2;
+                        if (overlapY > 0) score -= 80 + overlapY * 0.5;
+                    }
+                }
+
+                if (isCandidate) {
+                    candidates.push({ element: el, score: score });
                 }
             }
             
-            // Sort by distance
-            candidates.sort(function(a, b) { return a.distance - b.distance; });
+            // Sort by lowest score (closest + best alignment)
+            candidates.sort(function(a, b) { return a.score - b.score; });
             
             // Focus nearest candidate
             if (candidates.length > 0) {
@@ -198,81 +275,47 @@
         },
         
         /**
-         * Check if element is in the given direction
-         */
-        isInDirection: function(fromRect, toRect, direction) {
-            var threshold = 50; // Tolerance for alignment
-            
-            switch (direction) {
-                case 'left':
-                    return toRect.right <= fromRect.left + threshold &&
-                           Math.abs(toRect.top - fromRect.top) < fromRect.height + threshold;
-                case 'right':
-                    return toRect.left >= fromRect.right - threshold &&
-                           Math.abs(toRect.top - fromRect.top) < fromRect.height + threshold;
-                case 'up':
-                    return toRect.bottom <= fromRect.top + threshold &&
-                           Math.abs(toRect.left - fromRect.left) < fromRect.width + threshold;
-                case 'down':
-                    return toRect.top >= fromRect.bottom - threshold &&
-                           Math.abs(toRect.left - fromRect.left) < fromRect.width + threshold;
-                default:
-                    return false;
-            }
-        },
-        
-        /**
-         * Calculate distance between elements
-         */
-        calculateDistance: function(fromRect, toRect, direction) {
-            var dx, dy;
-            
-            switch (direction) {
-                case 'left':
-                case 'right':
-                    dx = Math.abs(toRect.left - fromRect.left);
-                    dy = Math.abs(toRect.top - fromRect.top);
-                    break;
-                case 'up':
-                case 'down':
-                    dx = Math.abs(toRect.left - fromRect.left);
-                    dy = Math.abs(toRect.top - fromRect.top);
-                    break;
-                default:
-                    return Infinity;
-            }
-            
-            // Euclidean distance
-            return Math.sqrt(dx * dx + dy * dy);
-        },
-        
-        /**
-         * Scroll element into view
+         * Scroll element into view with support for both horizontal carousels and vertical page scroll
          */
         scrollIntoView: function(element) {
-            var rect = element.getBoundingClientRect();
-            var container = this.findScrollParent(element);
-            
-            if (!container) return;
-            
-            var containerRect = container.getBoundingClientRect();
-            
-            // Calculate scroll positions
-            var scrollTop = container.scrollTop;
-            var scrollLeft = container.scrollLeft;
-            
-            // Vertical scrolling
-            if (rect.top < containerRect.top) {
-                container.scrollTop = scrollTop - (containerRect.top - rect.top) - 50;
-            } else if (rect.bottom > containerRect.bottom) {
-                container.scrollTop = scrollTop + (rect.bottom - containerRect.bottom) + 50;
-            }
-            
-            // Horizontal scrolling
-            if (rect.left < containerRect.left) {
-                container.scrollLeft = scrollLeft - (containerRect.left - rect.left) - 50;
-            } else if (rect.right > containerRect.right) {
-                container.scrollLeft = scrollLeft + (rect.right - containerRect.right) + 50;
+            if (!element) return;
+            var node = element.parentElement;
+            var isRtl = document.documentElement.getAttribute('dir') === 'rtl';
+
+            while (node && node !== document.body && node !== document.documentElement) {
+                var style = window.getComputedStyle(node);
+                var canScrollX = (style.overflowX === 'auto' || style.overflowX === 'scroll' || node.classList.contains('content-row') || node.classList.contains('live-band-track'));
+                var canScrollY = (style.overflowY === 'auto' || style.overflowY === 'scroll' || node.classList.contains('main-content') || node.id === 'main-content');
+
+                if (canScrollX) {
+                    var elRect = element.getBoundingClientRect();
+                    var nodeRect = node.getBoundingClientRect();
+                    if (isRtl) {
+                        if (elRect.right > nodeRect.right - 80) {
+                            node.scrollLeft += (elRect.right - (nodeRect.right - 80));
+                        } else if (elRect.left < nodeRect.left + 80) {
+                            node.scrollLeft -= ((nodeRect.left + 80) - elRect.left);
+                        }
+                    } else {
+                        if (elRect.left < nodeRect.left + 80) {
+                            node.scrollLeft -= ((nodeRect.left + 80) - elRect.left);
+                        } else if (elRect.right > nodeRect.right - 80) {
+                            node.scrollLeft += (elRect.right - (nodeRect.right - 80));
+                        }
+                    }
+                }
+
+                if (canScrollY) {
+                    var elRectY = element.getBoundingClientRect();
+                    var nodeRectY = node.getBoundingClientRect();
+                    if (elRectY.top < nodeRectY.top + 110) {
+                        node.scrollTop -= ((nodeRectY.top + 110) - elRectY.top);
+                    } else if (elRectY.bottom > nodeRectY.bottom - 80) {
+                        node.scrollTop += (elRectY.bottom - (nodeRectY.bottom - 80));
+                    }
+                }
+
+                node = node.parentElement;
             }
         },
         
@@ -283,10 +326,12 @@
             var parent = element.parentElement;
             
             while (parent) {
-                var overflow = window.getComputedStyle(parent).overflow;
-                if (overflow === 'auto' || overflow === 'scroll' || 
+                var style = window.getComputedStyle(parent);
+                if (style.overflowX === 'auto' || style.overflowX === 'scroll' ||
+                    style.overflowY === 'auto' || style.overflowY === 'scroll' ||
                     parent.classList.contains('scroll-container') ||
                     parent.classList.contains('content-row') ||
+                    parent.classList.contains('live-band-track') ||
                     parent.classList.contains('main-content')) {
                     return parent;
                 }
@@ -314,6 +359,12 @@
         back: function() {
             this.log('Back pressed');
             if (this.isPlayerOpen() && window.NexusPlayer) {
+                // If a player modal (subtitles, audio, sources, etc.) is open,
+                // close it first instead of stopping playback.
+                if (NexusPlayer.isAnyModalOpen && NexusPlayer.isAnyModalOpen()) {
+                    NexusPlayer.closeModals();
+                    return;
+                }
                 NexusPlayer.stop();
                 return;
             }

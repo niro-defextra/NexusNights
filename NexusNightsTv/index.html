@@ -2,16 +2,18 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=1920, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: https: http:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: http:; media-src 'self' data: blob: https: http:; connect-src 'self' https: http:; frame-src https: http:; font-src 'self' data: https:; object-src 'none'">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: https: http: file: $WEBAPIS; script-src 'self' 'unsafe-inline' blob: https: file: $WEBAPIS; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: http: blob:; media-src 'self' data: blob: https: http:; connect-src 'self' blob: data: https: http:; frame-src https: http:; font-src 'self' data: https:; object-src 'self' data:;">
     <title>NEXUSNIGHT</title>
+    <script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="shortcut icon" href="favicon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cinzel:wght@600;700;800;900&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/global.css">
     <link rel="stylesheet" href="css/components.css">
     <link rel="stylesheet" href="css/pages.css">
-    <script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
 </head>
 <body>
     <!-- Root Container -->
@@ -19,64 +21,74 @@
         <!-- Loading Screen -->
         <div id="loading-screen" class="loading-screen">
             <div class="loading-logo-crest">
-                <svg width="64" height="64" viewBox="0 0 48 48" fill="none">
-                    <path d="M24 4L44 14V34L24 44L4 34V14L24 4Z" stroke="#b3202f" stroke-width="2.5" fill="rgba(179,32,47,0.15)"/>
-                    <path d="M16 15V33L32 15V33" stroke="#f1f5f9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-                    <circle cx="24" cy="24" r="3" fill="#d4af6a"/>
+                <svg width="72" height="72" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                    <path d="M24 4L44 14V34L24 44L4 34V14L24 4Z" stroke="#B3202F" stroke-width="2.5" fill="rgba(179,32,47,0.14)"/>
+                    <path d="M16 15V33L32 15V33" stroke="#F5F6F8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle cx="24" cy="24" r="3" fill="#D4AF6A"/>
                 </svg>
             </div>
+            <div class="loading-wordmark">NEXUSNIGHT</div>
             <div class="loading-spinner"></div>
             <div class="loading-text">جاري التحميل...</div>
         </div>
 
-        <!-- Navigation Sidebar (Cinema Collapsible Rail) -->
-        <nav id="sidebar" class="sidebar hidden">
-            <div class="sidebar-logo-mark" aria-label="NEXUSNIGHT">
-                <svg width="38" height="38" viewBox="0 0 48 48" fill="none">
-                    <path d="M24 4L44 14V34L24 44L4 34V14L24 4Z" stroke="#b3202f" stroke-width="2.5" fill="rgba(179,32,47,0.16)"/>
-                    <path d="M16 15V33L32 15V33" stroke="#f1f5f9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-                    <circle cx="24" cy="24" r="3" fill="#d4af6a"/>
+        <!-- Top Tab Bar (streaming-platform shell) -->
+        <header id="nav-tabs" class="nav-tabs hidden">
+            <div class="nav-crest" title="NEXUSNIGHT">
+                <svg width="40" height="40" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                    <path d="M24 4L44 14V34L24 44L4 34V14L24 4Z" stroke="#B3202F" stroke-width="2.5" fill="rgba(179,32,47,0.16)"/>
+                    <path d="M16 15V33L32 15V33" stroke="#F5F6F8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle cx="24" cy="24" r="3" fill="#D4AF6A"/>
                 </svg>
             </div>
-            <ul class="sidebar-menu" role="menu">
-                <li class="menu-item focusable" data-page="home" tabindex="0">
-                    <span class="menu-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+
+            <ul class="nav-tab-list" role="tablist">
+                <li class="tab focusable" data-page="home" role="tab" tabindex="0">
+                    <span class="tab-icon" aria-hidden="true">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                     </span>
-                    <span class="menu-label">الرئيسية</span>
+                    <span class="tab-label">الرئيسية</span>
                 </li>
-                <li class="menu-item focusable" data-page="movies" tabindex="0">
-                    <span class="menu-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+                <li class="tab focusable" data-page="movies" role="tab" tabindex="0">
+                    <span class="tab-icon" aria-hidden="true">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="7" y1="4" x2="7" y2="20"/><line x1="17" y1="4" x2="17" y2="20"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
                     </span>
-                    <span class="menu-label">أفلام</span>
+                    <span class="tab-label">أفلام</span>
                 </li>
-                <li class="menu-item focusable" data-page="series" tabindex="0">
-                    <span class="menu-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
+                <li class="tab focusable" data-page="series" role="tab" tabindex="0">
+                    <span class="tab-icon" aria-hidden="true">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>
                     </span>
-                    <span class="menu-label">مسلسلات</span>
+                    <span class="tab-label">مسلسلات</span>
                 </li>
-                <li class="menu-item focusable" data-page="sports" tabindex="0">
-                    <span class="menu-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/></svg>
+                <li class="tab focusable" data-page="sports" role="tab" tabindex="0">
+                    <span class="tab-icon" aria-hidden="true">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3c3 3.5 3 14.5 0 18"/><path d="M12 3c-3 3.5-3 14.5 0 18"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
                     </span>
-                    <span class="menu-label">رياضة</span>
+                    <span class="tab-label">رياضة</span>
                 </li>
-                <li class="menu-item focusable" data-page="search" tabindex="0">
-                    <span class="menu-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <li class="tab focusable" data-page="search" role="tab" tabindex="0">
+                    <span class="tab-icon" aria-hidden="true">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.5" y2="16.5"/></svg>
                     </span>
-                    <span class="menu-label">بحث</span>
+                    <span class="tab-label">بحث</span>
                 </li>
-                <li class="menu-item focusable" data-page="settings" tabindex="0">
-                    <span class="menu-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <li class="tab focusable" data-page="settings" role="tab" tabindex="0">
+                    <span class="tab-icon" aria-hidden="true">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                     </span>
-                    <span class="menu-label">إعدادات</span>
+                    <span class="tab-label">إعدادات</span>
                 </li>
             </ul>
-        </nav>
+
+            <div class="nav-trailing">
+                <div class="live-chip hidden" id="nav-live-chip" aria-live="polite">
+                    <span class="live-dot" aria-hidden="true"></span>
+                    <span class="live-chip-text" id="nav-live-text"></span>
+                </div>
+                <div class="nav-clock" id="nav-clock" aria-label="Current time"></div>
+            </div>
+        </header>
 
         <!-- Main Content Area -->
         <main id="main-content" class="main-content hidden">
@@ -101,27 +113,3 @@
     <script src="js/app.js"></script>
 </body>
 </html>
-
-
-    <!-- Debug script -->
-    <script>
-        // Debug logging
-        console.log('=== NEXUSNIGHT TV DEBUG ===');
-        console.log('Document readyState:', document.readyState);
-        console.log('Script loading order:');
-        
-        // Track script loading
-        var scripts = document.querySelectorAll('script[src]');
-        scripts.forEach(function(script, i) {
-            console.log(i + 1 + '. ' + script.src.split('/').pop());
-        });
-        
-        // Check for NexusConfig after a short delay
-        setTimeout(function() {
-            console.log('=== Post-load check ===');
-            console.log('NexusConfig:', typeof NexusConfig !== 'undefined' ? '✓ Loaded' : '✗ Missing');
-            console.log('NexusAPI:', typeof NexusAPI !== 'undefined' ? '✓ Loaded' : '✗ Missing');
-            console.log('FocusManager:', typeof FocusManager !== 'undefined' ? '✓ Loaded' : '✗ Missing');
-            console.log('Navigator:', typeof Navigator !== 'undefined' ? '✓ Loaded' : '✗ Missing');
-        }, 500);
-    </script>
