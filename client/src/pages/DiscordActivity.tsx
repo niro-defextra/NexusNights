@@ -2,12 +2,13 @@ import { useEffect, useState, useMemo, useRef } from 'react';
 import { useRoom } from '../room/RoomContext';
 import { useAuth } from '../auth/AuthContext';
 import { useI18n } from '../i18n';
-import { api } from '../api';
+import { api, u } from '../api';
 import type { 
   GlobalTitleCard, 
   GlobalTitleDetail, 
   GlobalSeason, 
   PlaybackConfigPublic, 
+  AniSkipTimingsPublic,
   EpisodeDetail 
 } from '../api-types';
 import { 
@@ -51,6 +52,7 @@ export function DiscordActivity() {
   const activeMediaId = room.state?.mediaId ?? null;
   const [mediaDetail, setMediaDetail] = useState<EpisodeDetail | null>(null);
   const [streamingConfig, setStreamingConfig] = useState<PlaybackConfigPublic | null>(null);
+  const [skipTimings, setSkipTimings] = useState<AniSkipTimingsPublic | null>(null);
   const [playbackLoading, setPlaybackLoading] = useState(false);
   const playerHandle = useRef<PlayerHandle>(null);
 
@@ -62,6 +64,8 @@ export function DiscordActivity() {
   useEffect(() => {
     if (activeMediaId) {
       setActiveTab('watch');
+    } else {
+      setActiveTab('browse');
     }
   }, [activeMediaId]);
 
@@ -172,6 +176,7 @@ export function DiscordActivity() {
     if (!activeMediaId) {
       setMediaDetail(null);
       setStreamingConfig(null);
+      setSkipTimings(null);
       return;
     }
 
@@ -195,6 +200,7 @@ export function DiscordActivity() {
           const pb = await api.playbackMovie(tmdbId, lang);
           if (cancel) return;
           setStreamingConfig(pb.playback);
+          if (pb.skipTimings) setSkipTimings(pb.skipTimings);
           titleName = pb.title || `Movie #${tmdbId}`;
         } else if (tvMatch) {
           tmdbId = parseInt(tvMatch[1], 10);
@@ -204,6 +210,7 @@ export function DiscordActivity() {
           const pb = await api.playbackTV(tmdbId, season, episode, lang);
           if (cancel) return;
           setStreamingConfig(pb.playback);
+          if (pb.skipTimings) setSkipTimings(pb.skipTimings);
           titleName = `${pb.title} - S${season}E${episode}`;
         } else {
           // Local media ID
@@ -272,7 +279,22 @@ export function DiscordActivity() {
 
   const playMediaInVoice = async (mediaId: string) => {
     if (room.active) {
-      await room.send({ type: 'select', mediaId, position: 0 });
+      if (!room.canControl && !room.isHost) {
+        room.toast(t('onlyHost'));
+        return;
+      }
+      setPlaybackLoading(true);
+      setMediaDetail(null);
+      setStreamingConfig(null);
+      setSkipTimings(null);
+
+      const res = await room.send({ type: 'select', mediaId, position: 0 });
+      if (!res.ok) {
+        console.error('[DiscordActivity] Failed to select media in room:', res.error);
+        room.toast(res.error === 'forbidden' ? t('onlyHost') : t('playbackErrorHint'));
+        setPlaybackLoading(false);
+        return;
+      }
     } else {
       window.location.hash = `#/discord?room=dc-voice`;
       setTimeout(() => {
@@ -488,14 +510,26 @@ export function DiscordActivity() {
               ) : mediaDetail && streamingConfig ? (
                 <div className="relative flex-1 min-h-[220px] sm:min-h-[360px] bg-black flex flex-col justify-center">
                   <Player
+                    key={activeMediaId || mediaDetail.id}
                     ref={playerHandle}
                     media={mediaDetail}
                     streamingConfig={streamingConfig}
+                    skipTimings={skipTimings}
                     title={mediaDetail.titleName || mediaDetail.title}
                     autoPlay
-                    theatreMode
+                    controlled={room.active}
+                    canControl={room.canControl}
+                    onDisabledControlClick={() => room.toast(t('onlyHost'))}
+                    onUserPlay={(t) => room.canControl && void room.send({ type: 'play', position: t })}
+                    onUserPause={(t) => room.canControl && void room.send({ type: 'pause', position: t })}
+                    onUserSeek={(t) => room.canControl && void room.send({ type: 'seek', position: t })}
                     hasNext={false}
-                    onBack={() => setActiveTab('browse')}
+                    onBack={() => {
+                      if (room.isHost || room.canControl) {
+                        void room.send({ type: 'clear' });
+                      }
+                      setActiveTab('browse');
+                    }}
                     onNext={() => {}}
                   />
                 </div>
@@ -526,6 +560,21 @@ export function DiscordActivity() {
                       <span>{t('nativeStreamActive')} (1080p Ad-Free)</span>
                     </p>
                   </div>
+
+                  {/* Stop playback button for host/controller */}
+                  {(room.isHost || room.canControl) && (
+                    <button
+                      onClick={() => {
+                        void room.send({ type: 'clear' });
+                        setActiveTab('browse');
+                      }}
+                      className="flex items-center gap-1.5 rounded-xl border border-blood/40 bg-blood/10 px-3 py-1.5 text-xs font-semibold text-blood-hot hover:bg-blood/20 transition active:scale-95"
+                      title={lang === 'ar' ? 'إنهاء العرض الحالي وخروج الجميع إلى القائمة' : 'Stop current playback and return everyone to browse'}
+                    >
+                      <X className="size-3.5" />
+                      <span>{lang === 'ar' ? 'إنهاء العرض للجميع' : 'Stop Playback'}</span>
+                    </button>
+                  )}
 
                   {/* Reaction Quick Bar */}
                   <div className="flex items-center gap-1 bg-ink/80 p-1 rounded-xl border border-white/10 shadow-inner">
@@ -684,7 +733,7 @@ export function DiscordActivity() {
                     <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-ash mb-2 border border-white/5">
                       {title.posterUrl ? (
                         <img
-                          src={title.posterUrl}
+                          src={u(title.posterUrl)}
                           alt={title.title}
                           className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
                           loading="lazy"

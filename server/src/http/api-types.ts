@@ -11,6 +11,8 @@ export interface TitleSummary {
   rating: number | null;
   posterUrl: string | null;
   backdropUrl: string | null;
+  logoUrl?: string | null;
+  logoRatio?: number | null;
   seasonCount: number;
   episodeCount: number;
   addedAt: number;
@@ -140,6 +142,17 @@ export interface PlaybackConfigPublic {
   diagnosticsCount: number;
 }
 
+export interface AniSkipTimingPublic {
+  startTime: number;
+  endTime: number;
+}
+
+export interface AniSkipTimingsPublic {
+  found: boolean;
+  intro?: AniSkipTimingPublic;
+  outro?: AniSkipTimingPublic;
+}
+
 export interface PlaybackResponse {
   playback: PlaybackConfigPublic;
   title: string;
@@ -147,6 +160,7 @@ export interface PlaybackResponse {
   posterUrl: string | null;
   backdropUrl: string | null;
   releaseYear: number | null;
+  skipTimings?: AniSkipTimingsPublic | null;
 }
 
 // ─── Global Discovery Types ────────────────────────────────────────────────
@@ -160,6 +174,8 @@ export interface GlobalTitleCard {
   overview: string;
   posterUrl: string | null;
   backdropUrl: string | null;
+  logoUrl?: string | null;
+  logoRatio?: number | null;
   releaseDate: string | null;
   rating: number | null;
   year: number | null;
@@ -187,6 +203,8 @@ export interface GlobalTitleDetail {
   tagline: string | null;
   posterUrl: string | null;
   backdropUrl: string | null;
+  logoUrl?: string | null;
+  logoRatio?: number | null;
   releaseDate: string | null;
   rating: number | null;
   year: number | null;

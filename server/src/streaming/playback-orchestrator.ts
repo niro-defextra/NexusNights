@@ -217,7 +217,7 @@ export class PlaybackOrchestrator {
     return {
       source: normalizedBest,
       alternatives: normalizedAlts,
-      subtitles: [],
+      subtitles: normalizedBest?.subtitles || [],
       canAutoSwitch: alternatives.length > 0,
       diagnostics,
     };
@@ -230,6 +230,11 @@ export class PlaybackOrchestrator {
     const scored = sources.map((source) => {
       const pId = source.providerId.toLowerCase();
       let score = source.priority;
+
+      // Direct stream boost: local player (HLS / MP4) provides synchronized playback in Discord
+      if (!source.isEmbed || source.type === 'hls' || source.type === 'mp4') {
+        score += 80;
+      }
 
       // Quality scoring
       if (source.quality.includes('1080')) score += 10;

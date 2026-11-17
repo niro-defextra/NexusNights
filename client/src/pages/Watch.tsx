@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError } from '../api';
-import type { PlaybackConfigPublic } from '../api-types';
+import type { PlaybackConfigPublic, AniSkipTimingsPublic } from '../api-types';
 import { ErrorState } from '../components/States';
 import { Skel } from '../components/Skeleton';
 import { Spinner } from '../components/Icons';
@@ -17,6 +17,7 @@ import { WaitingRoom } from '../room/WaitingRoom';
 import { useRoomSync } from '../room/useRoomSync';
 import { go } from '../router';
 import { prewarmNextEpisode, cancelPrewarm, shouldStartPrewarm } from '../util/prewarm';
+import { registerBackHandler } from '../native/back-button';
 
 export function Watch({ id }: { id: string }) {
   const { lang, t } = useI18n();
@@ -27,6 +28,7 @@ export function Watch({ id }: { id: string }) {
   const [needsGesture, setNeedsGesture] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
   const [streamingConfig, setStreamingConfig] = useState<PlaybackConfigPublic | null>(null);
+  const [skipTimings, setSkipTimings] = useState<AniSkipTimingsPublic | null>(null);
   const [streamingLoading, setStreamingLoading] = useState(false);
   const [streamingError, setStreamingError] = useState<string | null>(null);
   const [serverStreamHlsUrl, setServerStreamHlsUrl] = useState<string | null>(null);
@@ -35,6 +37,17 @@ export function Watch({ id }: { id: string }) {
     document.body.classList.add('is-watching');
     return () => document.body.classList.remove('is-watching');
   }, []);
+
+  useEffect(() => {
+    return registerBackHandler(() => {
+      if (panel) {
+        setPanel(null);
+        return true;
+      }
+      go.home();
+      return true;
+    });
+  }, [panel]);
 
   const media = m.data;
 
@@ -51,6 +64,7 @@ export function Watch({ id }: { id: string }) {
     if (!media || !media.tmdbId || media.playback) {
       console.log('[Watch] Skipping streaming fetch');
       setStreamingConfig(null);
+      setSkipTimings(null);
       setStreamingError(null);
       return;
     }
@@ -78,6 +92,9 @@ export function Watch({ id }: { id: string }) {
 
         if (!ac.signal.aborted) {
           setStreamingConfig(response.playback);
+          if (response.skipTimings) {
+            setSkipTimings(response.skipTimings);
+          }
           setStreamingLoading(false);
         }
       } catch (err) {
@@ -279,6 +296,7 @@ export function Watch({ id }: { id: string }) {
       streamingConfig={streamingConfig}
       streamingLoading={streamingLoading}
       streamingError={streamingError}
+      skipTimings={skipTimings}
       title={isSeries ? media.titleName : media.title}
       subtitle={sub}
       startAt={startAt}

@@ -1,10 +1,10 @@
 ﻿/**
- * Native Stream Resolver
- * Resolves direct HLS (.m3u8) streams from providers using automated stealth browser
- * and caches results in memory for high-performance instant access.
+ * Ultra-Fast Stealth Stream Resolver
+ * Resolves direct HLS (.m3u8) streams from multiple providers using stealth Chromium,
+ * fast concurrent racing, aggressive ad/tracker blocking, and in-memory caching.
  */
 
-import { chromium, type Browser, type BrowserContext } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import fs from 'fs';
 
 export interface ResolvedStream {
@@ -20,12 +20,37 @@ export interface ResolvedStream {
   provider: string;
 }
 
-class StreamResolver {
+// Comprehensive ad, tracker, and bloatware host filters to make sniffing lightning-fast (<1s)
+const BLOCKED_DOMAINS = [
+  'google-analytics.com',
+  'googletagmanager.com',
+  'doubleclick.net',
+  'googlesyndication.com',
+  'adservice.google',
+  'cloudflareinsights.com',
+  'adsco.re',
+  'mc.yandex',
+  'yandex.ru',
+  'bvtpk.com',
+  'rtmark.net',
+  'acscdn.com',
+  'usrpubtrk.com',
+  'adexchangeclear.com',
+  'imasdk.googleapis.com',
+  'jwpltx.com',
+  'popcash.net',
+  'popads.net',
+  'adsterra.com',
+  'histats.com',
+  'connatix.com',
+];
+
+export class StreamResolver {
   private cache = new Map<string, ResolvedStream>();
   private pending = new Map<string, Promise<ResolvedStream>>();
   private activeBrowsers = 0;
   private readonly MAX_CONCURRENT_BROWSERS = 3;
-  private readonly CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+  private readonly CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
   private getBrowserPath(): string | undefined {
     const paths = [
@@ -40,6 +65,20 @@ class StreamResolver {
       return `series-${req.tmdbId}-s${req.season ?? 1}e${req.episode ?? 1}`;
     }
     return `movie-${req.tmdbId}`;
+  }
+
+  /**
+   * Register a stream resolved directly (e.g. from HiAnime or Dizibal)
+   */
+  registerDirectStream(stream: ResolvedStream): void {
+    const key = this.getCacheKey({
+      tmdbId: stream.tmdbId,
+      kind: stream.kind,
+      season: stream.season,
+      episode: stream.episode,
+    });
+    this.cache.set(key, stream);
+    this.cache.set(`id:${stream.id}`, stream);
   }
 
   /**
@@ -84,6 +123,7 @@ class StreamResolver {
     try {
       const result = await promise;
       this.cache.set(key, result);
+      this.cache.set(`id:${result.id}`, result);
       return result;
     } finally {
       this.pending.delete(key);
@@ -94,6 +134,8 @@ class StreamResolver {
    * Retrieves a stream by its unique stream session ID.
    */
   getById(streamId: string): ResolvedStream | undefined {
+    const direct = this.cache.get(`id:${streamId}`);
+    if (direct) return direct;
     for (const item of this.cache.values()) {
       if (item.id === streamId) return item;
     }
@@ -102,13 +144,12 @@ class StreamResolver {
 
   /**
    * Force re-resolve a stream by its cached stream ID (used by proxy on expiry).
-   * Returns the new stream, or undefined if not found in cache.
    */
   async reResolveById(streamId: string): Promise<ResolvedStream | undefined> {
     for (const [key, item] of this.cache.entries()) {
       if (item.id === streamId) {
-        // Evict expired entry and re-resolve
         this.cache.delete(key);
+        this.cache.delete(`id:${streamId}`);
         return this.resolve({
           tmdbId: item.tmdbId,
           kind: item.kind,
@@ -120,16 +161,10 @@ class StreamResolver {
     return undefined;
   }
 
-  /**
-   * Returns how many browser sessions are currently active.
-   */
   getActiveBrowserCount(): number {
     return this.activeBrowsers;
   }
 
-  /**
-   * Checks if a stream is already resolved and cached in memory.
-   */
   getCached(req: { tmdbId: number; kind: 'movie' | 'series'; season?: number; episode?: number }): ResolvedStream | undefined {
     const key = this.getCacheKey(req);
     const cached = this.cache.get(key);
@@ -144,28 +179,53 @@ class StreamResolver {
     cacheKey: string
   ): Promise<ResolvedStream> {
     const startTime = Date.now();
-    // Configurable timeouts via environment variables or default to robust values for slower VPS/Docker
-    const timeoutMs = parseInt(process.env.STREAM_RESOLVER_TIMEOUT || '40000', 10);
-    const maxPerProviderMs = parseInt(process.env.PROVIDER_TIMEOUT || '18000', 10);
+    const timeoutMs = parseInt(process.env.STREAM_RESOLVER_TIMEOUT || '25000', 10);
     const browserPath = this.getBrowserPath();
 
-    // Construct embed target URLs — VixSrc provides direct HLS (.m3u8), VidSrc as fallback
-    const providers: Array<{ name: string; url: string; referer: string }> = [];
+    const s = req.season ?? 1;
+    const e = req.episode ?? 1;
+    const isSeries = req.kind === 'series';
 
-    if (req.kind === 'series') {
-      const s = req.season ?? 1;
-      const e = req.episode ?? 1;
-      providers.push({ name: 'VixSrc', url: `https://vixsrc.to/tv/${req.tmdbId}/${s}/${e}`, referer: 'https://vixsrc.to/' });
-      providers.push({ name: 'VidSrc', url: `https://vidsrc.to/embed/tv/${req.tmdbId}/${s}/${e}`, referer: 'https://vidsrc.to/' });
-    } else {
-      providers.push({ name: 'VixSrc', url: `https://vixsrc.to/movie/${req.tmdbId}`, referer: 'https://vixsrc.to/' });
-      providers.push({ name: 'VidSrc', url: `https://vidsrc.to/embed/movie/${req.tmdbId}`, referer: 'https://vidsrc.to/' });
-    }
+    // Comprehensive target providers list with clean embed parameters
+    const providerTargets: Array<{ name: string; url: string; referer: string }> = [
+      {
+        name: 'Vidrift',
+        url: isSeries
+          ? `https://embed.vidrift.net/embed/tv/${req.tmdbId}/${s}/${e}?title=true&hide=next,episodes,cast`
+          : `https://embed.vidrift.net/embed/movie/${req.tmdbId}?title=true&hide=next,episodes,cast`,
+        referer: 'https://embed.vidrift.net/',
+      },
+      {
+        name: 'VixSrc',
+        url: isSeries
+          ? `https://vixsrc.to/tv/${req.tmdbId}/${s}/${e}`
+          : `https://vixsrc.to/movie/${req.tmdbId}`,
+        referer: 'https://vixsrc.to/',
+      },
+      {
+        name: 'Vidfast',
+        url: isSeries
+          ? `https://vidfast.vc/tv/${req.tmdbId}/${s}/${e}?pip=hide`
+          : `https://vidfast.vc/movie/${req.tmdbId}?pip=hide`,
+        referer: 'https://vidfast.vc/',
+      },
+      {
+        name: 'Aether',
+        url: isSeries
+          ? `https://aether.ist/media/tmdb-tv-${req.tmdbId}/${s}/${e}`
+          : `https://aether.ist/media/tmdb-movie-${req.tmdbId}`,
+        referer: 'https://aether.ist/',
+      },
+      {
+        name: 'Vidlove',
+        url: isSeries
+          ? `https://player.vidlove.cc/embed/tv/${req.tmdbId}/${s}/${e}`
+          : `https://player.vidlove.cc/embed/movie/${req.tmdbId}`,
+        referer: 'https://player.vidlove.cc/',
+      },
+    ];
 
-    console.log(`[StreamResolver] Starting stealth sniff — will try ${providers.length} providers`);
-    console.log(`[StreamResolver] Using browser: ${browserPath || 'Bundled Chromium'}`);
-    console.log(`[StreamResolver] Active browsers: ${this.activeBrowsers}/${this.MAX_CONCURRENT_BROWSERS}`);
-
+    console.log(`[StreamResolver] Starting fast multi-target sniff for ${cacheKey} (${providerTargets.length} targets)`);
     this.activeBrowsers++;
     let browser: Browser | null = null;
     let context: BrowserContext | null = null;
@@ -208,120 +268,123 @@ class StreamResolver {
 
       let resolvedResult: { url: string; headers: Record<string, string>; provider: string } | null = null;
 
-      // Try each provider in turn — stop at first success
-      for (const provider of providers) {
+      // Group targets into pairs of 2 for fast concurrent racing
+      for (let i = 0; i < providerTargets.length; i += 2) {
+        if (resolvedResult) break;
         const remainingTime = timeoutMs - (Date.now() - startTime);
-        if (remainingTime < 3000) break; // Not enough time left
+        if (remainingTime < 2500) break;
 
-        const page = await context.newPage();
+        const batch = providerTargets.slice(i, i + 2);
+        console.log(`[StreamResolver] Racing batch: ${batch.map((b) => b.name).join(' vs ')}`);
 
-        // Save RAM on low-memory servers (1GB RAM): abort images and fonts
-        await page.route('**/*', (route) => {
-          const type = route.request().resourceType();
-          if (type === 'image' || type === 'font') {
-            return route.abort();
-          }
-          return route.continue();
-        }).catch(() => {});
-
-        let targetUrl = provider.url;
-        let navReferer = provider.referer;
-
-        // Pre-check for VixSrc: fetch direct embed URL using the browser itself to bypass Cloudflare/TLS blocks
-        if (provider.name === 'VixSrc') {
+        const racePromises = batch.map(async (target) => {
+          if (!context) return null;
+          let page: Page | null = null;
           try {
-            const apiPath = req.kind === 'series'
-              ? `tv/${req.tmdbId}/${req.season ?? 1}/${req.episode ?? 1}`
-              : `movie/${req.tmdbId}`;
-            const apiUrl = `https://vixsrc.to/api/${apiPath}`;
-            
-            console.log(`[StreamResolver] Checking VixSrc API: ${apiUrl}`);
-            const apiRes = await page.goto(apiUrl, { waitUntil: 'domcontentloaded', timeout: 5000 });
-            if (apiRes && apiRes.status() === 404) {
-              console.log(`[StreamResolver] ℹ️ VixSrc does not have this title (404), skipping...`);
+            page = await context.newPage();
+
+            // Aggressive resource & ad blocking for ultra-fast load
+            await page.route('**/*', (route) => {
+              const reqObj = route.request();
+              const type = reqObj.resourceType();
+              const url = reqObj.url();
+
+              // Abort heavy non-video assets
+              if (type === 'image' || type === 'font') {
+                return route.abort();
+              }
+
+              // Abort ads and analytics
+              if (BLOCKED_DOMAINS.some((domain) => url.includes(domain))) {
+                return route.abort();
+              }
+
+              return route.continue();
+            }).catch(() => {});
+
+            // Auto-close any intrusive popups
+            page.on('popup', (popup) => { void popup.close().catch(() => {}); });
+
+            let capturedUrl: string | undefined;
+            let capturedHeaders: Record<string, string> | undefined;
+
+            const streamPromise = new Promise<{ url: string; headers: Record<string, string> }>((resolve) => {
+              if (!page) return;
+
+              page.on('request', (request) => {
+                const u = request.url();
+                const resType = request.resourceType();
+                const isThumb = u.includes('.vtt') || u.includes('.jpg') || u.includes('.png');
+                const isAdPing = u.includes('ping') || u.includes('doubleclick') || u.includes('analytics');
+
+                const isM3u8 = (u.includes('.m3u8') || u.includes('/playlist/')) && !isThumb && !isAdPing;
+                const isMedia = resType === 'media' && (u.includes('.mp4') || u.includes('.m3u8')) && !isThumb;
+
+                if ((isM3u8 || isMedia) && !capturedUrl) {
+                  capturedUrl = u;
+                  capturedHeaders = request.headers();
+                  resolve({ url: u, headers: capturedHeaders });
+                }
+              });
+
+              page.on('response', (res) => {
+                const u = res.url();
+                const cType = (res.headers()['content-type'] || '').toLowerCase();
+                const isMpeg = cType.includes('mpegurl') || cType.includes('application/x-mpegurl');
+
+                if (isMpeg && !capturedUrl) {
+                  capturedUrl = u;
+                  capturedHeaders = res.request().headers();
+                  resolve({ url: u, headers: capturedHeaders });
+                }
+              });
+            });
+
+            // Fast navigation with timeout
+            const pageTimeout = Math.min(8000, remainingTime - 500);
+            await page.goto(target.url, {
+              waitUntil: 'domcontentloaded',
+              timeout: pageTimeout,
+              referer: target.referer,
+            });
+
+            // Synthetic play trigger after 1.2s if stream not yet emitted
+            setTimeout(async () => {
+              if (page && !page.isClosed() && !capturedUrl) {
+                try {
+                  await page.evaluate(`(() => {
+                    const btn = document.querySelector('button[aria-label*="Play"], .play-button, .vjs-big-play-button, video, div[class*="play"]');
+                    if (btn && typeof btn.click === 'function') btn.click();
+                  })()`).catch(() => {});
+                } catch {}
+              }
+            }, 1200);
+
+            // Wait for stream capture or batch timeout
+            const res = await Promise.race([
+              streamPromise,
+              new Promise<null>((r) => setTimeout(() => r(null), pageTimeout)),
+            ]);
+
+            if (res) {
+              return { ...res, provider: target.name };
+            }
+            return null;
+          } catch {
+            return null;
+          } finally {
+            if (page && !page.isClosed()) {
               await page.close().catch(() => {});
-              continue;
             }
-            if (apiRes && apiRes.ok()) {
-              const bodyText = await page.textContent('body');
-              const apiData = JSON.parse(bodyText || '{}');
-              if (apiData?.src) {
-                targetUrl = `https://vixsrc.to${apiData.src}`;
-                navReferer = provider.url;
-                console.log(`[StreamResolver] ⚡ VixSrc direct embed target: ${targetUrl}`);
-              }
-            }
-          } catch (err: any) {
-            console.log(`[StreamResolver] ⚠️ VixSrc API check warning: ${err.message}`);
           }
-        }
+        });
 
-        await page.setExtraHTTPHeaders({ 'Referer': navReferer }).catch(() => {});
-
-        let capturedUrl: string | undefined;
-        let capturedHeaders: Record<string, string> | undefined;
-
-        try {
-          console.log(`[StreamResolver] Trying provider ${provider.name}: ${targetUrl}`);
-
-          // Close popups immediately
-          page.on('popup', (popup) => { void popup.close().catch(() => {}); });
-
-          // Stream detection promise
-          const streamPromise = new Promise<{ url: string; headers: Record<string, string> }>((resolve) => {
-            page.on('request', (request) => {
-              const url = request.url();
-              const resourceType = request.resourceType();
-              const isThumb = url.includes('.vtt') || url.includes('.jpg') || url.includes('.png');
-              const isPing = url.includes('ping.gif') || url.includes('doubleclick') || url.includes('analytics');
-              
-              const isM3u8Playlist = url.includes('/playlist/') && !isPing && !isThumb;
-              const isDirectM3u8 = (url.includes('.m3u8') || url.includes('master.m3u8')) && !isThumb && !isPing;
-              const isDirectMedia = resourceType === 'media' && (url.includes('.mp4') || url.includes('.m3u8')) && !isThumb;
-
-              if ((isM3u8Playlist || isDirectM3u8 || isDirectMedia) && !capturedUrl) {
-                capturedUrl = url;
-                capturedHeaders = request.headers();
-                resolve({ url, headers: capturedHeaders });
-              }
-            });
-
-            page.on('response', (res) => {
-              const url = res.url();
-              const isPing = url.includes('ping.gif') || url.includes('analytics');
-              const contentType = (res.headers()['content-type'] || '').toLowerCase();
-              const isMpegUrl = contentType.includes('application/vnd.apple.mpegurl') || contentType.includes('application/x-mpegurl');
-
-              if (isMpegUrl && !isPing && !capturedUrl) {
-                capturedUrl = url;
-                capturedHeaders = res.request().headers();
-                resolve({ url, headers: capturedHeaders });
-              }
-            });
-          });
-
-          // Navigate to target embed URL
-          const navTimeout = Math.min(remainingTime - 1000, maxPerProviderMs);
-          await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: navTimeout, referer: navReferer });
-
-          // Wait for stream to be captured (with per-provider timeout)
-          const perProviderTimeout = Math.min(remainingTime - 1000, maxPerProviderMs);
-          const result = await Promise.race([
-            streamPromise,
-            new Promise<null>((r) => setTimeout(() => r(null), perProviderTimeout)),
-          ]);
-
-          if (result) {
-            console.log(`[StreamResolver] ✅ ${provider.name} resolved successfully in ${Date.now() - startTime}ms`);
-            resolvedResult = { ...result, provider: provider.name };
-            break; // Success — stop trying further providers
-          } else {
-            console.log(`[StreamResolver] ❌ ${provider.name} timed out, trying next provider...`);
-          }
-        } catch (err: any) {
-          console.log(`[StreamResolver] ❌ ${provider.name} failed: ${err.message}`);
-        } finally {
-          await page.close().catch(() => {});
+        const batchResults = await Promise.all(racePromises);
+        const winner = batchResults.find((r): r is { url: string; headers: Record<string, string>; provider: string } => r !== null);
+        if (winner) {
+          console.log(`[StreamResolver] ✅ Winner captured: ${winner.provider} in ${Date.now() - startTime}ms`);
+          resolvedResult = winner;
+          break;
         }
       }
 
@@ -347,12 +410,8 @@ class StreamResolver {
       return resolved;
     } finally {
       this.activeBrowsers--;
-      if (context) {
-        await context.close().catch(() => {});
-      }
-      if (browser) {
-        await browser.close().catch(() => {});
-      }
+      if (context) await context.close().catch(() => {});
+      if (browser) await browser.close().catch(() => {});
     }
   }
 }

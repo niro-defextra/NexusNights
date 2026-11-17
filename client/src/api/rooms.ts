@@ -1,4 +1,4 @@
-import { api } from '../api';
+import { api, BASE } from '../api';
 import { getToken } from '../auth/AuthContext';
 
 export interface RoomInfo {
@@ -36,7 +36,7 @@ export const roomApi = {
     const token = getToken();
     if (!token) throw new Error('Not authenticated');
 
-    const response = await fetch('/api/rooms/create', {
+    const response = await fetch(`${BASE}/api/rooms/create`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -57,7 +57,7 @@ export const roomApi = {
    * Get room details by ID
    */
   async get(roomId: string): Promise<{ room: RoomInfo }> {
-    const response = await fetch(`/api/rooms/${roomId}`);
+    const response = await fetch(`${BASE}/api/rooms/${roomId}`);
     if (!response.ok) {
       throw new Error('Room not found');
     }
@@ -68,7 +68,7 @@ export const roomApi = {
    * Resolve an invite code to room details
    */
   async resolveInvite(code: string): Promise<{ room: RoomInfo }> {
-    const response = await fetch(`/api/rooms/invite/${code}`);
+    const response = await fetch(`${BASE}/api/rooms/invite/${code}`);
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'unknown' }));
       if (response.status === 410) throw new Error('Invite expired');
@@ -84,7 +84,7 @@ export const roomApi = {
     const token = getToken();
     if (!token) throw new Error('Not authenticated');
 
-    const response = await fetch(`/api/rooms/${roomId}/close`, {
+    const response = await fetch(`${BASE}/api/rooms/${roomId}/close`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -104,7 +104,7 @@ export const roomApi = {
     const token = getToken();
     if (!token) throw new Error('Not authenticated');
 
-    const response = await fetch('/api/rooms/discover', {
+    const response = await fetch(`${BASE}/api/rooms/discover`, {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -124,7 +124,7 @@ export const roomApi = {
     const token = getToken();
     if (!token) throw new Error('Not authenticated');
 
-    const response = await fetch(`/api/rooms/${roomId}/transfer`, {
+    const response = await fetch(`${BASE}/api/rooms/${roomId}/transfer`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

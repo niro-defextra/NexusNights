@@ -2,14 +2,18 @@ import Hls from 'hls.js';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, u } from '../api';
 import { mapProviderEmbedUrl, remapVidApiNestedPlayerFrame } from '../util/url-utils';
-import type { EpisodeDetail, PlaybackErrorCode, PlaybackConfigPublic, PlaybackSourcePublic } from '../api-types';
-import { ArrowLeft, AudioTracks, ExitFullscreen, Fullscreen, Gauge, Lock, Next, Pause, Play, Skip, Spinner, Subtitles, Volume } from '../components/Icons';
+import type { EpisodeDetail, PlaybackErrorCode, PlaybackConfigPublic, PlaybackSourcePublic, AniSkipTimingsPublic } from '../api-types';
+import { ArrowLeft, AudioTracks, ExitFullscreen, Fullscreen, Gauge, Lock, Next, Pause, Play, Skip, Sliders, Spinner, Subtitles, Volume } from '../components/Icons';
 import { clamp, fmtTime } from '../format';
 import { useI18n } from '../i18n';
 import { ControlButton, Menu } from './Menu';
 import { SeekBar } from './SeekBar';
 import { SubtitleOverlay } from './Subtitles';
 import { parseVtt, type Cue } from './vtt';
+import { SubtitleSearchModal } from '../components/SubtitleSearchModal';
+import { useToast, ToastContainer } from '../components/Toast';
+import { screenManager } from '../native/screen';
+import { registerBackHandler } from '../native/back-button';
 
 /** Imperative API — Stage 3 drives the player from the server through this (no echo loops:
  *  handle calls never fire the onUser* callbacks, only real user input does). */
@@ -30,6 +34,7 @@ interface Props {
   streamingConfig?: PlaybackConfigPublic | null;
   streamingLoading?: boolean;
   streamingError?: string | null;
+  skipTimings?: AniSkipTimingsPublic | null;
   title: string;
   subtitle?: string;
   startAt?: number;
@@ -73,7 +78,7 @@ const sleep = (ms: number, s: AbortSignal) => new Promise<void>((res) => { const
 
 export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref) {
   const { media, title, subtitle, startAt = 0, autoPlay = true, controlled = false, canControl = true, onDisabledControlClick, theatreMode = false, hasNext, onBack, onNext, onEnded, onProgress, onUserPlay, onUserPause, onUserSeek, onSubtitleChange, onAudioChange, onSpeedChange, intentPlaying, onReady, onBuffering, holdLabel, hideSpeed, overlay, extraControls } = props;
-  const { streamingConfig, streamingLoading, streamingError } = props;
+  const { streamingConfig, streamingLoading, streamingError, skipTimings } = props;
   const { t, lang } = useI18n();
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -116,13 +121,20 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
   const [rate, setRate] = useState(1);
   const [selectedSourceIdx, setSelectedSourceIdx] = useState(0); // index of current playback source
   const [uiVisible, setUiVisible] = useState(true);
-  const [menu, setMenu] = useState<null | 'subs' | 'audio' | 'speed'>(null);
+  const [menu, setMenu] = useState<null | 'subs' | 'audio' | 'speed' | 'quality' | 'source'>(null);
   const [fs, setFs] = useState(false);
   const [subId, setSubId] = useState<string | null>(null);
+  const [subOffset, setSubOffset] = useState(0);
   const [cues, setCues] = useState<Cue[] | null>(null);
   const [audioIdx, setAudioIdx] = useState(0);
+  const [availableAudioTracks, setAvailableAudioTracks] = useState<Array<{ id: number; label: string; lang?: string; channels?: number }>>([]);
+  const [availableLevels, setAvailableLevels] = useState<Array<{ id: number; label: string; height?: number }>>([]);
+  const [currentLevelIdx, setCurrentLevelIdx] = useState<number>(-1); // -1 = Auto
   const [flash, setFlash] = useState<{ kind: 'play' | 'pause' | 'back' | 'fwd'; n: number } | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [showExternalSubModal, setShowExternalSubModal] = useState(false);
+  const [externalSubtitles, setExternalSubtitles] = useState<Array<{ id: string; label: string; url: string }>>([]);
+  const { toasts, showToast, removeToast } = useToast();
 
   const hideTimer = useRef<number>();
   const clickTimer = useRef<number>();
@@ -235,16 +247,47 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
         const url = u(`/api/hls/${media.id}/master.m3u8`);
 
         if (Hls.isSupported()) {
-          hls = new Hls({ startPosition: startRef.current, maxBufferLength: 40, backBufferLength: 90, enableWorker: true });
+          hls = new Hls({
+            startPosition: startRef.current,
+            maxBufferLength: 40,
+            backBufferLength: 90,
+            enableWorker: true,
+            xhrSetup: (xhr) => { xhr.withCredentials = false; },
+          });
           hlsRef.current = hls;
           let net = 0, mediaErr = 0;
+          const syncLocalHlsTracks = () => {
+            if (!hls) return;
+            if (hls.audioTracks && hls.audioTracks.length > 0) {
+              const tracks = hls.audioTracks.map((t: any, idx: number) => ({
+                id: idx,
+                label: t.name || t.lang || `Track ${idx + 1}`,
+                lang: t.lang,
+                channels: t.channels,
+              }));
+              setAvailableAudioTracks(tracks);
+            }
+            if (hls.levels && hls.levels.length > 1) {
+              const lvls = hls.levels.map((lvl: any, idx: number) => ({
+                id: idx,
+                height: lvl.height,
+                label: lvl.height ? `${lvl.height}p` : `${Math.round(lvl.bitrate / 1000)}k`,
+              }));
+              setAvailableLevels(lvls);
+            }
+          };
+
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            syncLocalHlsTracks();
             const wanted = str('umbra:audiolang');
             const idx = media.audioTracks.findIndex((a) => a.lang && a.lang === wanted);
             const pick = idx >= 0 ? idx : Math.max(0, media.audioTracks.findIndex((a) => a.default));
             if (hls && hls.audioTracks.length > 1) hls.audioTrack = pick;
             setAudioIdx(pick);
             begin();
+          });
+          hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
+            syncLocalHlsTracks();
           });
           hls.on(Hls.Events.LEVEL_LOADED, (_e, d) => {
             live.current = !!d.details.live;
@@ -289,7 +332,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       attemptedSources.current.add(source.url);
 
       setPhase('loading');
-      const url = source.url;
+      const url = u(source.url) || source.url;
 
       // STREAMING: Embed source
       if (source.type === 'embed') {
@@ -310,18 +353,63 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           backBufferLength: 30,          // seconds behind to keep (was 90 — less memory)
           maxBufferHole: 0.5,            // tolerate small gaps
           enableWorker: true,
+          xhrSetup: (xhr) => { xhr.withCredentials = false; },
         });
         hlsRef.current = hls;
         let net = 0, mediaErr = 0, fragParseFails = 0, fragLoadFails = 0;
         
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          // For streaming sources, use embedded audio tracks if available
-          if (hls && hls.audioTracks.length > 1) {
+        const syncStreamingHlsTracks = () => {
+          if (!hls) return;
+          if (hls.audioTracks && hls.audioTracks.length > 0) {
+            const tracks = hls.audioTracks.map((t: any, idx: number) => ({
+              id: idx,
+              label: t.name || t.lang || `Track ${idx + 1}`,
+              lang: t.lang,
+              channels: t.channels,
+            }));
+            setAvailableAudioTracks(tracks);
+
             const wanted = str('umbra:audiolang');
-            const idx = wanted ? hls.audioTracks.findIndex((t: any) => t.lang === wanted) : -1;
-            hls.audioTrack = idx >= 0 ? idx : 0;
+            const enIdx = tracks.findIndex((t) => 
+              t.lang?.toLowerCase().startsWith('en') || 
+              /english|ingil|orijinal/i.test(t.label)
+            );
+            const arIdx = tracks.findIndex((t) => 
+              t.lang?.toLowerCase().startsWith('ar') || 
+              /arabic|عربي/i.test(t.label)
+            );
+
+            let pick = -1;
+            if (wanted && wanted !== 'tr') {
+              pick = tracks.findIndex((t) => t.lang?.toLowerCase() === wanted.toLowerCase());
+            }
+            // Always default to English if available, then Arabic
+            if (pick === -1) {
+              if (enIdx >= 0) pick = enIdx;
+              else if (arIdx >= 0) pick = arIdx;
+              else {
+                const defIdx = hls.audioTracks.findIndex((t: any) => t.default);
+                pick = defIdx >= 0 ? defIdx : 0;
+              }
+            }
+            if (hls.audioTracks.length > 0) {
+              hls.audioTrack = pick;
+            }
+            setAudioIdx(pick);
           }
-          setAudioIdx(0);
+
+          if (hls.levels && hls.levels.length > 1) {
+            const lvls = hls.levels.map((lvl: any, idx: number) => ({
+              id: idx,
+              height: lvl.height,
+              label: lvl.height ? `${lvl.height}p` : `${Math.round(lvl.bitrate / 1000)}k`,
+            }));
+            setAvailableLevels(lvls);
+          }
+        };
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          syncStreamingHlsTracks();
           
           // Report success to backend
           api.reportPlaybackSuccess({
@@ -330,6 +418,10 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           }).catch(() => {}); // Silent fail on reporting
           
           begin();
+        });
+
+        hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
+          syncStreamingHlsTracks();
         });
         
         hls.on(Hls.Events.LEVEL_LOADED, (_e, d) => {
@@ -525,23 +617,32 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
   }, [countdown]);
   useEffect(() => { if (playing) setCountdown(null); }, [playing]);
 
-  // ── subtitles (merge local + streaming) ───────────────────────────────────
+  // ── subtitles (merge local + streaming + external) ───────────────────────────────────
   const allSubtitles = useMemo(() => {
     const local = media.subtitles;
-    if (!streamingConfig || !streamingConfig.subtitles.length) return local;
     
-    // Add streaming subtitles with unique IDs
-    const streaming = streamingConfig.subtitles.map((sub, i) => ({
+    // Streaming subtitles
+    const streaming = streamingConfig?.subtitles?.map((sub, i) => ({
       id: `stream-${i}`,
       lang: sub.language,
       label: sub.label || sub.language,
       source: 'external' as const,
       forced: false,
       url: sub.url,
+    })) || [];
+    
+    // External OpenSubtitles
+    const external = externalSubtitles.map(sub => ({
+      id: sub.id,
+      lang: sub.id.split('-')[1] || 'en',
+      label: sub.label,
+      source: 'external' as const,
+      forced: false,
+      url: sub.url,
     }));
     
-    return [...local, ...streaming];
-  }, [media.subtitles, streamingConfig]);
+    return [...local, ...streaming, ...external];
+  }, [media.subtitles, streamingConfig, externalSubtitles]);
 
   const selectSubtitle = useCallback(async (id: string | null) => {
     setSubId(id);
@@ -550,12 +651,22 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     const tr = allSubtitles.find((s: any) => s.id === id);
     put('umbra:sublang', tr?.lang ?? (id ? '' : 'off'));
     if (!tr) return setCues(null);
+    
+    // Check cache first
     const hit = cueCache.current.get(tr.url);
     if (hit) return setCues(hit);
+    
     try {
-      const r = await fetch(tr.url.startsWith('http') ? tr.url : u(tr.url));
+      // For blob URLs or internal APIs, fetch directly; for remote URLs route through our CORS & encoding proxy
+      const fetchUrl = tr.url.startsWith('blob:')
+        ? tr.url
+        : (tr.url.startsWith('/api/') ? u(tr.url) : u(`/api/subtitles/proxy?url=${encodeURIComponent(tr.url)}`));
+      const r = await fetch(fetchUrl);
       if (!r.ok) throw new Error(String(r.status));
-      const parsed = parseVtt(await r.text());
+      const text = await r.text();
+      
+      // Parse VTT (blob URLs are already VTT format, proxy converts SRT to VTT)
+      const parsed = parseVtt(text);
       cueCache.current.set(tr.url, parsed);
       setCues(parsed);
     } catch (err) {
@@ -564,6 +675,78 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     }
   }, [allSubtitles]);
 
+  // ── External Subtitles Logic ──────────────────────────────────────────────
+  const handleExternalSubtitleSelect = useCallback(async (fileId: string, language: string, languageName: string) => {
+    setShowExternalSubModal(false);
+    
+    try {
+      console.log('[Player] Loading external subtitle:', { fileId, language, languageName });
+      
+      // Get download link
+      const downloadInfo = await api.getSubtitleDownloadLink(fileId);
+      console.log('[Player] Download info received:', downloadInfo);
+      
+      // Fetch the content through our proxy to avoid CORS and decode properly
+      const fetchUrl = downloadInfo.link.startsWith('http')
+        ? u(`/api/subtitles/proxy?url=${encodeURIComponent(downloadInfo.link)}`)
+        : u(downloadInfo.link);
+      const response = await fetch(fetchUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to download: ${response.status}`);
+      }
+      
+      const vttContent = await response.text();
+      const parsed = parseVtt(vttContent);
+      console.log('[Player] Parsed cues count:', parsed.length);
+      
+      // Create blob URL for consistency
+      const blob = new Blob([vttContent], { type: 'text/vtt; charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      
+      const newSubId = `external-${language}-${Date.now()}`;
+      const newSubtitle = {
+        id: newSubId,
+        label: `${languageName}`,
+        url,
+      };
+      
+      cueCache.current.set(url, parsed);
+      setSubId(newSubId);
+      setCues(parsed);
+      put('umbra:sublang', language);
+      onSubtitleChange?.(newSubId);
+
+      setExternalSubtitles(prev => [...prev, newSubtitle]);
+      
+      // Show success toast
+      showToast(
+        lang === 'ar' 
+          ? `تم تفعيل ترجمة ${languageName} (${parsed.length} سطر)` 
+          : `${languageName} subtitle loaded (${parsed.length} lines)`,
+        'success'
+      );
+    } catch (error: any) {
+      console.error('[Player] Failed to load external subtitle:', error);
+      showToast(
+        lang === 'ar' 
+          ? `فشل تحميل الترجمة: ${error.message || 'خطأ غير معروف'}` 
+          : `Failed to load subtitle: ${error.message || 'Unknown error'}`,
+        'error'
+      );
+    }
+  }, [lang, onSubtitleChange, showToast]);
+
+  // Convert SRT to VTT with robust line and timestamp formatting
+  const srtToVtt = (srt: string): string => {
+    const t = srt.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
+    if (t.startsWith('WEBVTT')) return t + '\n';
+    const body = t
+      .split('\n')
+      .map((line) => (line.includes('-->') ? line.replace(/,/g, '.') : line))
+      .join('\n');
+    return `WEBVTT\n\n${body}\n`;
+  };
+
   useEffect(() => {
     // restore last language choice when the next episode loads
     const pref = str('umbra:sublang');
@@ -571,15 +754,39 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     void selectSubtitle(match?.id ?? null);
   }, [media.id, selectSubtitle]);
 
+  const effectiveAudioTracks = useMemo(() => {
+    if (availableAudioTracks.length > 0) return availableAudioTracks;
+    return media.audioTracks.map((a, idx) => ({ id: idx, label: a.label, lang: a.lang, channels: a.channels }));
+  }, [availableAudioTracks, media.audioTracks]);
+
   const selectAudio = useCallback((i: number) => {
     setAudioIdx(i);
     setMenu(null);
     onAudioChange?.(i);
     const hls = hlsRef.current;
-    if (hls && hls.audioTracks.length > 1) hls.audioTrack = i;
-    const l = media.audioTracks[i]?.lang;
+    if (hls && hls.audioTracks && hls.audioTracks.length > 0) hls.audioTrack = i;
+    const l = effectiveAudioTracks[i]?.lang;
     if (l) put('umbra:audiolang', l);
-  }, [media.audioTracks]);
+  }, [effectiveAudioTracks, onAudioChange]);
+
+  const selectQuality = useCallback((lvlIdx: number) => {
+    setCurrentLevelIdx(lvlIdx);
+    setMenu(null);
+    const hls = hlsRef.current;
+    if (hls) {
+      hls.currentLevel = lvlIdx;
+    }
+  }, []);
+
+  const selectSource = useCallback((idx: number) => {
+    if (idx === currentSourceIndex) {
+      setMenu(null);
+      return;
+    }
+    setCurrentSourceIndex(idx);
+    setMenu(null);
+    setRetry((r) => r + 1);
+  }, [currentSourceIndex]);
 
   // ── tell the room when we are loading / stalling ─────────────────────────────
   useEffect(() => {
@@ -714,10 +921,41 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     else (el.requestFullscreen?.() ?? Promise.reject()).catch(() => el.webkitRequestFullscreen?.());
   }, []);
   useEffect(() => {
-    const on = () => setFs(!!document.fullscreenElement);
+    const on = () => {
+      const isFullscreen = !!document.fullscreenElement;
+      setFs(isFullscreen);
+      if (isFullscreen) {
+        void screenManager.enterVideoFullscreen();
+      } else {
+        void screenManager.exitVideoFullscreen();
+      }
+    };
     document.addEventListener('fullscreenchange', on);
-    return () => document.removeEventListener('fullscreenchange', on);
+    return () => {
+      document.removeEventListener('fullscreenchange', on);
+      void screenManager.exitVideoFullscreen();
+      void screenManager.setKeepAwake(false);
+    };
   }, []);
+
+  // Back button handling during fullscreen or playing
+  useEffect(() => {
+    return registerBackHandler(() => {
+      if (document.fullscreenElement) {
+        void document.exitFullscreen();
+        return true;
+      }
+      return false;
+    });
+  }, []);
+
+  // Screen keep-awake while playing
+  useEffect(() => {
+    void screenManager.setKeepAwake(playing);
+    return () => {
+      void screenManager.setKeepAwake(false);
+    };
+  }, [playing]);
 
   // ── auto-hiding controls ───────────────────────────────────────────────────
   const poke = useCallback(() => {
@@ -754,6 +992,34 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       else if (k === 'f') toggleFs();
       else if (k === 'n' && hasNext) cb.current.onNext();
       else if (k === 'c' && allSubtitles.length) void selectSubtitle(subId ? null : allSubtitles[0].id);
+      else if (k === '[' || k === 'z') {
+        if (subId && subId !== 'off') {
+          setSubOffset((prev) => {
+            const next = Math.round((prev - 0.5) * 10) / 10;
+            showToast(
+              lang === 'ar'
+                ? `تأخير الترجمة: ${next > 0 ? '+' : ''}${next.toFixed(1)} ثانية`
+                : `Subtitle offset: ${next > 0 ? '+' : ''}${next.toFixed(1)}s`,
+              'info'
+            );
+            return next;
+          });
+        }
+      }
+      else if (k === ']' || k === 'x') {
+        if (subId && subId !== 'off') {
+          setSubOffset((prev) => {
+            const next = Math.round((prev + 0.5) * 10) / 10;
+            showToast(
+              lang === 'ar'
+                ? `تقديم الترجمة: ${next > 0 ? '+' : ''}${next.toFixed(1)} ثانية`
+                : `Subtitle offset: ${next > 0 ? '+' : ''}${next.toFixed(1)}s`,
+              'info'
+            );
+            return next;
+          });
+        }
+      }
       else if (k === 'escape' && menu) setMenu(null);
       else handled = false;
       if (handled) { e.preventDefault(); poke(); }
@@ -761,7 +1027,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [controlled, hasNext, menu, subId, allSubtitles, toggleFs, poke, selectSubtitle]);
+  }, [controlled, hasNext, menu, subId, allSubtitles, toggleFs, poke, selectSubtitle, lang, showToast]);
 
   // ── surface gestures: click = play/pause (tap = toggle UI on touch), double-click = skip/fullscreen ──
   const onSurfaceClick = () => {
@@ -802,7 +1068,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
 
   const volLevel: 0 | 1 | 2 = muted || volume === 0 ? 0 : volume < 0.5 ? 1 : 2;
   const showUi = isEmbed ? uiVisible : (uiVisible || !playing || phase !== 'ready');
-  const multiAudio = media.audioTracks.length > 1 && media.playback?.mode === 'hls';
+  const multiAudio = effectiveAudioTracks.length > 1;
   const iconFlip = 'rtl:-scale-x-100';
   const errorHint = errorCode === 'media_not_ready' ? 'mediaNotReady'
     : errorCode === 'media_tools_missing' ? 'mediaToolsMissing'
@@ -849,7 +1115,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       {/* gesture surface */}
       {!isEmbed && <div className="absolute inset-0" onClick={onSurfaceClick} onDoubleClick={onSurfaceDouble} />}
 
-      {!isEmbed && <SubtitleOverlay video={videoRef.current} cues={cues} raised={showUi} />}
+      {!isEmbed && <SubtitleOverlay video={videoRef.current} cues={cues} offset={subOffset} raised={showUi} />}
 
       {/* top bar */}
       <div className={`pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start gap-3 bg-gradient-to-b from-black/85 to-transparent px-[max(1rem,2.5cqw)] pb-10 pt-[max(0.75rem,2cqh)] transition-opacity duration-300 ${showUi ? 'opacity-100' : 'opacity-0'}`}>
@@ -860,40 +1126,51 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           <p className="truncate font-display text-[clamp(1rem,2.4cqw,1.5rem)] font-bold tracking-wide">{title}</p>
           {subtitle && <p className="truncate text-[clamp(0.75rem,1.5cqw,0.95rem)] text-dust">{subtitle}</p>}
         </div>
-        {/* Native HLS active badge */}
-        {!isEmbed && currentSource?.type === 'hls' && phase === 'ready' && (
-          <span className="pointer-events-none ms-auto shrink-0 flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-400">
-            <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            {t('nativeStreamActive')}
-          </span>
-        )}
-        {isEmbed && currentSource && (
+        {currentSource && (
           <div className="pointer-events-auto ms-auto flex items-center gap-2">
+            {!isEmbed && currentSource.type === 'hls' && phase === 'ready' && (
+              <span className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-400">
+                <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                {t('nativeStreamActive')}
+              </span>
+            )}
             {startAt > 10 && (
               <span
-                className="rounded-full border border-gilt/40 bg-black/60 px-2.5 py-1 text-xs font-mono text-gilt"
+                className="hidden md:inline-flex rounded-full border border-gilt/40 bg-black/60 px-2.5 py-1 text-xs font-mono text-gilt"
                 title={lang === 'ar' ? 'موضع التوقف المحفوظ' : 'Saved resume position'}
               >
                 {lang === 'ar' ? `الموضع السابق: ${fmtTime(startAt)}` : `Resume: ${fmtTime(startAt)}`}
               </span>
             )}
-            <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-dust">
-              {currentSource.provider}
-            </span>
-            {allSources.length > 1 && (
+            <div className="relative">
               <button
-                onClick={triggerNextSource}
-                title={lang === 'ar' ? 'تبديل إلى مصدر بديل' : 'Switch to alternative source'}
-                className="rounded-full border border-white/20 bg-black/40 px-3 py-1 text-xs text-bone transition hover:border-gilt/60 hover:bg-white/10"
+                onClick={() => setMenu(menu === 'source' ? null : 'source')}
+                className="flex items-center gap-1.5 rounded-full border border-white/20 bg-black/60 px-3 py-1 text-xs font-medium text-bone transition hover:border-gilt/60 hover:bg-white/10 active:scale-95"
+                title={lang === 'ar' ? 'تغيير مصدر البث' : 'Change streaming source'}
               >
-                {lang === 'ar' ? 'مصدر بديل' : 'Alternative Source'}
+                <span className="size-1.5 rounded-full bg-gilt" />
+                <span>{currentSource.provider}</span>
+                {allSources.length > 1 && <span className="text-[10px] text-dust">({allSources.length})</span>}
               </button>
-            )}
+              {menu === 'source' && allSources.length > 0 && (
+                <Menu
+                  title={t('source')}
+                  placement="top"
+                  selected={String(currentSourceIndex)}
+                  onSelect={(id) => selectSource(Number(id))}
+                  items={allSources.map((s, idx) => ({
+                    id: String(idx),
+                    label: s.provider,
+                    hint: s.type === 'hls' ? 'HLS (Local Player)' : 'Embed',
+                  }))}
+                />
+              )}
+            </div>
             {hasNext && (
               <button
                 onClick={onNext}
                 title={t('nextEpisode')}
-                className="inline-flex items-center gap-1.5 rounded-full bg-blood px-3 py-1 text-xs font-semibold text-bone transition hover:bg-blood-hot"
+                className="inline-flex items-center gap-1.5 rounded-full bg-blood px-3 py-1 text-xs font-semibold text-bone transition hover:bg-blood-hot active:scale-95"
               >
                 <span>{t('nextEpisode')}</span>
                 <Next className="size-3.5" />
@@ -979,9 +1256,38 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
         </div>
       )}
 
+      {/* AniSkip Intro / Outro floating action button */}
+      {!isEmbed && skipTimings?.intro && time >= skipTimings.intro.startTime && time <= skipTimings.intro.endTime && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            userSeek(skipTimings.intro!.endTime + 0.5);
+          }}
+          className="group absolute bottom-[max(4.5rem,11cqh)] end-[max(1.25rem,2.5cqw)] z-30 flex items-center gap-2 rounded-full border border-white/20 bg-black/85 px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold tracking-wide text-bone shadow-[0_12px_32px_rgba(0,0,0,0.85)] backdrop-blur-xl transition-all duration-200 hover:scale-105 hover:border-gilt hover:text-white hover:bg-black/95 active:scale-95"
+        >
+          <Skip dir="fwd" className="size-4 text-gilt transition-transform duration-200 group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5 rtl:rotate-180" />
+          <span>{t('skipIntro')}</span>
+        </button>
+      )}
+
+      {!isEmbed && skipTimings?.outro && time >= skipTimings.outro.startTime && time <= skipTimings.outro.endTime && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            userSeek(skipTimings.outro!.endTime + 0.5);
+          }}
+          className="group absolute bottom-[max(4.5rem,11cqh)] end-[max(1.25rem,2.5cqw)] z-30 flex items-center gap-2 rounded-full border border-white/20 bg-black/85 px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold tracking-wide text-bone shadow-[0_12px_32px_rgba(0,0,0,0.85)] backdrop-blur-xl transition-all duration-200 hover:scale-105 hover:border-gilt hover:text-white hover:bg-black/95 active:scale-95"
+        >
+          <Skip dir="fwd" className="size-4 text-gilt transition-transform duration-200 group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5 rtl:rotate-180" />
+          <span>{t('skipOutro')}</span>
+        </button>
+      )}
+
       {/* bottom controls */}
       {!isEmbed && (
-        <div className={`absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-[max(1rem,2.5cqw)] pb-[max(0.75rem,2cqh)] pt-14 transition-opacity duration-300 ${showUi ? 'opacity-100' : 'pointer-events-none opacity-0'}`}>
+        <div className={`absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/95 via-black/60 to-transparent px-[max(0.75rem,2cqw)] pb-[max(0.75rem,1.8cqh)] pt-14 transition-opacity duration-300 ${showUi ? 'opacity-100' : 'pointer-events-none opacity-0'}`}>
           {!theatreMode && (
             <SeekBar
               time={time}
@@ -994,19 +1300,19 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
               onDisabledClick={onDisabledControlClick}
             />
           )}
-          <div className="mt-1 flex items-center gap-1" dir="ltr">
+          <div className="mt-1 flex items-center gap-1 sm:gap-1.5" dir="ltr">
             {!theatreMode && (
               <>
                 <ControlButton label={playing ? t('pause') : t('play')} onClick={togglePlay} disabled={controlled && !canControl} onDisabledClick={onDisabledControlClick}>
-                  {playing ? <Pause className="size-6" /> : <Play className="size-6" />}
+                  {playing ? <Pause className="size-5 sm:size-6" /> : <Play className="size-5 sm:size-6" />}
                 </ControlButton>
-                <ControlButton label={t('skipBack')} onClick={() => skip(-10)} className="@max-md:hidden" disabled={controlled && !canControl} onDisabledClick={onDisabledControlClick}><Skip dir="back" className="size-6" /></ControlButton>
-                <ControlButton label={t('skipForward')} onClick={() => skip(10)} className="@max-md:hidden" disabled={controlled && !canControl} onDisabledClick={onDisabledControlClick}><Skip dir="fwd" className="size-6" /></ControlButton>
+                <ControlButton label={t('skipBack')} onClick={() => skip(-10)} className="@max-md:hidden" disabled={controlled && !canControl} onDisabledClick={onDisabledControlClick}><Skip dir="back" className="size-5 sm:size-6" /></ControlButton>
+                <ControlButton label={t('skipForward')} onClick={() => skip(10)} className="@max-md:hidden" disabled={controlled && !canControl} onDisabledClick={onDisabledControlClick}><Skip dir="fwd" className="size-5 sm:size-6" /></ControlButton>
               </>
             )}
 
             <div className="group/vol flex items-center">
-              <ControlButton label={muted ? t('unmute') : t('mute')} onClick={toggleMute}><Volume level={volLevel} className="size-6" /></ControlButton>
+              <ControlButton label={muted ? t('unmute') : t('mute')} onClick={toggleMute}><Volume level={volLevel} className="size-5 sm:size-6" /></ControlButton>
               <input
                 type="range" min={0} max={1} step={0.02} value={muted ? 0 : volume} aria-label="Volume"
                 onChange={(e) => setVol(Number(e.target.value))} onClick={(e) => e.stopPropagation()}
@@ -1014,7 +1320,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
               />
             </div>
 
-            <span className="ms-1 whitespace-nowrap text-[0.82rem] tabular-nums text-bone/90 @max-sm:text-xs">
+            <span className="ms-1 shrink-0 whitespace-nowrap text-xs sm:text-[0.82rem] tabular-nums text-bone/90 select-none">
               {fmtTime(time)} <span className="text-dust">/ {fmtTime(duration)}</span>
             </span>
 
@@ -1025,14 +1331,14 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
               </span>
             )}
 
-            <div className="ms-auto flex items-center gap-0.5">
+            <div className="ms-auto flex items-center gap-0.5 sm:gap-1">
               {extraControls}
               {hasNext && (
-                <ControlButton label={t('nextEpisode')} onClick={onNext}><Next className="size-6" /></ControlButton>
+                <ControlButton label={t('nextEpisode')} onClick={onNext}><Next className="size-5 sm:size-6" /></ControlButton>
               )}
               {!hideSpeed && <div className="relative">
                 <ControlButton label={t('speed')} active={menu === 'speed'} onClick={() => setMenu(menu === 'speed' ? null : 'speed')} className="@max-sm:hidden">
-                  <Gauge className="size-6" />
+                  <Gauge className="size-5 sm:size-6" />
                 </ControlButton>
                 {menu === 'speed' && (
                   <Menu title={t('speed')} selected={String(rate)} onSelect={(id) => { 
@@ -1044,32 +1350,181 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
                     items={RATES.map((r) => ({ id: String(r), label: r === 1 ? t('normal') : `${r}×` }))} />
                 )}
               </div>}
-              {multiAudio && (
+              {effectiveAudioTracks.length > 0 && (
                 <div className="relative">
-                  <ControlButton label={t('audio')} active={menu === 'audio'} onClick={() => setMenu(menu === 'audio' ? null : 'audio')}><AudioTracks className="size-6" /></ControlButton>
+                  <ControlButton
+                    label={t('audio')}
+                    active={menu === 'audio'}
+                    onClick={() => setMenu(menu === 'audio' ? null : 'audio')}
+                  >
+                    <AudioTracks className="size-5 sm:size-6" />
+                  </ControlButton>
                   {menu === 'audio' && (
-                    <Menu title={t('audio')} selected={String(audioIdx)} onSelect={(id) => selectAudio(Number(id))}
-                      items={media.audioTracks.map((a) => ({ id: String(a.index), label: a.label, hint: a.channels && a.channels > 2 ? `${a.channels}.0` : undefined }))} />
+                    <Menu
+                      title={t('audio')}
+                      selected={String(audioIdx)}
+                      onSelect={(id) => selectAudio(Number(id))}
+                      items={effectiveAudioTracks.map((a) => ({
+                        id: String(a.id),
+                        label: a.label,
+                        hint: a.channels && a.channels > 2 ? `${a.channels}.0` : undefined,
+                      }))}
+                      footer={
+                        effectiveAudioTracks.length === 1 ? (
+                          <div className="mt-2 border-t border-white/10 pt-2 px-3 text-[11px] text-dust text-center">
+                            {lang === 'ar' ? 'المسار الصوتي الوحيد المتاح' : 'Single audio track available'}
+                          </div>
+                        ) : undefined
+                      }
+                    />
                   )}
                 </div>
               )}
-              {allSubtitles.length > 0 && (
+              {availableLevels.length > 1 && (
                 <div className="relative">
-                  <ControlButton label={t('subtitles')} active={menu === 'subs' || !!subId} onClick={() => setMenu(menu === 'subs' ? null : 'subs')}><Subtitles className="size-6" /></ControlButton>
-                  {menu === 'subs' && (
-                    <Menu title={t('subtitles')} selected={subId ?? 'off'} onSelect={(id) => void selectSubtitle(id === 'off' ? null : id)}
-                      items={[{ id: 'off', label: t('off') }, ...allSubtitles.map((s: any) => ({ id: s.id, label: s.label }))]} />
+                  <ControlButton label={t('quality')} active={menu === 'quality'} onClick={() => setMenu(menu === 'quality' ? null : 'quality')}>
+                    <Sliders className="size-5 sm:size-6" />
+                  </ControlButton>
+                  {menu === 'quality' && (
+                    <Menu
+                      title={t('quality')}
+                      selected={String(currentLevelIdx)}
+                      onSelect={(id) => selectQuality(Number(id))}
+                      items={[
+                        { id: '-1', label: `${t('auto')}${currentLevelIdx === -1 && hlsRef.current?.currentLevel !== undefined && hlsRef.current.currentLevel >= 0 && availableLevels[hlsRef.current.currentLevel] ? ` (${availableLevels[hlsRef.current.currentLevel].label})` : ''}` },
+                        ...availableLevels.map((lvl) => ({ id: String(lvl.id), label: lvl.label })),
+                      ]}
+                    />
                   )}
                 </div>
               )}
+              {/* Always show subtitle button to allow external subtitle search */}
+              <div className="relative">
+                <ControlButton label={t('subtitles')} active={menu === 'subs' || !!subId} onClick={() => setMenu(menu === 'subs' ? null : 'subs')}><Subtitles className="size-5 sm:size-6" /></ControlButton>
+                {menu === 'subs' && (
+                  <Menu
+                    title={t('subtitles')}
+                    selected={subId ?? 'off'}
+                    onSelect={(id) => {
+                      if (id === '__search__') {
+                        if (!media.tmdbId) {
+                          showToast(
+                            lang === 'ar'
+                              ? 'لا يمكن البحث عن ترجمات: المحتوى غير مرتبط بـ TMDB'
+                              : 'Cannot search subtitles: media is not linked to TMDB',
+                            'error'
+                          );
+                        } else {
+                          setShowExternalSubModal(true);
+                        }
+                        setMenu(null);
+                      } else {
+                        void selectSubtitle(id === 'off' ? null : id);
+                      }
+                    }}
+                    items={[
+                      { id: 'off', label: t('off') },
+                      ...allSubtitles.map((s: any) => ({ id: s.id, label: s.label })),
+                      { id: '__search__', label: lang === 'ar' ? '🔍 بحث عن ترجمات...' : '🔍 Search subtitles...', hint: 'Stremio / OpenSubs' }
+                    ]}
+                    footer={
+                      subId && subId !== 'off' ? (
+                        <div className="mt-2 border-t border-white/10 pt-2.5 px-2">
+                          <div className="flex items-center justify-between text-[11px] text-dust mb-1.5 px-1">
+                            <span>{lang === 'ar' ? 'مزامنة التوقيت' : 'Subtitle Sync'}</span>
+                            <span className="font-mono text-gilt font-medium">
+                              {subOffset > 0 ? `+${subOffset.toFixed(1)}s` : `${subOffset.toFixed(1)}s`}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5" dir="ltr">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSubOffset((prev) => Math.round((prev - 0.5) * 10) / 10);
+                              }}
+                              className="flex-1 py-1 rounded-lg bg-white/10 text-xs font-mono font-medium hover:bg-white/20 active:scale-95 transition"
+                              title="-0.5s"
+                            >
+                              -0.5s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSubOffset((prev) => Math.round((prev - 0.1) * 10) / 10);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-white/10 text-xs font-mono hover:bg-white/20 active:scale-95 transition"
+                              title="-0.1s"
+                            >
+                              -0.1s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSubOffset(0);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-white/5 text-[11px] text-dust hover:bg-white/15 hover:text-bone active:scale-95 transition"
+                              title="Reset"
+                            >
+                              0s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSubOffset((prev) => Math.round((prev + 0.1) * 10) / 10);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-white/10 text-xs font-mono hover:bg-white/20 active:scale-95 transition"
+                              title="+0.1s"
+                            >
+                              +0.1s
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSubOffset((prev) => Math.round((prev + 0.5) * 10) / 10);
+                              }}
+                              className="flex-1 py-1 rounded-lg bg-white/10 text-xs font-mono font-medium hover:bg-white/20 active:scale-95 transition"
+                              title="+0.5s"
+                            >
+                              +0.5s
+                            </button>
+                          </div>
+                          <div className="mt-1.5 text-[10px] text-dust/60 text-center px-1">
+                            {lang === 'ar' ? 'اختصار: [ أو ] لضبط التوقيت' : 'Hotkeys: [ or ] to adjust sync'}
+                          </div>
+                        </div>
+                      ) : undefined
+                    }
+                  />
+                )}
+              </div>
               <ControlButton label={fs ? t('exitFullscreen') : t('fullscreen')} onClick={toggleFs}>
-                {fs ? <ExitFullscreen className="size-6" /> : <Fullscreen className="size-6" />}
+                {fs ? <ExitFullscreen className="size-5 sm:size-6" /> : <Fullscreen className="size-5 sm:size-6" />}
               </ControlButton>
             </div>
           </div>
         </div>
       )}
       {overlay}
+      
+      {/* Toast Notifications */}
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
+      
+      {/* External Subtitles Modal */}
+      {showExternalSubModal && media.tmdbId && (
+        <SubtitleSearchModal
+          tmdbId={media.tmdbId}
+          type={media.kind === 'movie' ? 'movie' : 'tv'}
+          season={media.season ?? undefined}
+          episode={media.episode ?? undefined}
+          onSelect={handleExternalSubtitleSelect}
+          onClose={() => setShowExternalSubModal(false)}
+        />
+      )}
     </div>
   );
 });

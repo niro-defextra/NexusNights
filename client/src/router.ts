@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 
 export type Route =
   | { name: 'home' }
+  | { name: 'sports' }
+  | { name: 'sports-watch'; channelId: string }
   | { name: 'title'; id: string }
   | { name: 'watch'; id: string }
   | { name: 'global-title'; kind: 'movie' | 'series'; tmdbId: number }
@@ -14,6 +16,14 @@ export type Route =
 function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
   
+  // Sports & beIN live arena
+  if (parts[0] === 'sports' || parts[0] === 'bein') {
+    if (parts[1]) {
+      return { name: 'sports-watch', channelId: parts[1] };
+    }
+    return { name: 'sports' };
+  }
+
   // Discord Activity Mode
   if (parts[0] === 'discord' || parts[0] === 'activity') {
     return { name: 'discord' };
@@ -78,6 +88,8 @@ export function useRoute(): Route {
 
 export const go = {
   home: () => { location.hash = '#/'; },
+  sports: () => { location.hash = '#/sports'; },
+  sportsWatch: (channelId: string) => { location.hash = `#/sports/${encodeURIComponent(channelId)}`; },
   title: (id: string) => { location.hash = `#/title/${id}`; },
   watch: (id: string) => { location.hash = `#/watch/${id}`; },
   embedPoc: () => { location.hash = '#/poc'; },
@@ -92,6 +104,8 @@ export const go = {
 
 export const hrefs = {
   home: '#/',
+  sports: '#/sports',
+  sportsWatch: (channelId: string) => `#/sports/${encodeURIComponent(channelId)}`,
   title: (id: string) => `#/title/${id}`,
   watch: (id: string) => `#/watch/${id}`,
   providers: '#/providers',

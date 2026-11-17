@@ -13,13 +13,28 @@ export interface TmdbSearchHit {
   popularity?: number;
 }
 export interface TmdbGenre { id: number; name: string }
+export interface TmdbLogo {
+  aspect_ratio: number;
+  height: number;
+  width: number;
+  file_path: string;
+  iso_639_1: string | null;
+  vote_average?: number;
+  vote_count?: number;
+}
+export interface TmdbImagesResponse {
+  id: number;
+  backdrops?: Array<{ file_path: string }>;
+  posters?: Array<{ file_path: string }>;
+  logos?: TmdbLogo[];
+}
 export interface TmdbTv {
-  id: number; name: string; overview?: string; tagline?: string; genres?: TmdbGenre[];
+  id: number; name: string; original_name?: string; original_language?: string; overview?: string; tagline?: string; genres?: TmdbGenre[];
   poster_path?: string | null; backdrop_path?: string | null; first_air_date?: string;
   vote_average?: number; status?: string;
 }
 export interface TmdbMovie {
-  id: number; title: string; overview?: string; tagline?: string; genres?: TmdbGenre[];
+  id: number; title: string; original_title?: string; original_language?: string; overview?: string; tagline?: string; genres?: TmdbGenre[];
   poster_path?: string | null; backdrop_path?: string | null; release_date?: string;
   runtime?: number; vote_average?: number; status?: string;
 }
@@ -246,4 +261,64 @@ export class TmdbClient {
       }
     }>('/configuration');
   }
+
+  async getImages(kind: 'movie' | 'tv', id: number): Promise<TmdbImagesResponse | null> {
+    return this.request<TmdbImagesResponse>(`/${kind}/${id}/images`);
+  }
+}
+
+/**
+ * Select the highest quality title logo according to the website's chosen language:
+ * - If site is in Arabic ('ar'): prioritize Arabic ('ar') -> English ('en') -> Original language -> Best fallback.
+ * - If site is in English ('en'): prioritize English ('en') -> Original language -> Arabic ('ar') -> Best fallback.
+ * - Otherwise: prioritize preferredLang -> originalLanguage -> English -> Best fallback.
+ */
+export function selectBestLogo(
+  logos: TmdbLogo[] | undefined,
+  preferredLang: string = 'en',
+  originalLanguage?: string
+): { filePath: string; aspectRatio: number } | null {
+  if (!logos || logos.length === 0) return null;
+
+  const targetLang = (preferredLang || 'en').toLowerCase().split('-')[0];
+  const origLang = originalLanguage ? originalLanguage.toLowerCase().split('-')[0] : undefined;
+
+  // 1. Direct match with current website language (e.g. 'en' or 'ar')
+  const directMatch = logos.find((l) => l.iso_639_1?.toLowerCase() === targetLang && l.file_path);
+  if (directMatch) return { filePath: directMatch.file_path, aspectRatio: directMatch.aspect_ratio || 1 };
+
+  if (targetLang === 'ar') {
+    // When Arabic is selected but no Arabic logo exists, prefer English, then original language
+    const en = logos.find((l) => l.iso_639_1?.toLowerCase() === 'en' && l.file_path);
+    if (en) return { filePath: en.file_path, aspectRatio: en.aspect_ratio || 1 };
+
+    if (origLang && origLang !== 'ar' && origLang !== 'en') {
+      const orig = logos.find((l) => l.iso_639_1?.toLowerCase() === origLang && l.file_path);
+      if (orig) return { filePath: orig.file_path, aspectRatio: orig.aspect_ratio || 1 };
+    }
+  } else {
+    // When English (or other lang) is selected:
+    // 2. Try original language
+    if (origLang && origLang !== 'en') {
+      const orig = logos.find((l) => l.iso_639_1?.toLowerCase() === origLang && l.file_path);
+      if (orig) return { filePath: orig.file_path, aspectRatio: orig.aspect_ratio || 1 };
+    }
+
+    // 3. Try English if not already checked
+    if (targetLang !== 'en') {
+      const en = logos.find((l) => l.iso_639_1?.toLowerCase() === 'en' && l.file_path);
+      if (en) return { filePath: en.file_path, aspectRatio: en.aspect_ratio || 1 };
+    }
+  }
+
+  // 4. Any other language sorted by vote count / score
+  const sorted = [...logos]
+    .filter((l) => Boolean(l.file_path))
+    .sort((a, b) => (b.vote_average ?? 0) * (b.vote_count ?? 1) - (a.vote_average ?? 0) * (a.vote_count ?? 1));
+
+  if (sorted[0]) {
+    return { filePath: sorted[0].file_path, aspectRatio: sorted[0].aspect_ratio || 1 };
+  }
+
+  return null;
 }

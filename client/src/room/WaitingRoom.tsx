@@ -22,6 +22,8 @@ import {
 import { fmtRuntime } from '../format';
 import { useI18n } from '../i18n';
 import { EMOJIS, useRoom, type ControlMode } from './RoomContext';
+import { shareContent } from '../native/share';
+import { isNative } from '../native/platform';
 
 interface Props {
   media: EpisodeDetail | null;
@@ -60,12 +62,20 @@ export function WaitingRoom({ media, streamingConfig, onStart, onStartServerStre
   };
 
   // Share URL
+  const baseWeb = isNative() ? 'https://nexusunights.tech' : window.location.origin;
   const shareUrl = room.roomId
-    ? `${window.location.origin}/#/watch/${media?.id || ''}?room=${room.roomId}`
+    ? `${baseWeb}/#/watch/${media?.id || ''}?room=${room.roomId}`
     : window.location.href;
 
   const copyLink = () => {
-    navigator.clipboard.writeText(shareUrl);
+    if (isNative()) {
+      void shareContent({
+        title: media?.kind === 'series' ? (media?.titleName || 'NexusNight') : (media?.title || 'NexusNight'),
+        url: shareUrl,
+      });
+    } else {
+      navigator.clipboard.writeText(shareUrl);
+    }
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
   };
@@ -75,7 +85,15 @@ export function WaitingRoom({ media, streamingConfig, onStart, onStartServerStre
     const discordMessage = lang === 'ar'
       ? `🎬 تعال نتفرج سوا على "${movieTitle}" في NexusNight!\nرابط الغرفة: ${shareUrl}`
       : `🎬 Join me to watch "${movieTitle}" on NexusNight!\nRoom link: ${shareUrl}`;
-    navigator.clipboard.writeText(discordMessage);
+    if (isNative()) {
+      void shareContent({
+        title: movieTitle,
+        text: discordMessage,
+        url: shareUrl,
+      });
+    } else {
+      navigator.clipboard.writeText(discordMessage);
+    }
     setCopiedDiscord(true);
     setTimeout(() => setCopiedDiscord(false), 2500);
   };

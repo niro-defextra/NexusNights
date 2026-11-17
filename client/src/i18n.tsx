@@ -1,10 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { nativeStorage } from './native/platform';
 
 export type Lang = 'en' | 'ar';
 
 const en = {
   brandTag: 'Watch together',
   home: 'Home',
+  sports: 'Sports',
+  liveArena: 'Live Arena',
   play: 'Play',
   resume: 'Resume',
   playEpisode: 'Play episode',
@@ -32,6 +35,10 @@ const en = {
   subtitles: 'Subtitles',
   audio: 'Audio',
   speed: 'Speed',
+  quality: 'Quality',
+  auto: 'Auto',
+  source: 'Source',
+  switchSource: 'Switch Source',
   off: 'Off',
   normal: 'Normal',
   fullscreen: 'Fullscreen',
@@ -105,7 +112,8 @@ const en = {
   scanning: 'Scanning the library…',
   unplayable: 'Not ready',
   language: 'العربية',
-  synopsis: 'No synopsis available.',
+  // synopsis: 'No synopsis available.',
+  synopsis: '',
   titleStatus: 'Status',
   titleRuntime: 'Runtime',
   minutesUnit: 'minutes',
@@ -232,6 +240,8 @@ const en = {
   hostCommandCenter: 'Host Playback Controls',
   hostControlsOnlyNotice: 'Only the host can control playback.',
   skipBack10: '-10s',
+  skipIntro: 'Skip Intro',
+  skipOutro: 'Skip Outro',
   skipFwd10: '+10s',
   liveChat: 'Live Chat',
   theatreScreen: 'Cinema Screen',
@@ -281,6 +291,8 @@ export type Dict = typeof en;
 const ar: Dict = {
   brandTag: 'شاهد معًا',
   home: 'الرئيسية',
+  sports: 'الرياضة',
+  liveArena: 'مباشر الرياضة',
   play: 'تشغيل',
   resume: 'متابعة',
   playEpisode: 'تشغيل الحلقة',
@@ -308,6 +320,10 @@ const ar: Dict = {
   subtitles: 'الترجمة',
   audio: 'الصوت',
   speed: 'السرعة',
+  quality: 'الجودة',
+  auto: 'تلقائي',
+  source: 'المصدر',
+  switchSource: 'تبديل المصدر',
   off: 'إيقاف',
   normal: 'عادي',
   fullscreen: 'ملء الشاشة',
@@ -381,7 +397,8 @@ const ar: Dict = {
   scanning: 'جارٍ فحص المكتبة…',
   unplayable: 'غير جاهز',
   language: 'English',
-  synopsis: 'لا يوجد ملخص متاح.',
+  // synopsis: 'لا يوجد ملخص متاح.',
+  synopsis: '',
   titleStatus: 'الحالة',
   titleRuntime: 'المدة',
   minutesUnit: 'دقيقة',
@@ -525,7 +542,9 @@ const ar: Dict = {
   // Native Stream Loading
   nativeStreamLoading: 'جاري استخراج البث المباشر وتخطي الإعلانات...',
   nativeStreamLoadingHint: 'جاري استخراج أعلى جودة بدون إعلانات من السيرفر...',
-  nativeStreamActive: 'بث مباشر',
+  skipIntro: 'تخطي شارة البداية',
+  skipOutro: 'تخطي شارة النهاية',
+  nativeStreamActive: 'بث محلي متزامن',
   nativeStreamFallback: 'جاري التحويل للمشغل الاحتياطي...',
   startAutoStreamNative: 'بدء البث التلقائي (المشغل الأصلي)',
   startScreenShareManual: 'بث شاشة المضيف (يدوي)',
@@ -589,6 +608,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const setLang = useCallback((l: Lang) => {
     setLangState(l);
     try { localStorage.setItem(KEY, l); } catch { /* ignore */ }
+    void nativeStorage.set(KEY, l);
   }, []);
 
   const value = useMemo<I18n>(() => {

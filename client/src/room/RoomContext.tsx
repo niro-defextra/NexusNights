@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { api } from '../api';
+import { api, BASE } from '../api';
 import { roomApi } from '../api/rooms';
 import { useAuth, getToken } from '../auth/AuthContext';
 import { useI18n } from '../i18n';
@@ -15,7 +15,8 @@ export interface StateEvent { state: SyncState; by: string | null; reason: strin
 export interface Toast { id: number; text: string }
 export type Cmd =
   | { type: 'play' | 'pause' | 'seek'; position: number }
-  | { type: 'select'; mediaId: string; position?: number }
+  | { type: 'select'; mediaId: string | null; position?: number }
+  | { type: 'clear' }
   | { type: 'start' }
   | { type: 'stream:start'; hlsUrl: string }
   | { type: 'stream:stop' }
@@ -191,7 +192,12 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!roomAuth) { setConnection('off'); return; }
     setConnection('connecting');
-    const s = io({ path: '/socket.io', auth: roomAuth, reconnectionDelayMax: 4000 });
+    const s = io(BASE || undefined, { 
+      path: '/socket.io', 
+      auth: roomAuth, 
+      reconnectionDelayMax: 4000,
+      transports: ['websocket', 'polling'],
+    });
     sock.current = s;
 
     const syncClock = async (n: number) => {

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="https://nexusunights.tech/apps/NexusNightsTv" version="1.0.0" viewmodes="maximized">
+   <name>NEXUSNIGHT</name>
+   <description>Premium Streaming Experience for Samsung TV</description>
+   <author>NEXUSNIGHT Team</author>
+   <icon src="icon.png"></icon>
+   <content src="index.html"></content>
+   <access origin="*" subdomains="true"></access>
+   
+   <!-- Screen configuration for 1920x1080 -->
+   <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"></feature>
+   
+   <!-- Tizen settings -->
+   <tizen:setting 
+      screen-orientation="landscape" 
+      context-menu="enable" 
+      background-support="disable" 
+      encryption="disable" 
+      install-location="auto" 
+      hwkey-event="enable">
+   </tizen:setting>
+   
+   <!-- Application identity (keep existing certificate package ID) -->
+   <tizen:application id="7P7lQLyuKP.NexusNightsTv" package="7P7lQLyuKP" required_version="2.3"></tizen:application>
+   
+   <!-- Privileges for network access and playback -->
+   <tizen:privilege name="http://tizen.org/privilege/internet"></tizen:privilege>
+   <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"></tizen:privilege>
+   
+   <!-- Samsung TV metadata -->
+   <tizen:metadata key="http://samsung.com/tv/metadata/devel.api.version" value="5.0"></tizen:metadata>
+   <tizen:metadata key="http://samsung.com/tv/metadata/prelaunch.support" value="true"></tizen:metadata>
+   <tizen:metadata key="http://tizen.org/metadata/app_ui_type/base_screen_resolution" value="extensive"></tizen:metadata>
+   
+   <!-- Samsung TV profile -->
+   <tizen:profile name="tv-samsung"></tizen:profile>
+</widget>

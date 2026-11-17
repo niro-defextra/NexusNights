@@ -1,4 +1,4 @@
-import { api } from '../api';
+import { api, u } from '../api';
 import type { EpisodeDetail } from '../api-types';
 
 interface PrewarmState {
@@ -43,7 +43,7 @@ export function prewarmNextEpisode(nextMediaId: string | null, lang: string): vo
       // Preload the still image (episode thumbnail)
       if (metadata.stillUrl) {
         const img = new Image();
-        img.src = metadata.stillUrl.startsWith('/') ? metadata.stillUrl : metadata.stillUrl;
+        img.src = u(metadata.stillUrl)!;
         img.onload = () => {
           if (state.mediaId === nextMediaId) {
             state.imageLoaded = true;

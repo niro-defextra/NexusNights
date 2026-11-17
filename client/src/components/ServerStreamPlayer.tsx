@@ -4,6 +4,7 @@ import { ArrowLeft, ExitFullscreen, Fullscreen, MessageCircle, Spinner, Users, V
 import { useI18n } from '../i18n';
 import { ChatPanel } from '../room/ChatPanel';
 import { useRoom } from '../room/RoomContext';
+import { u } from '../api';
 
 interface Props {
   hlsUrl: string;
@@ -50,7 +51,8 @@ export function ServerStreamPlayer({ hlsUrl, title, subtitle, onBack }: Props) {
     const video = videoRef.current;
     if (!video) return;
 
-    console.log('[ServerStreamPlayer] Loading HLS stream:', hlsUrl);
+    const targetUrl = u(hlsUrl) || hlsUrl;
+    console.log('[ServerStreamPlayer] Loading HLS stream:', targetUrl);
 
     let retries = 0;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -58,6 +60,7 @@ export function ServerStreamPlayer({ hlsUrl, title, subtitle, onBack }: Props) {
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
+        xhrSetup: (xhr) => { xhr.withCredentials = false; },
         lowLatencyMode: true,
         backBufferLength: 3,
         maxBufferLength: 2,
@@ -100,7 +103,7 @@ export function ServerStreamPlayer({ hlsUrl, title, subtitle, onBack }: Props) {
             if (retryTimer) clearTimeout(retryTimer);
             retryTimer = setTimeout(() => {
               if (hlsRef.current) {
-                hlsRef.current.loadSource(hlsUrl);
+                hlsRef.current.loadSource(targetUrl);
               }
             }, 1200);
             return;
@@ -124,7 +127,7 @@ export function ServerStreamPlayer({ hlsUrl, title, subtitle, onBack }: Props) {
         }
       });
 
-      hls.loadSource(hlsUrl);
+      hls.loadSource(targetUrl);
       hls.attachMedia(video);
 
       return () => {
@@ -135,7 +138,7 @@ export function ServerStreamPlayer({ hlsUrl, title, subtitle, onBack }: Props) {
       };
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       // Native HLS support (Safari)
-      video.src = hlsUrl;
+      video.src = targetUrl;
       video.addEventListener('loadedmetadata', () => {
         setLoading(false);
         setError(null);

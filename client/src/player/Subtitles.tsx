@@ -5,7 +5,17 @@ import { activeHtml, type Cue } from './vtt';
  * Subtitles are rendered by us (not the browser's native <track>) so they: work inside our
  * fullscreen container, auto-flip for Arabic/RTL (dir="auto"), and move above the controls.
  */
-export function SubtitleOverlay({ video, cues, raised }: { video: HTMLVideoElement | null; cues: Cue[] | null; raised: boolean }) {
+export function SubtitleOverlay({
+  video,
+  cues,
+  offset = 0,
+  raised,
+}: {
+  video: HTMLVideoElement | null;
+  cues: Cue[] | null;
+  offset?: number;
+  raised: boolean;
+}) {
   const [html, setHtml] = useState('');
 
   useEffect(() => {
@@ -13,13 +23,14 @@ export function SubtitleOverlay({ video, cues, raised }: { video: HTMLVideoEleme
     let raf = 0;
     let last = '';
     const tick = () => {
-      const h = activeHtml(cues, video.currentTime);
+      // Subtitle offset in seconds: positive shifts cues earlier, negative later
+      const h = activeHtml(cues, video.currentTime + offset);
       if (h !== last) { last = h; setHtml(h); }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [video, cues]);
+  }, [video, cues, offset]);
 
   if (!html) return null;
   return (

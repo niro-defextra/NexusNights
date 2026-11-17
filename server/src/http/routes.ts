@@ -5,7 +5,7 @@ import type { LibraryService } from '../library/service';
 import { thumbPath, spritePath } from '../library/thumbs';
 import { embeddedToVtt, externalToVtt } from '../library/subtitles';
 import { ID_RE, exists, safeJoin } from '../util/fsx';
-import { AvatarCache, ImageCache } from './images';
+import { AvatarCache, ImageCache, tmdbArtworkUrl } from './images';
 import type { SessionManager } from '../auth/session';
 import type { ProgressStore } from '../realtime/progress';
 import path from 'node:path';
@@ -16,13 +16,20 @@ import { providerHealth } from '../streaming/provider-health';
 import type { PlaybackConfig, ProviderSource } from '../streaming/types';
 import type { PlaybackConfigPublic, PlaybackSourcePublic, GlobalHomeResponse, GlobalHomeSection } from './api-types';
 import { DiscoveryPresenter } from '../tmdb/discovery-presenter';
+import { selectBestLogo } from '../metadata/tmdb';
 import { streamResolver } from '../streaming/stream-resolver';
 import { streamProxyRouter } from '../streaming/stream-proxy';
 import { providerStreamProxyRouter, registerProviderStream } from '../streaming/provider-stream-proxy';
+import { sportsRouter } from '../streaming/sports-resolver';
 import { analyticsTracker } from '../analytics/tracker';
+import { openSubtitlesAPI } from '../subtitles/opensubtitles-api';
+import { unifiedSubtitles } from '../subtitles/unified-subtitles';
+import { subdlAPI } from '../subtitles/subdl-api';
+import { hianimeResolver } from '../streaming/hianime-resolver';
+import { aniSkipService } from '../streaming/aniskip-service';
 
-const wrap = (fn: (req: Request, res: Response) => Promise<unknown>): RequestHandler => (req, res, next) => {
-  fn(req, res).catch(next);
+const wrap = (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler => (req, res, next) => {
+  fn(req, res, next).catch(next);
 };
 
 /**
@@ -155,8 +162,8 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     return file ? res.sendFile(file, FILE_OPTS) : notFound(res);
   }));
 
-  router.get('/images/tmdb/:kind(poster|backdrop|still)/:file', assetLimiter, wrap(async (req, res) => {
-    const { kind, file } = req.params as { kind: 'poster' | 'backdrop' | 'still'; file: string };
+  router.get('/images/tmdb/:kind(poster|backdrop|still|logo)/:file', assetLimiter, wrap(async (req, res) => {
+    const { kind, file } = req.params as { kind: 'poster' | 'backdrop' | 'still' | 'logo'; file: string };
     const cached = await images.get(kind, `/${file}`);
     return cached ? res.sendFile(cached, FILE_OPTS) : notFound(res);
   }));
@@ -175,11 +182,151 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     return (await exists(p)) ? res.sendFile(p, FILE_OPTS) : notFound(res);
   }));
 
-  router.get('/subtitles/:id/:track', assetLimiter, wrap(async (req, res) => {
+  /**
+   * GET /api/subtitles/search
+   * Search for external subtitles via Unified Subtitles (Wyzie, SubDL, OpenSubtitles)
+   */
+  router.get('/subtitles/search', apiLimiter, wrap(async (req, res) => {
+    const tmdbId = parseInt(req.query.tmdbId as string, 10);
+    const type = req.query.type as string;
+    const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+    const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+    const languages = req.query.languages as string | undefined;
+
+    if (!tmdbId || isNaN(tmdbId) || !type || !['movie', 'tv'].includes(type)) {
+      return res.status(400).json({ error: 'Invalid parameters' });
+    }
+
+    try {
+      const subtitles = await unifiedSubtitles.searchSubtitles({
+        tmdbId,
+        type: type as 'movie' | 'tv',
+        season,
+        episode,
+        languages,
+      });
+
+      res.json({ subtitles });
+    } catch (error: any) {
+      console.error('[Subtitles] Search error:', error);
+      res.status(502).json({ error: error.message || 'Failed to search subtitles' });
+    }
+  }));
+
+  /**
+   * GET /api/subtitles/download/:fileId
+   * Get download link for a subtitle file
+   */
+  router.get('/subtitles/download/:fileId', apiLimiter, wrap(async (req, res) => {
+    const fileId = req.params.fileId;
+
+    if (!fileId) {
+      return res.status(400).json({ error: 'Missing file ID' });
+    }
+
+    try {
+      const downloadInfo = await unifiedSubtitles.getDownloadLink(fileId);
+      res.json(downloadInfo);
+    } catch (error: any) {
+      console.error('[Subtitles] Download error:', error.message || error);
+      const isQuota = /حد التحميل|allowed 5 subtitles|VIP/i.test(error.message || '');
+      res.status(isQuota ? 429 : 502).json({ error: error.message || 'Failed to get download link' });
+    }
+  }));
+
+  /**
+   * GET /api/subtitles/subdl-stream
+   * Streams extracted subtitle file directly from SubDL ZIP
+   */
+  router.get('/subtitles/subdl-stream', assetLimiter, wrap(async (req, res) => {
+    const url = req.query.url as string;
+    if (!url) return res.status(400).send('Missing url');
+
+    const data = await subdlAPI.downloadAndExtract(url);
+    if (!data) return res.status(404).send('Failed to extract subtitle from SubDL archive');
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(data);
+  }));
+
+  /**
+   * GET /api/subtitles/proxy
+   * Universal CORS proxy & SRT->VTT converter for subtitles
+   */
+  router.get('/subtitles/proxy', assetLimiter, wrap(async (req, res) => {
+    const targetUrl = req.query.url as string;
+    if (!targetUrl) return res.status(400).send('Missing url parameter');
+
+    try {
+      let referer = '';
+      try {
+        referer = new URL(targetUrl).origin;
+      } catch {
+        // invalid URL
+      }
+
+      const response = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          ...(referer ? { Referer: referer } : {}),
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!response.ok) {
+        return res.status(response.status).send(`Failed to fetch upstream subtitle: ${response.statusText}`);
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      let text = '';
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+      } catch {
+        // Fallback for Arabic Windows-1256 encoding
+        text = new TextDecoder('windows-1256').decode(buffer);
+      }
+
+      // Convert SRT to VTT if needed
+      const clean = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim();
+      let vtt = clean;
+      if (!clean.startsWith('WEBVTT')) {
+        const body = clean
+          .split('\n')
+          .map((line) => (line.includes('-->') ? line.replace(/,/g, '.') : line))
+          .join('\n');
+        vtt = `WEBVTT\n\n${body}\n`;
+      }
+
+      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(vtt);
+    } catch (err: any) {
+      console.error('[SubtitlesProxy] Fetch error:', err.message);
+      res.status(502).send(`Proxy error: ${err.message}`);
+    }
+  }));
+
+  /**
+   * GET /api/streaming/aniskip/:malId/:episode
+   * Retrieves opening and ending skip timestamps
+   */
+  router.get('/streaming/aniskip/:malId/:episode', apiLimiter, wrap(async (req, res) => {
+    const malId = parseInt(req.params.malId, 10);
+    const episode = parseInt(req.params.episode, 10);
+    if (isNaN(malId) || isNaN(episode)) {
+      return res.status(400).json({ error: 'Invalid malId or episode' });
+    }
+    const timings = await aniSkipService.getSkipTimes(malId, episode);
+    res.json(timings);
+  }));
+
+  router.get('/subtitles/:id/:track', assetLimiter, wrap(async (req, res, next) => {
     const { id, track } = req.params;
     const tm = /^(ext|emb)-(\d{1,3})\.vtt$/.exec(track);
     const item = ID_RE.test(id) ? store.media.get(id) : undefined;
-    if (!tm || !item) return notFound(res);
+    if (!tm || !item) return next ? next() : notFound(res);
     const n = Number(tm[2]);
     let vtt: string;
     try {
@@ -348,12 +495,79 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         diagnosticsCount: config.diagnostics.length,
       };
 
-      // Automatic on-demand native HLS stream resolution
-      // Skip sniffer if we already have direct HLS/MP4 sources from providers (e.g., Dizibal)
+      // Fetch title metadata early for optimal routing and anime detection
+      let title = '';
+      let overview = '';
+      let posterUrl: string | null = null;
+      let backdropUrl: string | null = null;
+      let releaseYear: number | null = null;
+      let tmdbMovieData: any = null;
+
+      if (localTitle) {
+        const localSummary = present.summary(localTitle, lang);
+        title = localSummary.title;
+        overview = localSummary.overview;
+        posterUrl = localSummary.posterUrl;
+        backdropUrl = localSummary.backdropUrl;
+        releaseYear = localSummary.year;
+      } else if (svc.tmdb.enabled) {
+        try {
+          tmdbMovieData = await svc.tmdb.getMovie(tmdbId);
+          if (tmdbMovieData) {
+            title = tmdbMovieData.title || '';
+            overview = tmdbMovieData.overview || '';
+            releaseYear = tmdbMovieData.release_date ? new Date(tmdbMovieData.release_date).getFullYear() : null;
+          }
+        } catch {}
+      }
+
+      // Check if title is Anime
+      const isAnime = tmdbMovieData && (
+        tmdbMovieData.original_language === 'ja' ||
+        (Array.isArray(tmdbMovieData.genres) && tmdbMovieData.genres.some((g: any) => g.id === 16))
+      );
+
+      let skipTimings: any = null;
+
+      // Automatic on-demand native HLS stream resolution (Direct Player Priority)
       const hasDirectSource = config.source && !config.source.isEmbed;
       const snifferEnabled = process.env.ENABLE_STREAM_SNIFFER !== 'false' && process.env.DISABLE_SNIFFER !== 'true';
       let nativeStream = snifferEnabled ? streamResolver.getCached({ tmdbId, kind: 'movie' }) : undefined;
-      
+
+      // Tier 1: If Anime, try HiAnime direct scraper (<2s, zero browser overhead, direct HLS + MAL ID)
+      if (isAnime && !nativeStream && !localMediaId && snifferEnabled && !hasDirectSource) {
+        try {
+          const animeSearchTitle = tmdbMovieData.original_title || tmdbMovieData.title || title;
+          console.log(`[Playback] Anime movie detected: "${animeSearchTitle}". Resolving via HiAnime...`);
+          const hiStream = await hianimeResolver.resolve({
+            title: animeSearchTitle,
+            tmdbId,
+            kind: 'movie',
+          });
+          if (hiStream) {
+            nativeStream = {
+              id: hiStream.streamId,
+              tmdbId,
+              kind: 'movie',
+              playlistUrl: hiStream.masterUrl,
+              headers: { referer: hiStream.referer },
+              createdAt: Date.now(),
+              expiresAt: Date.now() + 4 * 3600 * 1000,
+              provider: 'HiAnime (Direct HLS)',
+            };
+            if (hiStream.subtitles && hiStream.subtitles.length > 0) {
+              playbackConfig.subtitles = [...playbackConfig.subtitles, ...hiStream.subtitles];
+            }
+            if (hiStream.malId) {
+              skipTimings = await aniSkipService.getSkipTimes(hiStream.malId, 1);
+            }
+          }
+        } catch (animeErr: any) {
+          console.log(`[Playback] HiAnime direct resolve fallback:`, animeErr.message);
+        }
+      }
+
+      // Tier 2: Multi-target concurrent stealth sniffer (Vidrift, VixSrc, Vidfast, Aether, Vidlove)
       if (!nativeStream && !localMediaId && snifferEnabled && !hasDirectSource) {
         try {
           console.log(`[Playback] Auto-resolving native direct stream for movie ${tmdbId}...`);
@@ -380,36 +594,9 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         playbackConfig.source = nativeSource;
       }
 
-      // Get title metadata (prefer local, fallback to TMDB)
-      let title = '';
-      let overview = '';
-      let posterUrl: string | null = null;
-      let backdropUrl: string | null = null;
-      let releaseYear: number | null = null;
-
-      if (localTitle) {
-        const localSummary = present.summary(localTitle, lang);
-        title = localSummary.title;
-        overview = localSummary.overview;
-        posterUrl = localSummary.posterUrl;
-        backdropUrl = localSummary.backdropUrl;
-        releaseYear = localSummary.year;
-      } else if (svc.tmdb.enabled) {
-        // Fetch from TMDB
-        try {
-          const tmdbData = await svc.tmdb.getMovie(tmdbId);
-          if (tmdbData) {
-            title = tmdbData.title || '';
-            overview = tmdbData.overview || '';
-            releaseYear = tmdbData.release_date ? new Date(tmdbData.release_date).getFullYear() : null;
-          }
-        } catch {
-          // Silently fall through
-        }
-      }
-
       res.json({
         playback: playbackConfig,
+        skipTimings,
         title,
         overview,
         posterUrl,
@@ -499,12 +686,88 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         diagnosticsCount: config.diagnostics.length,
       };
 
-      // Automatic on-demand native HLS stream resolution for TV series
-      // Skip sniffer if we already have direct HLS/MP4 sources from providers (e.g., Dizibal)
+      // Fetch metadata early for anime detection and rich episode details
+      let title = '';
+      let overview = '';
+      let posterUrl: string | null = null;
+      let backdropUrl: string | null = null;
+      let releaseYear: number | null = null;
+      let tmdbTvData: any = null;
+
+      if (localMedia && localTitle) {
+        const episodeSummary = present.episode(localMedia, lang);
+        const titleSummary = present.summary(localTitle, lang);
+        title = episodeSummary.title;
+        overview = episodeSummary.overview;
+        posterUrl = titleSummary.posterUrl;
+        backdropUrl = episodeSummary.stillUrl;
+        releaseYear = titleSummary.year;
+      } else if (svc.tmdb.enabled) {
+        try {
+          tmdbTvData = await svc.tmdb.getTv(tmdbId);
+          if (tmdbTvData) {
+            const seriesName = tmdbTvData.name || '';
+            title = `${seriesName} S${season}E${episode}`;
+            releaseYear = tmdbTvData.first_air_date ? new Date(tmdbTvData.first_air_date).getFullYear() : null;
+          }
+        } catch {
+          title = `S${season}E${episode}`;
+        }
+      } else {
+        title = `S${season}E${episode}`;
+      }
+
+      // Check if series is Anime
+      const isAnime = tmdbTvData && (
+        tmdbTvData.original_language === 'ja' ||
+        (Array.isArray(tmdbTvData.genres) && tmdbTvData.genres.some((g: any) => g.id === 16))
+      );
+
+      let skipTimings: any = null;
+
+      // Automatic on-demand native HLS stream resolution (Direct Player Priority)
       const hasDirectSource = config.source && !config.source.isEmbed;
       const snifferEnabled = process.env.ENABLE_STREAM_SNIFFER !== 'false' && process.env.DISABLE_SNIFFER !== 'true';
       let nativeStream = snifferEnabled ? streamResolver.getCached({ tmdbId, kind: 'series', season, episode }) : undefined;
-      
+
+      // Tier 1: If Anime, try HiAnime direct scraper (<2s, direct HLS + MAL ID + skip timings)
+      if (isAnime && !nativeStream && !localMediaId && snifferEnabled && !hasDirectSource) {
+        try {
+          const animeSearchTitle = tmdbTvData.original_name || tmdbTvData.name || title;
+          console.log(`[Playback] Anime series detected: "${animeSearchTitle}" S${season}E${episode}. Resolving via HiAnime...`);
+          const hiStream = await hianimeResolver.resolve({
+            title: animeSearchTitle,
+            tmdbId,
+            kind: 'series',
+            season,
+            episode,
+          });
+          if (hiStream) {
+            nativeStream = {
+              id: hiStream.streamId,
+              tmdbId,
+              kind: 'series',
+              season,
+              episode,
+              playlistUrl: hiStream.masterUrl,
+              headers: { referer: hiStream.referer },
+              createdAt: Date.now(),
+              expiresAt: Date.now() + 4 * 3600 * 1000,
+              provider: 'HiAnime (Direct HLS)',
+            };
+            if (hiStream.subtitles && hiStream.subtitles.length > 0) {
+              playbackConfig.subtitles = [...playbackConfig.subtitles, ...hiStream.subtitles];
+            }
+            if (hiStream.malId) {
+              skipTimings = await aniSkipService.getSkipTimes(hiStream.malId, episode);
+            }
+          }
+        } catch (animeErr: any) {
+          console.log(`[Playback] HiAnime direct resolve fallback:`, animeErr.message);
+        }
+      }
+
+      // Tier 2: Multi-target concurrent stealth sniffer (Vidrift, VixSrc, Vidfast, Aether, Vidlove)
       if (!nativeStream && !localMediaId && snifferEnabled && !hasDirectSource) {
         try {
           console.log(`[Playback] Auto-resolving native direct stream for TV ${tmdbId} S${season}E${episode}...`);
@@ -531,41 +794,9 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         playbackConfig.source = nativeSource;
       }
 
-      // Get episode metadata
-      let title = '';
-      let overview = '';
-      let posterUrl: string | null = null;
-      let backdropUrl: string | null = null;
-      let releaseYear: number | null = null;
-
-      if (localMedia && localTitle) {
-        const episodeSummary = present.episode(localMedia, lang);
-        const titleSummary = present.summary(localTitle, lang);
-        
-        title = episodeSummary.title;
-        overview = episodeSummary.overview;
-        posterUrl = titleSummary.posterUrl;
-        backdropUrl = episodeSummary.stillUrl;
-        releaseYear = titleSummary.year;
-      } else if (svc.tmdb.enabled) {
-        // Fetch from TMDB
-        try {
-          const tvData = await svc.tmdb.getTv(tmdbId);
-          if (tvData) {
-            const seriesName = tvData.name || '';
-            title = `${seriesName} S${season}E${episode}`;
-            releaseYear = tvData.first_air_date ? new Date(tvData.first_air_date).getFullYear() : null;
-          }
-        } catch {
-          // Silently fall through - use fallback
-          title = `S${season}E${episode}`;
-        }
-      } else {
-        title = `S${season}E${episode}`;
-      }
-
       res.json({
         playback: playbackConfig,
+        skipTimings,
         title,
         overview,
         posterUrl,
@@ -748,7 +979,15 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     // Select hero from trending movies or local library
     let hero = null;
     if (trendingMoviesDay?.results?.length) {
-      hero = discovery.searchHitToCard(trendingMoviesDay.results[0], 'movie');
+      const topHit = trendingMoviesDay.results[0];
+      let logoInfo: { filePath: string; aspectRatio: number } | null = null;
+      try {
+        const imagesData = await svc.tmdb.getImages('movie', topHit.id);
+        logoInfo = selectBestLogo(imagesData?.logos, lang, (topHit as any).original_language);
+      } catch {
+        // Fallback without logo
+      }
+      hero = discovery.searchHitToCard(topHit, 'movie', logoInfo);
     } else {
       const localHome = present.home(lang);
       if (localHome.hero) {
@@ -904,10 +1143,14 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
 
     const lang = resolveLang(req.query.lang);
     const tmdbLang = langToTmdb(lang);
-    const movie = await svc.tmdb.getMovieDetail(tmdbId, tmdbLang);
+    const [movie, imagesData] = await Promise.all([
+      svc.tmdb.getMovieDetail(tmdbId, tmdbLang),
+      svc.tmdb.getImages('movie', tmdbId).catch(() => null),
+    ]);
     if (!movie) return notFound(res);
 
-    const detail = discovery.movieDetailToGlobal(movie);
+    const logoInfo = selectBestLogo(imagesData?.logos, lang, movie.original_language);
+    const detail = discovery.movieDetailToGlobal(movie, logoInfo);
     res.json(detail);
   }));
 
@@ -919,10 +1162,14 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
 
     const lang = resolveLang(req.query.lang);
     const tmdbLang = langToTmdb(lang);
-    const tv = await svc.tmdb.getTvDetail(tmdbId, tmdbLang);
+    const [tv, imagesData] = await Promise.all([
+      svc.tmdb.getTvDetail(tmdbId, tmdbLang),
+      svc.tmdb.getImages('tv', tmdbId).catch(() => null),
+    ]);
     if (!tv) return notFound(res);
 
-    const detail = discovery.tvDetailToGlobal(tv);
+    const logoInfo = selectBestLogo(imagesData?.logos, lang, tv.original_language);
+    const detail = discovery.tvDetailToGlobal(tv, logoInfo);
     res.json(detail);
   }));
 
@@ -941,6 +1188,105 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     const seasonDetail = discovery.seasonToGlobal(season, tmdbId);
     res.json(seasonDetail);
   }));
+
+  // ── TMDB Browse Endpoints (for TV app) ──────────────────────────────────────
+
+  // Popular Movies
+  router.get('/discovery/movies/popular', apiLimiter, wrap(async (req, res) => {
+    const lang = resolveLang(req.query.lang);
+    const tmdbLang = langToTmdb(lang);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    
+    if (!svc.tmdb.enabled) {
+      return res.status(503).json({ error: 'tmdb_disabled' });
+    }
+
+    const data = await svc.tmdb.getPopularMovies(page, tmdbLang);
+    res.json(data);
+  }));
+
+  // Top Rated Movies
+  router.get('/discovery/movies/top-rated', apiLimiter, wrap(async (req, res) => {
+    const lang = resolveLang(req.query.lang);
+    const tmdbLang = langToTmdb(lang);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    
+    if (!svc.tmdb.enabled) {
+      return res.status(503).json({ error: 'tmdb_disabled' });
+    }
+
+    const data = await svc.tmdb.getTopRatedMovies(page, tmdbLang);
+    res.json(data);
+  }));
+
+  // Now Playing Movies
+  router.get('/discovery/movies/now-playing', apiLimiter, wrap(async (req, res) => {
+    const lang = resolveLang(req.query.lang);
+    const tmdbLang = langToTmdb(lang);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    
+    if (!svc.tmdb.enabled) {
+      return res.status(503).json({ error: 'tmdb_disabled' });
+    }
+
+    const data = await svc.tmdb.getNowPlayingMovies(page, tmdbLang);
+    res.json(data);
+  }));
+
+  // Popular TV Series
+  router.get('/discovery/series/popular', apiLimiter, wrap(async (req, res) => {
+    const lang = resolveLang(req.query.lang);
+    const tmdbLang = langToTmdb(lang);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    
+    if (!svc.tmdb.enabled) {
+      return res.status(503).json({ error: 'tmdb_disabled' });
+    }
+
+    const data = await svc.tmdb.getPopularTv(page, tmdbLang);
+    res.json(data);
+  }));
+
+  // Top Rated TV Series
+  router.get('/discovery/series/top-rated', apiLimiter, wrap(async (req, res) => {
+    const lang = resolveLang(req.query.lang);
+    const tmdbLang = langToTmdb(lang);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    
+    if (!svc.tmdb.enabled) {
+      return res.status(503).json({ error: 'tmdb_disabled' });
+    }
+
+    const data = await svc.tmdb.getTopRatedTv(page, tmdbLang);
+    res.json(data);
+  }));
+
+  // Trending
+  router.get('/discovery/trending/:kind/:timeWindow', apiLimiter, wrap(async (req, res) => {
+    const kind = req.params.kind as 'movie' | 'tv' | 'all';
+    const timeWindow = req.params.timeWindow as 'day' | 'week';
+    const lang = resolveLang(req.query.lang);
+    const tmdbLang = langToTmdb(lang);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    
+    if (!svc.tmdb.enabled) {
+      return res.status(503).json({ error: 'tmdb_disabled' });
+    }
+
+    let data;
+    if (kind === 'movie') {
+      data = await svc.tmdb.getTrendingMovies(timeWindow, page, tmdbLang);
+    } else if (kind === 'tv') {
+      data = await svc.tmdb.getTrendingTv(timeWindow, page, tmdbLang);
+    } else {
+      // For 'all', return movies for now
+      data = await svc.tmdb.getTrendingMovies(timeWindow, page, tmdbLang);
+    }
+    
+    res.json(data);
+  }));
+
+  // ────────────────────────────────────────────────────────────────────────────
 
   // Universal Search
   router.get('/search', apiLimiter, wrap(async (req, res) => {
@@ -1057,6 +1403,29 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     }
     const data = await svc.tmdb.getTv(id);
     res.json(data);
+  }));
+
+  // Resolve transparent title logo
+  router.get('/tmdb/logo/:kind(movie|tv)/:id', apiLimiter, wrap(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const kind = req.params.kind as 'movie' | 'tv';
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'invalid_id' });
+    }
+    const lang = resolveLang(req.query.lang);
+    try {
+      const imagesData = await svc.tmdb.getImages(kind, id);
+      const logo = selectBestLogo(imagesData?.logos, lang);
+      if (logo) {
+        return res.json({
+          logoUrl: tmdbArtworkUrl('logo', logo.filePath),
+          logoRatio: logo.aspectRatio,
+        });
+      }
+      return res.json({ logoUrl: null, logoRatio: null });
+    } catch {
+      return res.json({ logoUrl: null, logoRatio: null });
+    }
   }));
 
   // TMDB Search
@@ -1468,6 +1837,9 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
   
   // Mount Provider Stream Proxy (for Dizibal, etc.)
   router.use('/provider-stream-proxy', providerStreamProxyRouter);
+
+  // Mount Sports Live Stream Proxy (for beIN Sports HD 100% ad-free native HLS)
+  router.use('/sports', sportsRouter);
 
   router.use((_req, res) => notFound(res));
   router.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

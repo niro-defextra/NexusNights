@@ -3,14 +3,19 @@ import path from 'node:path';
 import type { Config } from '../config';
 import { exists, shortId, writeFileAtomic } from '../util/fsx';
 
-const SIZE = { poster: 'w500', backdrop: 'w1280', still: 'w780' } as const;
+const SIZE = { poster: 'w500', backdrop: 'w1280', still: 'w780', logo: 'w500' } as const;
 export type ArtKind = keyof typeof SIZE;
 const TMDB_PATH = /^\/[\w-]+\.(jpg|jpeg|png|webp)$/i;
 const MAX_BYTES = 10 * 1024 * 1024;
+/**
+ * Bump whenever the headers artwork is served with change (CORP/CORS/cache policy) so browsers and
+ * CDNs stop reusing copies cached under the old policy.
+ */
+const ARTWORK_URL_VERSION = 2;
 
 export function tmdbArtworkUrl(kind: ArtKind, tmdbPath: string | null | undefined): string | null {
   if (!tmdbPath || !TMDB_PATH.test(tmdbPath)) return null;
-  return `/api/images/tmdb/${kind}/${encodeURIComponent(tmdbPath.slice(1))}`;
+  return `/api/images/tmdb/${kind}/${encodeURIComponent(tmdbPath.slice(1))}?v=${ARTWORK_URL_VERSION}`;
 }
 
 /**

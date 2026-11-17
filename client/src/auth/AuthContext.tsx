@@ -1,4 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { BASE } from '../api';
+import { nativeStorage } from '../native/platform';
 
 export interface User {
   id: string;
@@ -37,32 +39,36 @@ const TOKEN_KEY = 'nexusnight_token';
  * New Authentication System using Discord OAuth2
  * Replaces Discord Activity SDK
  */
+let externalAuthHandler: ((token: string) => void) | null = null;
+export const handleExternalToken = (token: string) => {
+  if (externalAuthHandler) externalAuthHandler(token);
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>(initial);
 
   const login = () => {
     console.log('[Auth] Redirecting to Discord OAuth...');
-    // Redirect to Discord OAuth2
-    window.location.href = '/api/auth/discord';
+    window.location.href = (BASE || '') + '/api/auth/discord';
   };
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-      localStorage.removeItem(TOKEN_KEY);
-      setState({ user: null, loading: false, error: null, isAdmin: false });
+      await fetch(BASE + '/api/auth/logout', { method: 'POST' });
     } catch (error) {
       console.error('Logout failed:', error);
     }
+    await nativeStorage.remove(TOKEN_KEY);
+    setState({ user: null, loading: false, error: null, isAdmin: false });
   };
 
   /** Shared helper: call /api/auth/is-admin and update state.isAdmin.
    *  Always marks loading=false when done — it's the LAST step of init. */
   const refreshAdmin = async (user: User | null) => {
     try {
-      const session = user ? localStorage.getItem(TOKEN_KEY) : null;
-      const adminToken = localStorage.getItem('nexusnight_admin_token');
-      const res = await fetch('/api/auth/is-admin', {
+      const session = user ? (await nativeStorage.get(TOKEN_KEY)) : null;
+      const adminToken = await nativeStorage.get('nexusnight_admin_token');
+      const res = await fetch(BASE + '/api/auth/is-admin', {
         headers: {
           ...(session ? { Authorization: `Bearer ${session}` } : {}),
           ...(adminToken ? { 'x-admin-token': adminToken } : {}),
@@ -75,22 +81,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const saveTokenAndAuth = async (token: string) => {
+    console.log('[Auth] Token received, saving...');
+    await nativeStorage.set(TOKEN_KEY, token);
+    try {
+      const response = await fetch(BASE + '/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        throw new Error('Not authenticated');
+      }
+
+      const user = await response.json();
+      const userWithName: User = {
+        ...user,
+        id: user.id || user.userId || '',
+        name: user.globalName || user.username || 'User',
+      };
+      console.log('[Auth] User authenticated:', userWithName.name);
+      setState({ user: userWithName, loading: true, error: null, isAdmin: false });
+      void refreshAdmin(userWithName);
+    } catch (error) {
+      console.error('[Auth] Token validation failed:', error);
+      await nativeStorage.remove(TOKEN_KEY);
+      setState({ user: null, loading: false, error: 'Authentication failed', isAdmin: false });
+    }
+  };
+
+  // Register external auth handler (for deep links / custom URL schemes)
+  useEffect(() => {
+    externalAuthHandler = (token: string) => {
+      void saveTokenAndAuth(token);
+    };
+    return () => {
+      externalAuthHandler = null;
+    };
+  }, []);
+
   // Check if user is already logged in
   useEffect(() => {
     const checkAuth = async () => {
-      const token = localStorage.getItem(TOKEN_KEY);
+      const token = await nativeStorage.get(TOKEN_KEY);
       console.log('[Auth] Checking auth, token:', token ? 'exists' : 'missing');
       
       if (!token) {
         setState({ user: null, loading: true, error: null, isAdmin: false });
-        // Still check admin-token even without a Discord session
-        // refreshAdmin will flip loading→false when done
         void refreshAdmin(null);
         return;
       }
 
       try {
-        const response = await fetch('/api/auth/me', {
+        const response = await fetch(BASE + '/api/auth/me', {
           headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -99,19 +141,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         const user = await response.json();
-        // Add display name and ensure id is always populated
         const userWithName: User = {
           ...user,
           id: user.id || user.userId || '',
           name: user.globalName || user.username || 'User',
         };
         console.log('[Auth] User authenticated:', userWithName.name);
-        // Keep loading:true — refreshAdmin will set it to false
         setState({ user: userWithName, loading: true, error: null, isAdmin: false });
         void refreshAdmin(userWithName);
       } catch (error) {
         console.error('[Auth] Auth check failed:', error);
-        localStorage.removeItem(TOKEN_KEY);
+        await nativeStorage.remove(TOKEN_KEY);
         setState({ user: null, loading: false, error: 'Authentication failed', isAdmin: false });
       }
     };
@@ -121,7 +161,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Handle OAuth callback
   useEffect(() => {
-    // Check both regular URL params and hash params
     const urlParams = new URLSearchParams(window.location.search);
     const hashParts = window.location.hash.split('?');
     const hashParams = hashParts.length > 1 ? new URLSearchParams(hashParts[1]) : null;
@@ -129,9 +168,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = urlParams.get('token') || hashParams?.get('token');
     
     if (token) {
-      console.log('[Auth] Token received, saving...');
-      localStorage.setItem(TOKEN_KEY, token);
-      
       // Remove token from URL
       if (urlParams.has('token')) {
         urlParams.delete('token');
@@ -143,34 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         window.history.replaceState({}, document.title, window.location.pathname + newHash);
       }
       
-      // Trigger auth check immediately instead of reload
-      const checkAuthAfterLogin = async () => {
-        try {
-          const response = await fetch('/api/auth/me', {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-
-          if (!response.ok) {
-            throw new Error('Not authenticated');
-          }
-
-          const user = await response.json();
-          const userWithName: User = {
-            ...user,
-            id: user.id || user.userId || '',
-            name: user.globalName || user.username || 'User',
-          };
-          console.log('[Auth] Login successful:', userWithName.name);
-          setState({ user: userWithName, loading: true, error: null, isAdmin: false });
-          void refreshAdmin(userWithName);
-        } catch (error) {
-          console.error('[Auth] Token validation failed:', error);
-          localStorage.removeItem(TOKEN_KEY);
-          setState({ user: null, loading: false, error: 'Authentication failed', isAdmin: false });
-        }
-      };
-      
-      checkAuthAfterLogin();
+      void saveTokenAndAuth(token);
     }
   }, []);
 

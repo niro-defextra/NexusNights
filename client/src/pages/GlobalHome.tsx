@@ -86,6 +86,8 @@ export function GlobalHome() {
             rating: hero.rating,
             posterUrl: hero.posterUrl,
             backdropUrl: hero.backdropUrl,
+            logoUrl: hero.logoUrl,
+            logoRatio: hero.logoRatio,
             seasonCount: 0,
             episodeCount: 0,
             addedAt: 0,
@@ -100,13 +102,22 @@ export function GlobalHome() {
         />
       )}
       
-      <div className="relative z-10 space-y-8">
+      <div className="relative z-10 -mt-6 sm:-mt-10 space-y-4 sm:space-y-6">
         {/* Continue Watching */}
         {contItems.length > 0 && (
           <Row title={t('continueWatching')}>
             {contItems.map((e) => {
               const p = getProgress(e.id);
-              return <EpisodeCard key={e.id} ep={e} showTitleName progress={p && p.d > 0 ? p.t / p.d : undefined} />;
+              return (
+                <EpisodeCard
+                  key={e.id}
+                  ep={e}
+                  showTitleName
+                  progress={p && p.d > 0 ? p.t / p.d : undefined}
+                  currentTime={p?.t}
+                  duration={p?.d}
+                />
+              );
             })}
           </Row>
         )}

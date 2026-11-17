@@ -13,7 +13,7 @@ export class DiscoveryPresenter {
   /**
    * Convert TMDB search hit to global title card (works for both movie and TV)
    */
-  searchHitToCard(hit: TmdbSearchHit & { media_type?: 'movie' | 'tv'; poster_path?: string | null; backdrop_path?: string | null; vote_average?: number }, forceKind?: 'movie' | 'series'): GlobalTitleCard {
+  searchHitToCard(hit: TmdbSearchHit & { media_type?: 'movie' | 'tv'; poster_path?: string | null; backdrop_path?: string | null; vote_average?: number }, forceKind?: 'movie' | 'series', logo?: { filePath: string; aspectRatio: number } | null): GlobalTitleCard {
     const isMovie = forceKind === 'movie' || (hit.media_type === 'movie' || !!hit.title);
     const tmdbId = hit.id;
     const title = isMovie ? (hit.title ?? hit.name ?? '') : (hit.name ?? hit.title ?? '');
@@ -34,6 +34,8 @@ export class DiscoveryPresenter {
       overview: '',
       posterUrl: tmdbArtworkUrl('poster', hit.poster_path),
       backdropUrl: tmdbArtworkUrl('backdrop', hit.backdrop_path),
+      logoUrl: logo?.filePath ? tmdbArtworkUrl('logo', logo.filePath) : null,
+      logoRatio: logo?.aspectRatio ?? null,
       releaseDate: releaseDate || null,
       rating: hit.vote_average || null,
       year,
@@ -99,7 +101,7 @@ export class DiscoveryPresenter {
   /**
    * Convert TMDB movie details to global title detail
    */
-  movieDetailToGlobal(movie: TmdbMovie): GlobalTitleDetail {
+  movieDetailToGlobal(movie: TmdbMovie, logo?: { filePath: string; aspectRatio: number } | null): GlobalTitleDetail {
     const tmdbId = movie.id;
     const year = movie.release_date ? parseInt(movie.release_date.substring(0, 4)) : null;
     const localTitle = this.findLocalByTmdbId(tmdbId, 'movie');
@@ -114,6 +116,8 @@ export class DiscoveryPresenter {
       tagline: movie.tagline || null,
       posterUrl: tmdbArtworkUrl('poster', movie.poster_path),
       backdropUrl: tmdbArtworkUrl('backdrop', movie.backdrop_path),
+      logoUrl: logo?.filePath ? tmdbArtworkUrl('logo', logo.filePath) : null,
+      logoRatio: logo?.aspectRatio ?? null,
       releaseDate: movie.release_date || null,
       rating: movie.vote_average || null,
       year,
@@ -128,7 +132,7 @@ export class DiscoveryPresenter {
   /**
    * Convert TMDB TV details to global title detail
    */
-  tvDetailToGlobal(tv: TmdbTvDetail): GlobalTitleDetail {
+  tvDetailToGlobal(tv: TmdbTvDetail, logo?: { filePath: string; aspectRatio: number } | null): GlobalTitleDetail {
     const tmdbId = tv.id;
     const year = tv.first_air_date ? parseInt(tv.first_air_date.substring(0, 4)) : null;
     const localTitle = this.findLocalByTmdbId(tmdbId, 'tv');
@@ -143,6 +147,8 @@ export class DiscoveryPresenter {
       tagline: tv.tagline || null,
       posterUrl: tmdbArtworkUrl('poster', tv.poster_path),
       backdropUrl: tmdbArtworkUrl('backdrop', tv.backdrop_path),
+      logoUrl: logo?.filePath ? tmdbArtworkUrl('logo', logo.filePath) : null,
+      logoRatio: logo?.aspectRatio ?? null,
       releaseDate: tv.first_air_date || null,
       rating: tv.vote_average || null,
       year,

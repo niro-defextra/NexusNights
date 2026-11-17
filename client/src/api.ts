@@ -15,14 +15,18 @@ import type {
   ProviderTestResultPublic,
   ResetCooldownsResponse,
 } from './api-types';
+import { getApiBaseUrl } from './native/platform';
 
-// No more Discord Activity - direct API access
-export const BASE = '';
+// Dynamic API base: '' for browser (relative), server URL for native mobile
+export const BASE = getApiBaseUrl();
 
 export function u(path: string): string;
 export function u(path: string | null | undefined): string | undefined;
 export function u(path: string | null | undefined): string | undefined {
-  return path ?? undefined;
+  if (!path) return undefined;
+  if (/^https?:\/\//i.test(path)) return path;
+  const base = getApiBaseUrl();
+  return base ? `${base}${path.startsWith('/') ? '' : '/'}${path}` : path;
 }
 
 export class ApiError extends Error {
@@ -32,7 +36,8 @@ export class ApiError extends Error {
 }
 
 async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const r = await fetch(BASE + path, { signal, headers: { accept: 'application/json' } });
+  const url = u(path) || path;
+  const r = await fetch(url, { signal, headers: { accept: 'application/json' } });
   if (!r.ok) throw new ApiError(r.status);
   return (await r.json()) as T;
 }
@@ -79,6 +84,8 @@ export const api = {
     get<GlobalTitleDetail>(`/api/discovery/tv/${tmdbId}?lang=${lang}`, signal),
   discoverySeason: (tmdbId: number, season: number, lang: string, signal?: AbortSignal) =>
     get<GlobalSeason>(`/api/discovery/tv/${tmdbId}/season/${season}?lang=${lang}`, signal),
+  tmdbLogo: (kind: 'movie' | 'tv', id: number, lang: string = 'en', signal?: AbortSignal) =>
+    get<{ logoUrl: string | null; logoRatio: number | null }>(`/api/tmdb/logo/${kind}/${id}?lang=${lang}`, signal),
   search: (query: string, lang: string, page: number, signal?: AbortSignal) =>
     get<GlobalSearchResponse>(`/api/search?q=${encodeURIComponent(query)}&lang=${lang}&page=${page}`, signal),
 
@@ -104,6 +111,44 @@ export const api = {
       body: JSON.stringify(report),
     }).then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to report')));
   },
+
+  // ── External Subtitles (OpenSubtitles.com) ──
+  searchExternalSubtitles: (req: {
+    tmdbId: number;
+    type: 'movie' | 'tv';
+    season?: number;
+    episode?: number;
+    languages?: string;
+  }, signal?: AbortSignal) => {
+    const params = new URLSearchParams({
+      tmdbId: req.tmdbId.toString(),
+      type: req.type,
+    });
+    if (req.season !== undefined) params.append('season', req.season.toString());
+    if (req.episode !== undefined) params.append('episode', req.episode.toString());
+    if (req.languages) params.append('languages', req.languages);
+    
+    return get<{
+      subtitles: Array<{
+        id: string;
+        language: string;
+        languageName: string;
+        fileName: string;
+        downloadCount: number;
+        rating: number;
+        hearingImpaired: boolean;
+        movieHashMatch: boolean;
+      }>;
+    }>(`/api/subtitles/search?${params.toString()}`, signal);
+  },
+
+  getSubtitleDownloadLink: (fileId: string, signal?: AbortSignal) =>
+    get<{
+      link: string;
+      fileName: string;
+      remaining: number;
+      resetTime: string;
+    }>(`/api/subtitles/download/${fileId}`, signal),
 
   // ── Provider Management ──
   getProviders: (signal?: AbortSignal) =>

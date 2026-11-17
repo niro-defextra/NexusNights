@@ -41,6 +41,11 @@ export function attachRealtime(server: http.Server, svc: LibraryService, session
     pingInterval: 20_000,
     pingTimeout: 20_000,
     connectTimeout: 10_000,
+    cors: {
+      origin: true,
+      methods: ['GET', 'POST'],
+      credentials: true,
+    },
   });
 
   const rooms = new Map<string, Room>();
@@ -144,8 +149,20 @@ export function attachRealtime(server: http.Server, svc: LibraryService, session
       const res = r.apply(user.id, p.data, Date.now());
       if (!res.ok) { socket.emit('error:cmd', { code: res.code }); return reply(ack, false, res.code); }
       if (res.changed) {
+        if (p.data.type === 'select') {
+          roomRegistry.setMedia(roomId, p.data.mediaId ?? null);
+        } else if (p.data.type === 'clear') {
+          roomRegistry.setMedia(roomId, null);
+        }
         emitState(r, p.data.type, user.id);
-        if (p.data.type === 'start' || p.data.type === 'play' || p.data.type === 'stream:start' || p.data.type === 'stream:stop') {
+        if (
+          p.data.type === 'start' ||
+          p.data.type === 'play' ||
+          p.data.type === 'stream:start' ||
+          p.data.type === 'stream:stop' ||
+          p.data.type === 'clear' ||
+          p.data.type === 'select'
+        ) {
           emitMembers(r);
         }
       }

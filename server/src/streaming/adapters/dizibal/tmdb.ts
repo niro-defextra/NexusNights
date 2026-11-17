@@ -17,6 +17,7 @@ interface TmdbInfo {
   title: string;
   originalTitle: string;
   turkishTitle: string;
+  originalLanguage: string;
   year: string;
   posterPath: string | null;
 }
@@ -26,6 +27,7 @@ interface TmdbResponse {
   name?: string;
   original_title?: string;
   original_name?: string;
+  original_language?: string;
   release_date?: string;
   first_air_date?: string;
   poster_path?: string | null;
@@ -75,6 +77,7 @@ export async function getTmdbInfo(
 
     const title = data.title || data.name || '';
     const originalTitle = data.original_title || data.original_name || '';
+    const originalLanguage = data.original_language || 'en';
     const releaseDate = data.release_date || data.first_air_date || '';
     const year = releaseDate ? releaseDate.split('-')[0] : '';
     const posterPath = data.poster_path || null;
@@ -83,6 +86,7 @@ export async function getTmdbInfo(
       title,
       originalTitle,
       turkishTitle,
+      originalLanguage,
       year,
       posterPath,
     };

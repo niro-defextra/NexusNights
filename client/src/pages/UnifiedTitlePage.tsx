@@ -170,7 +170,7 @@ function TmdbMovieView({ data }: { data: TmdbMovieDetail }) {
     <div className="pb-20">
       <section className="relative isolate min-h-[min(66dvh,34rem)] overflow-hidden">
         {backdropUrl ? (
-          <img src={backdropUrl} alt="" className="absolute inset-0 -z-20 size-full object-cover" />
+          <img src={u(backdropUrl)} alt="" className="absolute inset-0 -z-20 size-full object-cover" />
         ) : (
           <div className="absolute inset-0 -z-20 bg-[radial-gradient(ellipse_at_70%_20%,#3a1219,#0a0708_70%)]" />
         )}
@@ -183,7 +183,7 @@ function TmdbMovieView({ data }: { data: TmdbMovieDetail }) {
             {posterUrl && (
               <div className="hidden sm:block w-48 shrink-0">
                 <img
-                  src={posterUrl}
+                  src={u(posterUrl)}
                   alt={data.title}
                   className="w-full rounded-lg shadow-2xl"
                 />
@@ -280,7 +280,7 @@ function TmdbTvView({ data }: { data: TmdbTvDetail }) {
     <div className="pb-20">
       <section className="relative isolate min-h-[min(66dvh,34rem)] overflow-hidden">
         {backdropUrl ? (
-          <img src={backdropUrl} alt="" className="absolute inset-0 -z-20 size-full object-cover" />
+          <img src={u(backdropUrl)} alt="" className="absolute inset-0 -z-20 size-full object-cover" />
         ) : (
           <div className="absolute inset-0 -z-20 bg-[radial-gradient(ellipse_at_70%_20%,#3a1219,#0a0708_70%)]" />
         )}
@@ -293,7 +293,7 @@ function TmdbTvView({ data }: { data: TmdbTvDetail }) {
             {posterUrl && (
               <div className="hidden sm:block w-48 shrink-0">
                 <img
-                  src={posterUrl}
+                  src={u(posterUrl)}
                   alt={data.name}
                   className="w-full rounded-lg shadow-2xl"
                 />

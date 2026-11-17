@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { roomApi } from '../api/rooms';
 import { useI18n } from '../i18n';
 import { useAuth } from '../auth/AuthContext';
 import { Check, Spinner, Users, X } from './Icons';
+import { registerBackHandler } from '../native/back-button';
+import { shareContent } from '../native/share';
+import { isNative } from '../native/platform';
 
 interface Props {
   mediaId: string;
@@ -87,13 +90,29 @@ export function CreateRoomModal({ mediaId, title, onClose, onCreated }: Props) {
     }
   };
 
+  useEffect(() => {
+    return registerBackHandler(() => {
+      onClose();
+      return true;
+    });
+  }, [onClose]);
+
+  const baseWeb = isNative() ? 'https://nexusunights.tech' : window.location.origin;
   const shareUrl = createdRoomId
-    ? `${window.location.origin}/#/watch/${mediaId}?room=${createdRoomId}`
+    ? `${baseWeb}/#/watch/${mediaId}?room=${createdRoomId}`
     : '';
 
   const copyInvite = () => {
     if (shareUrl) {
-      navigator.clipboard.writeText(shareUrl);
+      if (isNative()) {
+        void shareContent({
+          title,
+          text: `🎬 تعال نتفرج سوا على "${title}" في NexusNight!\n\n🎫 كود الدعوة: ${inviteCode}`,
+          url: shareUrl,
+        });
+      } else {
+        navigator.clipboard.writeText(shareUrl);
+      }
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 3000);
     }
@@ -104,7 +123,15 @@ export function CreateRoomModal({ mediaId, title, onClose, onCreated }: Props) {
       ? `🎬 تعال نتفرج سوا على "${title}" في NexusNight!\n\n🔗 رابط الغرفة:\n${shareUrl}\n\n🎫 كود الدعوة: ${inviteCode}`
       : `🎬 Join me for a watch party on NexusNight!\n\n🎞️ Now Playing: "${title}"\n\n🔗 Room Link:\n${shareUrl}\n\n🎫 Invite Code: ${inviteCode}`;
     
-    navigator.clipboard.writeText(discordMessage);
+    if (isNative()) {
+      void shareContent({
+        title,
+        text: discordMessage,
+        url: shareUrl,
+      });
+    } else {
+      navigator.clipboard.writeText(discordMessage);
+    }
     setCopiedDiscord(true);
     setTimeout(() => setCopiedDiscord(false), 3000);
   };

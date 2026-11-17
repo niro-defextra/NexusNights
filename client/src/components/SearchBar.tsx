@@ -1,7 +1,7 @@
 /**
  * Global Search Bar
  * 
- * Searches TMDB catalog with debouncing and keyboard navigation
+ * Searches TMDB catalog with debouncing, keyboard navigation, and instant results
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -44,6 +44,7 @@ export function SearchBar({ autoFocus = false, onClose, className = '' }: Search
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   // Auto focus if requested
   useEffect(() => {
@@ -80,6 +81,13 @@ export function SearchBar({ autoFocus = false, onClose, className = '' }: Search
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
+  // Scroll active item into view during keyboard navigation
+  useEffect(() => {
+    if (selectedIndex >= 0 && itemRefs.current[selectedIndex]) {
+      itemRefs.current[selectedIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [selectedIndex]);
+
   // Debounced search
   useEffect(() => {
     if (debounceTimer.current) {
@@ -96,7 +104,7 @@ export function SearchBar({ autoFocus = false, onClose, className = '' }: Search
     setLoading(true);
     debounceTimer.current = setTimeout(() => {
       performSearch(query);
-    }, 300);
+    }, 280);
 
     return () => {
       if (debounceTimer.current) {
@@ -117,14 +125,14 @@ export function SearchBar({ autoFocus = false, onClose, className = '' }: Search
         tvRes.json() as Promise<SearchResponse>,
       ]);
 
-      // Combine and sort by popularity/rating
+      // Combine and sort by popularity / rating
       const combined: SearchResult[] = [
         ...moviesData.results.map((r) => ({ ...r, media_type: 'movie' as const })),
         ...tvData.results.map((r) => ({ ...r, media_type: 'tv' as const })),
       ];
       combined.sort((a, b) => b.vote_average - a.vote_average);
 
-      setResults(combined.slice(0, 8)); // Top 8 results
+      setResults(combined.slice(0, 8));
       setSelectedIndex(-1);
       setShowResults(true);
       setLoading(false);
@@ -196,7 +204,7 @@ export function SearchBar({ autoFocus = false, onClose, className = '' }: Search
           onKeyDown={handleKeyDown}
           placeholder={t('searchPlaceholder')}
           aria-label={t('search')}
-          className="w-full h-9 ps-10 pe-16 bg-white/[0.04] border border-white/10 rounded-full text-sm text-bone placeholder:text-dust/60 transition-all duration-300 focus:outline-none focus:border-gilt/50 focus:bg-white/[0.06] hover:border-white/15"
+          className="w-full h-9 ps-10 pe-16 bg-white/[0.04] border border-white/10 rounded-full text-xs sm:text-sm text-bone placeholder:text-dust/60 transition-all duration-200 focus:outline-none focus:border-gilt/50 focus:bg-white/[0.07] hover:border-white/20"
           autoComplete="off"
           spellCheck={false}
         />
@@ -227,12 +235,13 @@ export function SearchBar({ autoFocus = false, onClose, className = '' }: Search
           role="listbox"
           aria-label={t('searchResults')}
         >
-          <div className="max-h-[min(65vh,480px)] overflow-y-auto scrollbar-thin divide-y divide-white/[0.03]">
+          <div className="max-h-[min(60vh,420px)] overflow-y-auto scrollbar-thin divide-y divide-white/[0.03]">
             {results.map((result, idx) => (
               <SearchResultItem
                 key={result.id}
                 result={result}
                 selected={idx === selectedIndex}
+                itemRef={(el) => (itemRefs.current[idx] = el)}
                 onClick={() => handleResultClick(result)}
               />
             ))}
@@ -259,10 +268,12 @@ export function SearchBar({ autoFocus = false, onClose, className = '' }: Search
 function SearchResultItem({
   result,
   selected,
+  itemRef,
   onClick,
 }: {
   result: SearchResult;
   selected: boolean;
+  itemRef?: (el: HTMLButtonElement | null) => void;
   onClick: () => void;
 }) {
   const { lang } = useI18n();
@@ -274,19 +285,20 @@ function SearchResultItem({
 
   return (
     <button
+      ref={itemRef}
       onClick={onClick}
       role="option"
       aria-selected={selected}
-      className={`w-full flex items-start gap-3.5 p-3 text-start transition-all duration-200 group ${
+      className={`w-full flex items-start gap-3 p-2.5 sm:p-3 text-start transition-all duration-150 group select-none ${
         selected ? 'bg-gilt/15 text-bone' : 'hover:bg-white/[0.05] active:bg-gilt/10'
       }`}
     >
       {/* Poster */}
-      <div className="flex-shrink-0 w-12 h-16 bg-crypt/80 rounded-md overflow-hidden ring-1 ring-white/10 group-hover:ring-gilt/40 transition-all duration-200 group-hover:scale-[1.03]">
+      <div className="shrink-0 w-11 aspect-[2/3] bg-crypt rounded-lg overflow-hidden ring-1 ring-white/10 group-hover:ring-gilt/40 transition-all duration-200">
         {posterUrl ? (
-          <img src={posterUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+          <img src={u(posterUrl)} alt="" className="size-full object-cover" loading="lazy" />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-gilt/40 text-xl bg-ink/60">
+          <div className="size-full flex items-center justify-center text-gilt/40 text-base bg-ink/60">
             🎬
           </div>
         )}
@@ -294,12 +306,12 @@ function SearchResultItem({
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <h4 className="font-semibold text-sm text-bone group-hover:text-gilt transition-colors truncate leading-tight">
+        <h4 className="font-semibold text-xs sm:text-sm text-bone group-hover:text-gilt transition-colors truncate leading-tight">
           {title}
         </h4>
-        <div className="flex items-center gap-2 mt-1.5 text-xs text-dust flex-wrap">
+        <div className="flex items-center gap-2 mt-1 text-[11px] text-dust flex-wrap">
           <span
-            className={`px-1.5 py-0.5 rounded text-[10px] font-medium tracking-wide uppercase ${
+            className={`px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${
               isTv
                 ? 'bg-sky-500/15 border border-sky-500/25 text-sky-300'
                 : 'bg-blood/15 border border-blood/25 text-blood-hot'
@@ -307,16 +319,16 @@ function SearchResultItem({
           >
             {mediaType}
           </span>
-          {year && <span className="text-dust/70 font-mono text-[11px]">{year}</span>}
+          {year && <span className="font-mono text-dust/70">{year}</span>}
           {result.vote_average > 0 && (
-            <span className="flex items-center gap-1 text-gilt font-mono text-[11px]">
-              <Star className="size-3 fill-gilt" />
+            <span className="flex items-center gap-1 text-gilt font-bold font-mono">
+              <Star className="size-2.5 fill-gilt" />
               <span>{result.vote_average.toFixed(1)}</span>
             </span>
           )}
         </div>
         {result.overview && (
-          <p className="text-xs text-dust/60 line-clamp-1 mt-1 leading-relaxed">
+          <p className="text-[11px] text-dust/60 line-clamp-1 mt-0.5 leading-relaxed">
             {result.overview}
           </p>
         )}

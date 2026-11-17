@@ -8,6 +8,7 @@ import { useRoom } from '../room/RoomContext';
 import { AvatarStack } from './Avatar';
 import { Close, Discord, Globe, Menu, Search, Sigil, Spinner, Users } from './Icons';
 import { SearchBar } from './SearchBar';
+import { registerBackHandler } from '../native/back-button';
 
 export function TopBar() {
   const { t, toggle, lang } = useI18n();
@@ -42,7 +43,27 @@ export function TopBar() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  useEffect(() => {
+    if (!mobileMenuOpen && !mobileSearchOpen && !people) return;
+    return registerBackHandler(() => {
+      if (mobileSearchOpen) {
+        setMobileSearchOpen(false);
+        return true;
+      }
+      if (mobileMenuOpen) {
+        setMobileMenuOpen(false);
+        return true;
+      }
+      if (people) {
+        setPeople(false);
+        return true;
+      }
+      return false;
+    });
+  }, [mobileMenuOpen, mobileSearchOpen, people]);
+
   const isHome = route.name === 'home';
+  const isSports = route.name === 'sports' || route.name === 'sports-watch';
   const isRooms = route.name === 'discover-rooms';
   const isAdminActive = route.name === 'admin-dashboard';
   const isProvidersActive = route.name === 'providers';
@@ -50,16 +71,18 @@ export function TopBar() {
   return (
     <>
       <header
-        className={`fixed inset-x-0 top-0 z-40 flex h-14 sm:h-16 items-center gap-3 sm:gap-4 px-[var(--pad)] transition-all duration-300 ${
-          scrolled
-            ? 'bg-ink/92 backdrop-blur-xl border-b border-gilt/15 shadow-[0_4px_24px_rgba(0,0,0,0.65)]'
-            : 'bg-gradient-to-b from-ink/95 via-ink/60 to-transparent border-b border-white/[0.04]'
+        className={`fixed inset-x-0 top-0 z-40 flex h-14 sm:h-16 items-center gap-3 sm:gap-4 px-[var(--pad)] pt-[env(safe-area-inset-top,0px)] transition-all duration-200 ${
+          isSports
+            ? 'bg-[#07080b] border-b border-white/[0.08] shadow-[0_8px_30px_rgba(0,0,0,0.85)]'
+            : scrolled
+            ? 'bg-ink/85 backdrop-blur-2xl border-b border-gilt/15 shadow-[0_8px_32px_rgba(0,0,0,0.7)]'
+            : 'bg-gradient-to-b from-ink/90 via-ink/50 to-transparent border-b border-white/[0.04] backdrop-blur-[2px]'
         }`}
       >
         {/* Logo */}
-        <a href={hrefs.home} className="group flex items-center gap-2 shrink-0" aria-label="NexusNight Home">
-          <Sigil className="size-6 sm:size-7 text-blood-hot transition-transform duration-700 group-hover:rotate-180" />
-          <span lang="en" dir="ltr" className="font-display text-[1.35rem] sm:text-[1.5rem] font-extrabold tracking-[0.02em] text-bone select-none">
+        <a href={hrefs.home} className="group flex items-center gap-2 shrink-0 outline-none" aria-label="NexusNight Home">
+          <Sigil className="size-6 sm:size-7 text-blood-hot transition-transform duration-700 ease-[var(--ease-out-expo)] group-hover:rotate-180 group-hover:scale-110" />
+          <span lang="en" dir="ltr" className="font-display text-[1.25rem] sm:text-[1.45rem] font-extrabold tracking-[0.03em] text-bone select-none">
             <span className="text-blood-hot">NEXUS</span>
             <span className="text-gilt">NIGHT</span>
           </span>
@@ -69,26 +92,39 @@ export function TopBar() {
         <nav className="ms-2 hidden items-center gap-4 text-sm sm:flex shrink-0">
           <a
             href={hrefs.home}
-            className={`relative py-1 transition-colors ${
+            className={`relative py-1 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 ${
               isHome ? 'text-bone font-medium' : 'text-dust/80 hover:text-bone focus-visible:text-gilt'
             }`}
           >
             {t('home')}
             {isHome && (
-              <span className="absolute -bottom-1.5 inset-x-0 h-0.5 bg-gilt rounded-full shadow-[0_0_8px_rgba(212,175,106,0.8)]" />
+              <span className="absolute -bottom-1.5 inset-x-0 h-0.5 bg-gilt rounded-full shadow-[0_0_8px_rgba(212,175,106,0.85)]" />
+            )}
+          </a>
+
+          <a
+            href={hrefs.sports}
+            className={`relative py-1 flex items-center gap-1.5 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 ${
+              isSports ? 'text-emerald-400 font-medium' : 'text-dust/80 hover:text-bone focus-visible:text-emerald-400'
+            }`}
+          >
+            <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>{t('sports')}</span>
+            {isSports && (
+              <span className="absolute -bottom-1.5 inset-x-0 h-0.5 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.85)]" />
             )}
           </a>
 
           {!isDiscordActivity && (
             <a
               href={hrefs.discoverRooms}
-              className={`relative py-1 transition-colors ${
+              className={`relative py-1 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 ${
                 isRooms ? 'text-bone font-medium' : 'text-dust/80 hover:text-bone focus-visible:text-gilt'
               }`}
             >
               {t('discoverRooms')}
               {isRooms && (
-                <span className="absolute -bottom-1.5 inset-x-0 h-0.5 bg-gilt rounded-full shadow-[0_0_8px_rgba(212,175,106,0.8)]" />
+                <span className="absolute -bottom-1.5 inset-x-0 h-0.5 bg-gilt rounded-full shadow-[0_0_8px_rgba(212,175,106,0.85)]" />
               )}
             </a>
           )}
@@ -98,7 +134,7 @@ export function TopBar() {
               href="https://discord.com/oauth2/authorize?client_id=1365445429700853853&scope=applications.commands+applications.entitlements"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 rounded-full border border-[#5865F2]/25 bg-[#5865F2]/10 px-2.5 py-1 text-xs font-medium text-[#7983f5] transition-all hover:border-[#5865F2]/60 hover:bg-[#5865F2]/20 hover:text-white"
+              className="flex items-center gap-1.5 rounded-full border border-[#5865F2]/30 bg-[#5865F2]/10 px-2.5 py-1 text-xs font-medium text-[#858ff8] transition-all duration-200 hover:border-[#5865F2]/60 hover:bg-[#5865F2]/20 hover:text-white hover:-translate-y-0.5 active:translate-y-0"
               title={lang === 'ar' ? 'جرّب على Discord' : 'Try on Discord'}
             >
               <Discord className="size-3.5" />
@@ -109,7 +145,7 @@ export function TopBar() {
           {isAdmin && (
             <a
               href={hrefs.adminDashboard}
-              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all ${
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all duration-200 hover:-translate-y-0.5 ${
                 isAdminActive
                   ? 'border-blood bg-blood/25 text-white shadow-[0_0_12px_rgba(220,48,68,0.4)]'
                   : 'border-blood/30 bg-blood/10 text-blood-hot hover:border-blood/60 hover:bg-blood/20'
@@ -124,7 +160,7 @@ export function TopBar() {
           {isAdmin && (
             <a
               href={hrefs.providers}
-              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all ${
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all duration-200 hover:-translate-y-0.5 ${
                 isProvidersActive
                   ? 'border-gilt bg-gilt/25 text-bone shadow-[0_0_12px_rgba(212,175,106,0.3)]'
                   : 'border-gilt/25 bg-gilt/10 text-gilt hover:border-gilt/60 hover:bg-gilt/20 hover:text-bone'
@@ -146,10 +182,10 @@ export function TopBar() {
           {/* Mobile Search Toggle Button */}
           <button
             onClick={() => setMobileSearchOpen((v) => !v)}
-            className={`p-2 rounded-full border transition-all md:hidden ${
+            className={`flex size-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-full border transition-all duration-200 md:hidden ${
               mobileSearchOpen
-                ? 'border-gilt/50 bg-gilt/15 text-gilt'
-                : 'border-white/10 bg-white/[0.04] text-dust hover:text-bone hover:border-white/20'
+                ? 'border-gilt/60 bg-gilt/15 text-gilt'
+                : 'border-white/10 bg-white/[0.04] text-dust hover:text-bone hover:border-white/20 active:scale-95'
             }`}
             aria-label={t('search')}
             aria-expanded={mobileSearchOpen}
@@ -171,34 +207,34 @@ export function TopBar() {
                 onClick={() => setPeople((v) => !v)}
                 aria-label={t('people')}
                 aria-expanded={people}
-                className="flex items-center gap-2 rounded-full border border-white/10 py-1 pe-3 ps-1.5 transition-colors hover:border-gilt/60 focus-visible:border-gilt"
+                className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] py-1 pe-3 ps-1.5 transition-all duration-200 hover:border-gilt/60 hover:-translate-y-0.5 focus-visible:border-gilt"
               >
                 <AvatarStack users={room.room.members} size={26} />
                 <Users className="size-4 text-dust" aria-hidden="true" />
                 {room.isHost && room.room.pending.length > 0 && (
-                  <span className="size-2 rounded-full bg-blood-hot" aria-label={`${room.room.pending.length} pending`} />
+                  <span className="size-2 rounded-full bg-blood-hot shadow-[0_0_6px_rgba(220,48,68,0.8)]" aria-label={`${room.room.pending.length} pending`} />
                 )}
               </button>
               {people && (
-                <PeoplePanel onClose={() => setPeople(false)} className="absolute end-0 top-[calc(100%+0.6rem)] z-50 w-[min(22rem,90vw)]" />
+                <PeoplePanel onClose={() => setPeople(false)} className="absolute end-0 top-[calc(100%+0.6rem)] z-50 w-[min(22rem,90vw)] animate-fade" />
               )}
             </div>
           )}
 
           {/* User auth state (desktop) */}
           {!room.active && auth.user && (
-            <div className="hidden sm:flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] py-1 ps-1.5 pe-2.5 transition-colors hover:border-white/20">
               <div className="flex items-center gap-1.5" title={auth.user.name}>
-                <AvatarStack users={[auth.user]} />
+                <AvatarStack users={[auth.user]} size={24} />
                 <span className="hidden lg:inline text-xs font-medium text-bone max-w-[90px] truncate">{auth.user.name}</span>
               </div>
               <button
                 onClick={auth.logout}
-                className="rounded-full border border-white/10 bg-white/5 p-1.5 text-dust transition-colors hover:bg-blood/20 hover:text-blood-hot hover:border-blood/30 focus-visible:border-gilt"
+                className="rounded-full border border-white/10 bg-white/5 p-1 text-dust transition-colors hover:bg-blood/20 hover:text-blood-hot hover:border-blood/30 focus-visible:border-gilt"
                 aria-label={lang === 'ar' ? 'تسجيل الخروج' : 'Logout'}
                 title={lang === 'ar' ? 'تسجيل الخروج' : 'Logout'}
               >
-                <Close className="size-3.5" aria-hidden="true" />
+                <Close className="size-3" aria-hidden="true" />
               </button>
             </div>
           )}
@@ -206,7 +242,7 @@ export function TopBar() {
           {!room.active && !auth.user && (
             <button
               onClick={auth.login}
-              className="hidden sm:flex items-center gap-1.5 rounded-full border border-[#5865F2]/40 bg-[#5865F2]/15 px-3 py-1.5 text-xs font-semibold text-[#7983f5] transition-all hover:bg-[#5865F2]/25 hover:text-white focus-visible:border-[#5865F2]"
+              className="hidden sm:flex items-center gap-1.5 rounded-full border border-[#5865F2]/40 bg-[#5865F2]/15 px-3 py-1.5 text-xs font-semibold text-[#858ff8] transition-all duration-200 hover:bg-[#5865F2]/25 hover:text-white hover:-translate-y-0.5 active:translate-y-0 focus-visible:border-[#5865F2]"
             >
               <Discord className="size-3.5" />
               <span>{t('login')}</span>
@@ -222,7 +258,7 @@ export function TopBar() {
           {/* Language Switcher (Desktop) */}
           <button
             onClick={toggle}
-            className="hidden sm:flex items-center gap-1.5 rounded-full border border-gilt/20 bg-gilt/[0.06] px-3 py-1.5 text-xs font-medium text-gilt/90 transition-all hover:border-gilt/50 hover:bg-gilt/15 hover:text-gilt focus-visible:border-gilt active:scale-95"
+            className="hidden sm:flex items-center gap-1.5 rounded-full border border-gilt/25 bg-gilt/[0.06] px-3 py-1.5 text-xs font-medium text-gilt/90 transition-all duration-200 hover:border-gilt/60 hover:bg-gilt/15 hover:text-gilt hover:-translate-y-0.5 active:scale-95 focus-visible:border-gilt"
             aria-label={lang === 'ar' ? 'تغيير اللغة' : 'Change language'}
           >
             <Globe className="size-3.5" aria-hidden="true" />
@@ -232,10 +268,10 @@ export function TopBar() {
           {/* Mobile Hamburger Menu Toggle */}
           <button
             onClick={() => setMobileMenuOpen((v) => !v)}
-            className={`p-2 rounded-full border transition-all sm:hidden ${
+            className={`flex size-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-full border transition-all duration-200 sm:hidden ${
               mobileMenuOpen
-                ? 'border-gilt/50 bg-gilt/15 text-gilt'
-                : 'border-white/10 bg-white/[0.04] text-dust hover:text-bone hover:border-white/20'
+                ? 'border-gilt/60 bg-gilt/15 text-gilt'
+                : 'border-white/10 bg-white/[0.04] text-dust hover:text-bone hover:border-white/20 active:scale-95'
             }`}
             aria-label={mobileMenuOpen ? 'Close Menu' : 'Open Menu'}
             aria-expanded={mobileMenuOpen}
@@ -246,7 +282,7 @@ export function TopBar() {
 
         {/* Mobile Search Overlay Bar */}
         {mobileSearchOpen && (
-          <div className="absolute inset-x-0 top-full bg-ink/98 backdrop-blur-2xl border-b border-gilt/20 px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.85)] md:hidden">
+          <div className="absolute inset-x-0 top-full bg-ink/98 backdrop-blur-2xl border-b border-gilt/20 px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.85)] animate-fade md:hidden">
             <SearchBar autoFocus onClose={() => setMobileSearchOpen(false)} />
           </div>
         )}
@@ -256,7 +292,7 @@ export function TopBar() {
       {mobileMenuOpen && (
         <div
           onClick={() => setMobileMenuOpen(false)}
-          className="fixed inset-0 top-14 bg-black/75 backdrop-blur-sm z-30 sm:hidden animate-fade"
+          className="fixed inset-0 top-[calc(3.5rem+env(safe-area-inset-top,0px))] bg-black/80 backdrop-blur-md z-30 sm:hidden animate-fade"
           aria-hidden="true"
         />
       )}
@@ -264,30 +300,43 @@ export function TopBar() {
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
         <div
-          className="fixed inset-x-0 top-14 bg-coal/98 border-b border-gilt/20 p-5 shadow-[0_20px_40px_rgba(0,0,0,0.9)] z-40 sm:hidden flex flex-col gap-4 animate-fade"
+          className="fixed inset-x-0 top-[calc(3.5rem+env(safe-area-inset-top,0px))] bg-coal/98 backdrop-blur-2xl border-b border-gilt/20 p-5 shadow-[0_24px_50px_rgba(0,0,0,0.95)] z-40 sm:hidden flex flex-col gap-4 animate-fade"
           dir={lang === 'ar' ? 'rtl' : 'ltr'}
         >
           {/* Navigation Links */}
-          <nav className="flex flex-col gap-1 text-sm">
+          <nav className="flex flex-col gap-1.5 text-sm">
             <a
               href={hrefs.home}
-              className={`flex items-center justify-between rounded-lg px-3 py-2.5 transition-colors ${
+              className={`flex items-center justify-between rounded-xl px-3.5 py-3 transition-all duration-200 active:scale-[0.98] ${
                 isHome ? 'bg-gilt/15 text-gilt font-medium' : 'text-bone hover:bg-white/[0.05]'
               }`}
             >
               <span>{t('home')}</span>
-              {isHome && <span className="size-1.5 rounded-full bg-gilt" />}
+              {isHome && <span className="size-2 rounded-full bg-gilt shadow-[0_0_8px_rgba(212,175,106,0.8)]" />}
+            </a>
+
+            <a
+              href={hrefs.sports}
+              className={`flex items-center justify-between rounded-xl px-3.5 py-3 transition-all duration-200 active:scale-[0.98] ${
+                isSports ? 'bg-emerald-500/15 text-emerald-400 font-medium' : 'text-bone hover:bg-white/[0.05]'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>{t('sports')} (beIN Live)</span>
+              </span>
+              {isSports && <span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />}
             </a>
 
             {!isDiscordActivity && (
               <a
                 href={hrefs.discoverRooms}
-                className={`flex items-center justify-between rounded-lg px-3 py-2.5 transition-colors ${
+                className={`flex items-center justify-between rounded-xl px-3.5 py-3 transition-all duration-200 active:scale-[0.98] ${
                   isRooms ? 'bg-gilt/15 text-gilt font-medium' : 'text-bone hover:bg-white/[0.05]'
                 }`}
               >
                 <span>{t('discoverRooms')}</span>
-                {isRooms && <span className="size-1.5 rounded-full bg-gilt" />}
+                {isRooms && <span className="size-2 rounded-full bg-gilt shadow-[0_0_8px_rgba(212,175,106,0.8)]" />}
               </a>
             )}
 
@@ -296,7 +345,7 @@ export function TopBar() {
                 href="https://discord.com/oauth2/authorize?client_id=1365445429700853853&scope=applications.commands+applications.entitlements"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[#7983f5] hover:bg-[#5865F2]/10 transition-colors"
+                className="flex items-center gap-2.5 rounded-xl px-3.5 py-3 text-[#858ff8] hover:bg-[#5865F2]/10 transition-all duration-200 active:scale-[0.98]"
               >
                 <Discord className="size-4" />
                 <span>Discord</span>
@@ -306,54 +355,54 @@ export function TopBar() {
             {isAdmin && (
               <a
                 href={hrefs.adminDashboard}
-                className={`flex items-center justify-between rounded-lg px-3 py-2.5 transition-colors ${
+                className={`flex items-center justify-between rounded-xl px-3.5 py-3 transition-all duration-200 active:scale-[0.98] ${
                   isAdminActive ? 'bg-blood/20 text-blood-hot font-medium' : 'text-blood-hot hover:bg-blood/10'
                 }`}
               >
                 <span className="flex items-center gap-2">
-                  <span className="size-1.5 rounded-full bg-blood-hot" />
+                  <span className="size-2 rounded-full bg-blood-hot" />
                   <span>{lang === 'ar' ? 'لوحة التحكم الإدارية' : 'Admin Dashboard'}</span>
                 </span>
-                {isAdminActive && <span className="size-1.5 rounded-full bg-blood-hot" />}
+                {isAdminActive && <span className="size-2 rounded-full bg-blood-hot shadow-[0_0_8px_rgba(220,48,68,0.8)]" />}
               </a>
             )}
 
             {isAdmin && (
               <a
                 href={hrefs.providers}
-                className={`flex items-center justify-between rounded-lg px-3 py-2.5 transition-colors ${
+                className={`flex items-center justify-between rounded-xl px-3.5 py-3 transition-all duration-200 active:scale-[0.98] ${
                   isProvidersActive ? 'bg-gilt/20 text-gilt font-medium' : 'text-gilt hover:bg-gilt/10'
                 }`}
               >
                 <span className="flex items-center gap-2">
-                  <span className="size-1.5 rounded-full bg-emerald-400" />
+                  <span className="size-2 rounded-full bg-emerald-400" />
                   <span>{t('providersNav')}</span>
                 </span>
-                {isProvidersActive && <span className="size-1.5 rounded-full bg-gilt" />}
+                {isProvidersActive && <span className="size-2 rounded-full bg-gilt shadow-[0_0_8px_rgba(212,175,106,0.8)]" />}
               </a>
             )}
           </nav>
 
-          <div className="h-px bg-white/[0.06]" />
+          <div className="h-px bg-white/[0.08]" />
 
           {/* User profile & Language switcher in mobile menu */}
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3 pt-1">
             {!room.active && auth.user ? (
               <div className="flex items-center gap-2">
-                <AvatarStack users={[auth.user]} size={28} />
-                <span className="text-xs font-medium text-bone max-w-[120px] truncate">{auth.user.name}</span>
+                <AvatarStack users={[auth.user]} size={32} />
+                <span className="text-xs font-medium text-bone max-w-[130px] truncate">{auth.user.name}</span>
                 <button
                   onClick={auth.logout}
-                  className="ms-1 rounded-full border border-white/10 bg-white/5 p-1 text-dust hover:text-blood-hot hover:border-blood/40"
+                  className="ms-1 rounded-full border border-white/10 bg-white/5 p-1.5 text-dust hover:text-blood-hot hover:border-blood/40"
                   aria-label={lang === 'ar' ? 'تسجيل الخروج' : 'Logout'}
                 >
-                  <Close className="size-3" />
+                  <Close className="size-3.5" />
                 </button>
               </div>
             ) : !room.active && !auth.user ? (
               <button
                 onClick={auth.login}
-                className="flex items-center gap-1.5 rounded-full border border-[#5865F2]/40 bg-[#5865F2]/15 px-3 py-1.5 text-xs font-semibold text-[#7983f5]"
+                className="flex items-center gap-1.5 rounded-full border border-[#5865F2]/40 bg-[#5865F2]/15 px-3.5 py-2 text-xs font-semibold text-[#858ff8] active:scale-95 transition-all"
               >
                 <Discord className="size-3.5" />
                 <span>{t('login')}</span>
@@ -362,7 +411,7 @@ export function TopBar() {
 
             <button
               onClick={toggle}
-              className="flex items-center gap-1.5 rounded-full border border-gilt/20 bg-gilt/[0.06] px-3 py-1.5 text-xs font-medium text-gilt"
+              className="flex items-center gap-1.5 rounded-full border border-gilt/25 bg-gilt/[0.08] px-3.5 py-2 text-xs font-medium text-gilt active:scale-95 transition-all"
             >
               <Globe className="size-3.5" />
               <span>{t('language')}</span>

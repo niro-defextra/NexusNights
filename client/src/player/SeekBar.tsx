@@ -62,9 +62,11 @@ export function SeekBar({ time, duration, buffered, sprite, onSeek, label, disab
       );
     }
     preview = (
-      <div className="pointer-events-none absolute bottom-full mb-3 flex -translate-x-1/2 flex-col items-center gap-1.5" style={{ left }}>
+      <div className="pointer-events-none absolute bottom-full mb-3 flex -translate-x-1/2 flex-col items-center gap-1.5 z-30" style={{ left }}>
         {tile}
-        <span className="rounded bg-black/80 px-1.5 py-0.5 text-xs font-medium tabular-nums">{fmtTime(tip.t)}</span>
+        <span className="rounded-full bg-black/90 border border-white/15 px-2.5 py-0.5 text-[0.72rem] font-mono font-medium tabular-nums text-bone shadow-xl backdrop-blur-md">
+          {fmtTime(tip.t)}
+        </span>
       </div>
     );
   }
@@ -80,7 +82,7 @@ export function SeekBar({ time, duration, buffered, sprite, onSeek, label, disab
       aria-valuemin={0}
       aria-valuemax={Math.round(duration)}
       aria-valuenow={Math.round(shown)}
-      className={`group/seek relative flex h-5 w-full touch-none items-center ${disabled ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}`}
+      className={`group/seek relative flex h-7 sm:h-6 w-full touch-none select-none items-center ${disabled ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}`}
       onPointerMove={(e) => {
         if (disabled) return;
         const p = pos(e.clientX);
@@ -106,12 +108,12 @@ export function SeekBar({ time, duration, buffered, sprite, onSeek, label, disab
       }}
       onPointerCancel={() => setDrag(null)}
     >
-      <div className={`relative w-full overflow-visible rounded-full bg-white/20 transition-[height] duration-150 ${active ? 'h-[7px]' : 'h-[3px]'}`}>
-        <div className="absolute inset-y-0 start-0 rounded-full bg-white/30" style={{ width: `${bufPct}%` }} />
-        <div className={`absolute inset-y-0 start-0 rounded-full bg-blood-hot ${drag === null ? 'transition-[width] duration-300 ease-linear' : ''}`} style={{ width: `${pct}%` }} />
+      <div className={`relative w-full overflow-visible rounded-full bg-white/20 transition-[height] duration-150 ${active ? 'h-[6px]' : 'h-[3.5px]'}`}>
+        <div className="absolute inset-y-0 start-0 rounded-full bg-white/35" style={{ width: `${bufPct}%` }} />
+        <div className={`absolute inset-y-0 start-0 rounded-full bg-blood-hot shadow-[0_0_8px_rgba(220,48,68,0.5)] ${drag === null ? 'transition-[width] duration-300 ease-linear' : ''}`} style={{ width: `${pct}%` }} />
         {hover && <div className="absolute inset-y-0 start-0 rounded-full bg-white/25" style={{ width: hover.x }} />}
         <div
-          className={`absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-gilt shadow-[0_0_0_3px_rgba(10,7,8,0.6)] transition-transform duration-150 ${active ? 'scale-100' : 'scale-0'}`}
+          className={`absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-gilt shadow-[0_0_0_2px_rgba(10,7,8,0.8),0_0_10px_rgba(212,175,106,0.6)] transition-transform duration-150 group-hover/seek:scale-100 ${active ? 'scale-100 ring-2 ring-gilt/40' : 'scale-0'}`}
           style={{ left: `${pct}%` }}
         />
       </div>

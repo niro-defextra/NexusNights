@@ -36,14 +36,31 @@
   @keyframes drift { from { transform: scale(1.04) translate3d(0, 0, 0); } to { transform: scale(1.14) translate3d(-1.2%, -1%, 0); } }
   @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
   @keyframes pop { 0% { opacity: 0; transform: scale(0.6); } 25% { opacity: 1; } 100% { opacity: 0; transform: scale(1.5); } }
+  @keyframes slideIn { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
 }
 
 html { background: var(--color-ink); color: var(--color-bone); color-scheme: dark; -webkit-tap-highlight-color: transparent; }
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
 html[lang="ar"] { 
   --font-display: "Amiri", "Cinzel", serif; 
   font-family: "IBM Plex Sans Arabic", "Hanken Grotesk Variable", system-ui, sans-serif;
 }
-body { margin: 0; font-family: var(--font-sans); min-height: 100dvh; overflow-x: hidden; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+body { 
+  margin: 0; 
+  font-family: var(--font-sans); 
+  min-height: 100dvh; 
+  overflow-x: hidden; 
+  text-rendering: optimizeLegibility; 
+  -webkit-font-smoothing: antialiased; 
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
 /* Arabic letters must stay joined: never letter-space them. */
 :lang(ar) { letter-spacing: normal; }
 html[lang="ar"] .font-display { font-family: "Amiri", serif; }
@@ -98,9 +115,19 @@ button:focus-visible, a:focus-visible, select:focus-visible, [tabindex]:focus-vi
 }
 
 :root {
-  --pad: clamp(1rem, 4vw, 3.5rem);
+  --pad: clamp(1rem, 3.5vw, 3.5rem);
   --card-w: clamp(10.5rem, 18vw, 16.5rem);
-  --poster-w: clamp(7.5rem, 11vw, 11rem);
+  --poster-w: clamp(7.5rem, 11vw, 11.5rem);
+  --header-h: 4rem;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --pad: 1rem;
+    --poster-w: clamp(7.2rem, 28vw, 9.5rem);
+    --card-w: clamp(9.5rem, 42vw, 14rem);
+    --header-h: 3.5rem;
+  }
 }
 
 /* floating reactions */

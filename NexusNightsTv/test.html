@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>NEXUSNIGHT TV Test</title>
+    <style>
+        body { font-family: Arial; padding: 20px; background: #111; color: white; }
+        .test { padding: 10px; margin: 10px; border: 1px solid #444; border-radius: 5px; }
+        .success { background: #1a3a1a; border-color: #2ecc71; }
+        .error { background: #3a1a1a; border-color: #e74c3c; }
+        .warning { background: #3a3a1a; border-color: #f39c12; }
+    </style>
+</head>
+<body>
+    <h1>NEXUSNIGHT TV Module Test</h1>
+    
+    <div id="test-results">
+        <div class="test" id="test-config">Testing NexusConfig...</div>
+        <div class="test" id="test-api">Testing NexusAPI...</div>
+        <div class="test" id="test-focus">Testing FocusManager...</div>
+        <div class="test" id="test-navigator">Testing Navigator...</div>
+        <div class="test" id="test-player">Testing NexusPlayer...</div>
+    </div>
+    
+    <script src="js/config.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/navigation.js"></script>
+    <script src="js/focus.js"></script>
+    <script src="js/player.js"></script>
+    
+    <script>
+        console.log('=== TEST START ===');
+        
+        function updateTest(id, status, message) {
+            var elem = document.getElementById(id);
+            elem.className = 'test ' + status;
+            elem.innerHTML = '<strong>' + message + '</strong><br>' + elem.innerHTML.split('<br>')[1];
+        }
+        
+        // Test NexusConfig
+        if (typeof NexusConfig !== 'undefined') {
+            updateTest('test-config', 'success', '✓ NexusConfig loaded');
+            console.log('NexusConfig:', NexusConfig);
+            console.log('Backend URL:', NexusConfig.getBackendUrl());
+            console.log('Language:', NexusConfig.getLanguage());
+        } else {
+            updateTest('test-config', 'error', '✗ NexusConfig NOT loaded');
+        }
+        
+        // Test NexusAPI
+        if (typeof NexusAPI !== 'undefined') {
+            updateTest('test-api', 'success', '✓ NexusAPI loaded');
+            console.log('NexusAPI keys:', Object.keys(NexusAPI));
+            
+            // Test testConnection
+            if (typeof NexusAPI.testConnection === 'function') {
+                console.log('Testing connection...');
+                NexusAPI.testConnection().then(function(result) {
+                    console.log('Connection test result:', result);
+                    updateTest('test-api', 'success', '✓ NexusAPI loaded (Connection: ' + (result ? 'OK' : 'Failed') + ')');
+                }).catch(function(err) {
+                    console.error('Connection test error:', err);
+                    updateTest('test-api', 'warning', '✓ NexusAPI loaded (Connection test error)');
+                });
+            } else {
+                updateTest('test-api', 'warning', '✓ NexusAPI loaded (no testConnection function)');
+            }
+        } else {
+            updateTest('test-api', 'error', '✗ NexusAPI NOT loaded');
+        }
+        
+        // Test FocusManager
+        if (typeof FocusManager !== 'undefined') {
+            updateTest('test-focus', 'success', '✓ FocusManager loaded');
+            console.log('FocusManager:', FocusManager);
+        } else {
+            updateTest('test-focus', 'error', '✗ FocusManager NOT loaded');
+        }
+        
+        // Test Navigator
+        if (typeof Navigator !== 'undefined') {
+            updateTest('test-navigator', 'success', '✓ Navigator loaded');
+            console.log('Navigator:', Navigator);
+        } else {
+            updateTest('test-navigator', 'error', '✗ Navigator NOT loaded');
+        }
+        
+        // Test NexusPlayer
+        if (typeof NexusPlayer !== 'undefined') {
+            updateTest('test-player', 'success', '✓ NexusPlayer loaded');
+            console.log('NexusPlayer:', NexusPlayer);
+        } else {
+            updateTest('test-player', 'error', '✗ NexusPlayer NOT loaded');
+        }
+        
+        console.log('=== TEST COMPLETE ===');
+    </script>
+</body>
+</html>

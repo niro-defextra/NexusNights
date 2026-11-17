@@ -17,12 +17,35 @@ export function createApp(svc: LibraryService) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', svc.cfg.trustProxy);
+
+  // CORS support for mobile applications (Capacitor) and cross-origin clients
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-token, Range, accept');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
   app.use(
     helmet({
-      // Stage 3 adds a real CSP + frame-ancestors for Discord; Activities are *embedded* in an iframe,
-      // so X-Frame-Options must NOT be set.
       contentSecurityPolicy: false,
       frameguard: false,
+      // Posters/artwork/HLS are consumed from other origins (Tizen TV app, Capacitor WebView,
+      // Discord Activity iframe). Sending an explicit `cross-origin` CORP prevents responses
+      // (and anything a proxy/CDN caches from them) from being treated as `same-origin`, which
+      // browsers kill with net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      crossOriginOpenerPolicy: false,
     }),
   );
   // Discord's proxy strips "/.proxy" before forwarding; this keeps the same URLs working when the

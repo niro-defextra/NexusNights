@@ -6,6 +6,10 @@ import { VidSrcMovAdapter } from './adapters/vidsrc-mov-adapter';
 import { VidApiAdapter } from './adapters/vidapi-adapter';
 import { VidRockAdapter } from './adapters/vidrock-adapter';
 import { DizibalAdapter } from './adapters/dizibal-adapter';
+import { VidriftAdapter } from './adapters/vidrift-adapter';
+import { VidfastAdapter } from './adapters/vidfast-adapter';
+import { AetherAdapter } from './adapters/aether-adapter';
+import { VidloveAdapter } from './adapters/vidlove-adapter';
 import { providerHealth } from './provider-health';
 
 export class ProviderRegistry {
@@ -19,8 +23,12 @@ export class ProviderRegistry {
 
   private registerDefaults() {
     this.register(new DizibalAdapter());  // Turkish content priority
-    this.register(new VidSrcMovAdapter()); // Primary
-    this.register(new VixSrcAdapter());    // Fallback
+    this.register(new VidriftAdapter());   // Fast, multi-lang, clean UI
+    this.register(new VidfastAdapter());   // Fast, themed, clean UI
+    this.register(new VidSrcMovAdapter()); // Multi-mirror fallback
+    this.register(new VixSrcAdapter());    // Fallback 1080p
+    this.register(new AetherAdapter());    // Multi-audio
+    this.register(new VidloveAdapter());   // Embed with hidden next/tour
     this.register(new VidApiAdapter());
     this.register(new VidRockAdapter());
   }
@@ -111,8 +119,16 @@ export class ProviderRegistry {
 
       if (adapter.id === 'dizibal') {
         description = 'Turkish streaming provider with direct M3U8 sources for Turkish movies, series & anime';
+      } else if (adapter.id === 'vidrift') {
+        description = 'Fast multi-language provider with clean player UI, Arabic subtitles and anime support';
+      } else if (adapter.id === 'vidfast') {
+        description = 'High-speed cloud provider with themed player interface and Arabic subtitles';
+      } else if (adapter.id === 'aether') {
+        description = 'Multi-audio provider supporting multiple languages for movies and TV series';
+      } else if (adapter.id === 'vidlove') {
+        description = 'Direct embed provider with automated UI stripping and clean controls';
       } else if (adapter.id === 'vidsrc-mov') {
-        description = 'Primary fast embed provider with automatic multi-mirror fallback';
+        description = 'Fast embed provider with automatic multi-mirror fallback';
       } else if (adapter.id === 'vixsrc') {
         description = 'Fallback 1080p stream embed with comprehensive catalog & direct resolution';
       } else if (adapter.id === 'vidapi') {

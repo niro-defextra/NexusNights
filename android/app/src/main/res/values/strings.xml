@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">NexusNight</string>
+    <string name="title_activity_main">NexusNight</string>
+    <string name="package_name">com.nexusnights.app</string>
+    <string name="custom_url_scheme">com.nexusnights.app</string>
+</resources>

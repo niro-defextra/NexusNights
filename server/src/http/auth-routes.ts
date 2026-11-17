@@ -48,6 +48,13 @@ export function createAuthRoutes(discord: DiscordOAuth, sessions: SessionManager
       // Create JWT tokens
       const { accessToken } = sessions.createTokens(user);
 
+      // Check for Android App redirect (custom URL scheme)
+      const ua = String(req.get('user-agent') || '');
+      const isAndroidApp = ua.includes('NexusNight') || (req.query.state as string)?.includes('platform=android');
+      if (isAndroidApp) {
+        return res.redirect(`nexusnight://auth/callback?token=${accessToken}`);
+      }
+
       // Redirect to client with token (use hash-based routing)
       // CLIENT_URL wins if set. Otherwise: on a real domain redirect back to the
       // same origin (the server also serves the built client); only fall back to

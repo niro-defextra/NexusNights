@@ -10,6 +10,9 @@ import { useI18n } from '../i18n';
 import { Spinner, Users, Film, Clock, TrendingUp, Activity, Lock, Zap, BarChart } from '../components/Icons';
 import { u } from '../api';
 import { useAuth } from '../auth/AuthContext';
+import { nativeStorage } from '../native/platform';
+import { registerBackHandler } from '../native/back-button';
+import { go } from '../router';
 
 const STORAGE_KEY = 'nexusnight_admin_token';
 
@@ -42,8 +45,23 @@ function useAdminToken() {
   const [token, setTokenState] = useState<string>(() => {
     try { return localStorage.getItem(STORAGE_KEY) ?? ''; } catch { return ''; }
   });
+
+  useEffect(() => {
+    nativeStorage.get(STORAGE_KEY).then((saved) => {
+      if (saved && saved !== token) setTokenState(saved);
+    }).catch(() => {});
+  }, []);
+
   const save = (t: string) => {
-    try { if (t) localStorage.setItem(STORAGE_KEY, t); else localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+    try {
+      if (t) {
+        localStorage.setItem(STORAGE_KEY, t);
+        void nativeStorage.set(STORAGE_KEY, t);
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+        void nativeStorage.remove(STORAGE_KEY);
+      }
+    } catch { /* ignore */ }
     setTokenState(t);
   };
   return [token, save] as const;
@@ -134,6 +152,13 @@ export function AdminDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    return registerBackHandler(() => {
+      go.home();
+      return true;
+    });
+  }, []);
 
   // Auto-verify saved token on mount
   useEffect(() => {

@@ -16,6 +16,7 @@ import { ProvidersDashboard } from './pages/ProvidersDashboard';
 import { DiscoverRooms } from './pages/DiscoverRooms';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { DiscordActivity } from './pages/DiscordActivity';
+import { SportsPage } from './pages/SportsPage';
 import { go, useRoute } from './router';
 
 /** Shown when a non-admin tries to access an admin-only page */
@@ -70,6 +71,8 @@ function Routes() {
           <UnifiedTitlePage id={route.id} />
         ) : route.name === 'global-title' ? (
           <GlobalTitle kind={route.kind} tmdbId={route.tmdbId} />
+        ) : route.name === 'sports' || route.name === 'sports-watch' ? (
+          <SportsPage />
         ) : route.name === 'providers' ? (
           <AdminGate><ProvidersDashboard /></AdminGate>
         ) : route.name === 'discover-rooms' ? (
@@ -85,9 +88,32 @@ function Routes() {
 }
 
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { SplashScreen } from '@capacitor/splash-screen';
+import { initBackButton } from './native/back-button';
+import { initDeepLinks } from './native/deep-links';
+import { handleExternalToken } from './auth/AuthContext';
 
 function AppContent() {
   const { user, loading } = useAuth();
+
+  useEffect(() => {
+    const unbindBack = initBackButton((msg) => {
+      console.log(msg);
+    });
+    const unbindLinks = initDeepLinks((token) => {
+      handleExternalToken(token);
+    });
+    return () => {
+      unbindBack();
+      unbindLinks();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      SplashScreen.hide().catch(() => {});
+    }
+  }, [loading]);
 
   if (loading) {
     return (

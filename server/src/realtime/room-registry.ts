@@ -81,6 +81,11 @@ class RoomRegistryStore {
     return this.rooms.get(roomId);
   }
 
+  setMedia(roomId: string, mediaId: string | null): void {
+    const r = this.rooms.get(roomId);
+    if (r) r.mediaId = mediaId || '';
+  }
+
   setStarted(roomId: string, started = true): void {
     const r = this.rooms.get(roomId);
     if (r) r.started = started;

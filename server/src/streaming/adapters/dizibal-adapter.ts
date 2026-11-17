@@ -182,10 +182,11 @@ export class DizibalAdapter implements ProviderAdapter {
       const type = normalizeMediaType(req.kind);
 
       // Get TMDB info
-      const { title, originalTitle, turkishTitle, year, posterPath } = await getTmdbInfo(
+      const { title, originalTitle, turkishTitle, originalLanguage, year, posterPath } = await getTmdbInfo(
         req.tmdbId,
         type
       );
+      const isNativeTurkish = originalLanguage === 'tr';
 
       const titles = [...new Set([turkishTitle, title, originalTitle].filter(Boolean))];
       diagnostics.push(`TMDB: ${titles.length} title variants (Turkish: ${turkishTitle || 'N/A'})`);
@@ -264,7 +265,32 @@ export class DizibalAdapter implements ProviderAdapter {
               : `${name}${year ? ` (${year})` : ''}`;
 
           // Audio info
-          const audio = audioSummary(config.audios);
+          const audios = config.audios || [];
+          const audio = audioSummary(audios);
+          const audioLower = audio.toLowerCase();
+
+          // Check if stream supports English (original audio, English track, etc.)
+          const hasEnglish = audios.some((a: any) => {
+            const l = String(a.lang || '').toLowerCase();
+            const label = String(a.label || '').toLowerCase();
+            return l === 'en' || l === 'eng' || label.includes('orijinal') || label.includes('english') || label.includes('ingil');
+          }) || audioLower.includes('orijinal') || audioLower.includes('english') || audioLower.includes('ingil');
+
+          // If content is not native Turkish, and Dizibal stream only has Turkish Dub (no English track):
+          // User rule: "لو المصدر الي هنجيب منه الفلم مش بيدعم انجليزي اصلاََ يبقى بلاش منه نهائي"
+          if (!isNativeTurkish && !hasEnglish) {
+            const skipMsg = `[Dizibal] Skipping candidate ${pageUrl}: Turkish dub only (${audio || 'Turkish'}) without English audio for non-Turkish media`;
+            diagnostics.push(skipMsg);
+            console.log(skipMsg);
+            continue;
+          }
+
+          const audioTracks = audios.map((a: any) => {
+            const l = String(a.lang || '').toLowerCase();
+            const label = a.label || '';
+            const detectedLang = l || (label.toLowerCase().includes('türk') ? 'tr' : label.toLowerCase().includes('orij') || label.toLowerCase().includes('eng') ? 'en' : 'und');
+            return { language: detectedLang, label: label || detectedLang.toUpperCase() };
+          });
 
           const source: ProviderSource = {
             id: `${this.id}-${req.kind}-${req.tmdbId}${req.season ? `-s${req.season}e${req.episode}` : ''}`,
@@ -275,6 +301,7 @@ export class DizibalAdapter implements ProviderAdapter {
             providerName: this.name,
             isEmbed: false,
             priority: this.basePriority,
+            audioTracks,
             headers, // Include required headers for CORS bypass
             subtitles, // Include provider subtitles
           };

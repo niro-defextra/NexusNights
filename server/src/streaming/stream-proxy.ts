@@ -55,10 +55,26 @@ function rewriteManifest(manifestText: string, baseUrl: string, streamId: string
 
 /** Returns headers needed to pass hotlink / CORS protection */
 function proxyHeaders(stream: ResolvedStream): Record<string, string> {
+  let referer = stream.headers['referer'];
+  if (!referer && stream.playlistUrl) {
+    try {
+      referer = new URL(stream.playlistUrl).origin + '/';
+    } catch {}
+  }
+  referer = referer || 'https://vixsrc.to/';
+
+  let origin = stream.headers['origin'];
+  if (!origin && referer) {
+    try {
+      origin = new URL(referer).origin;
+    } catch {}
+  }
+  origin = origin || 'https://vixsrc.to';
+
   return {
-    'User-Agent': stream.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-    'Referer': stream.headers['referer'] || 'https://vixsrc.to/',
-    'Origin': stream.headers['origin'] || 'https://vixsrc.to',
+    'User-Agent': stream.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Referer': referer,
+    'Origin': origin,
   };
 }
 

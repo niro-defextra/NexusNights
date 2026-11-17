@@ -1,0 +1,716 @@
+/*
+ * NEXUSNIGHT TV - Component Styles
+ * Sidebar, Cards, Buttons, Focus System
+ * Chromium M63 — no gap, no aspect-ratio, no :is()/:where(), no clamp()
+ */
+
+/* ============================================
+   SIDEBAR NAVIGATION (Cinema Collapsible Rail)
+   ============================================ */
+
+.sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 88px;
+    height: 100%;
+    background: rgba(10, 7, 9, 0.88);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    padding: var(--spacing-lg) 0;
+    z-index: 200;
+    overflow: hidden;
+    -webkit-transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1), background 0.25s ease, box-shadow 0.3s ease;
+    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1), background 0.25s ease, box-shadow 0.3s ease;
+}
+
+/* Expanded state on remote focus or mouse hover */
+.sidebar.expanded,
+.sidebar:hover,
+.sidebar:focus-within {
+    width: 270px;
+    background: rgba(8, 6, 8, 0.96);
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.85);
+}
+
+.sidebar-logo-mark {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    height: 72px;
+    margin-bottom: var(--spacing-xl);
+    -webkit-transition: padding 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: padding 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar.expanded .sidebar-logo-mark,
+.sidebar:hover .sidebar-logo-mark {
+    -webkit-justify-content: flex-start;
+    justify-content: flex-start;
+    padding-left: 24px;
+}
+
+.sidebar-menu {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.menu-item {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    border-radius: 14px;
+    cursor: pointer;
+    color: var(--color-text-muted);
+    outline: none;
+    width: 56px;
+    height: 56px;
+    margin: 8px auto;
+    padding: 0;
+    -webkit-justify-content: center;
+    justify-content: center;
+    -webkit-transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar.expanded .menu-item,
+.sidebar:hover .menu-item {
+    width: calc(100% - 24px);
+    margin: 6px 12px;
+    padding: 0 16px;
+    -webkit-justify-content: flex-start;
+    justify-content: flex-start;
+}
+
+.menu-item:hover {
+    color: var(--color-text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* Remote-control focus — solid red pill with subtle elevation */
+.menu-item.focused {
+    background: linear-gradient(135deg, #b3202f 0%, #8c1925 100%) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 18px rgba(179, 32, 47, 0.45);
+    -webkit-transform: scale(1.04);
+    transform: scale(1.04);
+}
+
+.menu-item.active:not(.focused) {
+    color: var(--color-brand-red);
+    background: rgba(179, 32, 47, 0.08);
+}
+
+.menu-icon {
+    font-size: var(--font-size-md);
+    display: -webkit-inline-flex;
+    display: inline-flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    margin: 0;
+    -webkit-transition: margin 0.25s ease;
+    transition: margin 0.25s ease;
+}
+
+.sidebar.expanded .menu-icon,
+.sidebar:hover .menu-icon {
+    margin-right: 14px;
+}
+
+.menu-label {
+    font-size: 19px;
+    font-weight: var(--font-weight-semibold);
+    white-space: nowrap;
+    opacity: 0;
+    max-width: 0;
+    -webkit-transform: translateX(10px);
+    transform: translateX(10px);
+    overflow: hidden;
+    pointer-events: none;
+    -webkit-transition: opacity 0.2s ease, max-width 0.28s ease, transform 0.25s ease;
+    transition: opacity 0.2s ease, max-width 0.28s ease, transform 0.25s ease;
+}
+
+.sidebar.expanded .menu-label,
+.sidebar:hover .menu-label {
+    opacity: 1;
+    max-width: 170px;
+    -webkit-transform: translateX(0);
+    transform: translateX(0);
+}
+
+/* ============================================
+   MAIN CONTENT
+   ============================================ */
+
+.main-content {
+    position: fixed;
+    left: 88px;
+    top: 0;
+    width: calc(100% - 88px);
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    background: var(--color-bg-black);
+    -webkit-animation: fadeIn var(--transition-slow);
+    animation: fadeIn var(--transition-slow);
+}
+
+.main-content::-webkit-scrollbar {
+    display: none;
+}
+
+/* ============================================
+   HERO SECTION
+   Full-bleed backdrop, cinematic bottom gradient,
+   content anchored to bottom-left (bottom-right in RTL)
+   ============================================ */
+
+.hero-section {
+    position: relative;
+    width: 100%;
+    height: var(--hero-height);
+    overflow: hidden;
+    margin-bottom: var(--spacing-xl);
+}
+
+.hero-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center 20%;
+}
+
+/* Cinematic gradient — heavy at the bottom to anchor text */
+.hero-backdrop::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 80%;
+    background: var(--gradient-hero-overlay);
+}
+
+.hero-content {
+    position: relative;
+    z-index: 2;
+    padding: var(--spacing-xl) var(--spacing-xl) var(--spacing-2xl);
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    -webkit-justify-content: flex-end;
+    justify-content: flex-end;
+    height: 100%;
+    max-width: 900px;
+}
+
+.hero-logo {
+    max-width: 500px;
+    max-height: 180px;
+    margin-bottom: var(--spacing-lg);
+    object-fit: contain;
+    object-position: left bottom;
+    filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.7));
+    -webkit-animation: cinematicEntrance var(--transition-slow);
+    animation: cinematicEntrance var(--transition-slow);
+}
+
+html[dir="rtl"] .hero-logo {
+    object-position: right bottom;
+}
+
+.hero-title {
+    font-size: var(--font-size-hero);
+    font-weight: var(--font-weight-black);
+    margin-bottom: var(--spacing-md);
+    text-shadow: 0 2px 20px rgba(0, 0, 0, 0.8);
+    line-height: var(--line-height-tight);
+    letter-spacing: -0.03em;
+    -webkit-animation: cinematicEntrance var(--transition-slow) 80ms;
+    animation: cinematicEntrance var(--transition-slow) 80ms;
+}
+
+.hero-meta {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    margin-bottom: var(--spacing-md);
+    font-size: var(--font-size-sm);
+    -webkit-animation: cinematicEntrance var(--transition-slow) 160ms;
+    animation: cinematicEntrance var(--transition-slow) 160ms;
+}
+
+.hero-meta-item {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+}
+
+.hero-rating {
+    color: var(--color-brand-gold);
+    font-weight: var(--font-weight-semibold);
+}
+
+.hero-year {
+    color: var(--color-text-secondary);
+    font-weight: var(--font-weight-medium);
+}
+
+.hero-genres {
+    color: var(--color-text-muted);
+}
+
+.hero-overview {
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-relaxed);
+    color: var(--color-text-secondary);
+    margin-bottom: var(--spacing-lg);
+    max-width: 800px;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+    -webkit-animation: cinematicEntrance var(--transition-slow) 240ms;
+    animation: cinematicEntrance var(--transition-slow) 240ms;
+}
+
+.hero-actions {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-animation: cinematicEntrance var(--transition-slow) 320ms;
+    animation: cinematicEntrance var(--transition-slow) 320ms;
+}
+
+/* ============================================
+   BUTTONS
+   ============================================ */
+
+.btn {
+    display: -webkit-inline-flex;
+    display: inline-flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    padding: var(--spacing-sm) var(--spacing-xl);
+    border: none;
+    border-radius: var(--border-radius);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    cursor: pointer;
+    -webkit-transition: all var(--transition-fast);
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+}
+
+.btn-primary {
+    background: var(--color-brand-red);
+    color: var(--color-text-primary);
+}
+
+.btn-primary:hover {
+    background: var(--color-brand-red-hover);
+}
+
+.btn-primary.focused {
+    background: var(--color-brand-red-hover);
+    -webkit-transform: scale(1.06);
+    transform: scale(1.06);
+    box-shadow: 0 0 0 4px rgba(196, 30, 58, 0.4);
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--color-text-primary);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.btn-secondary.focused {
+    background: rgba(255, 255, 255, 0.15);
+    -webkit-transform: scale(1.06);
+    transform: scale(1.06);
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.12);
+}
+
+.btn-icon {
+    margin-right: var(--spacing-sm);
+    font-size: var(--font-size-md);
+    display: -webkit-inline-flex;
+    display: inline-flex;
+    -webkit-align-items: center;
+    align-items: center;
+}
+
+/* ============================================
+   CONTENT ROWS
+   ============================================ */
+
+.content-section {
+    margin-bottom: var(--spacing-2xl);
+    padding: 0 var(--spacing-xl);
+}
+
+.section-header {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: space-between;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-lg);
+}
+
+.section-title {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-primary);
+    letter-spacing: -0.01em;
+}
+
+.section-link {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    -webkit-transition: color var(--transition-fast);
+    transition: color var(--transition-fast);
+    font-weight: var(--font-weight-medium);
+}
+
+.section-link:hover {
+    color: var(--color-brand-red);
+}
+
+.content-row {
+    display: -webkit-flex;
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: var(--spacing-md);
+    scrollbar-width: none;
+    scroll-behavior: smooth;
+}
+
+.content-row::-webkit-scrollbar {
+    display: none;
+}
+
+/* ============================================
+   POSTER CARDS (200×300)
+   ============================================ */
+
+.content-card {
+    position: relative;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    width: var(--poster-width);
+    cursor: pointer;
+    -webkit-transition: transform var(--transition-normal);
+    transition: transform var(--transition-normal);
+    border-radius: var(--border-radius-lg);
+    overflow: hidden;
+}
+
+/* Bottom gradient on hover/focus reveals card-info */
+.content-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 50%;
+    background: var(--gradient-card-overlay);
+    opacity: 0;
+    -webkit-transition: opacity var(--transition-normal);
+    transition: opacity var(--transition-normal);
+    pointer-events: none;
+}
+
+.content-card:hover {
+    -webkit-transform: translateY(-6px) scale(1.04);
+    transform: translateY(-6px) scale(1.04);
+}
+
+.content-card:hover::after {
+    opacity: 1;
+}
+
+/* Strong red focus ring for remote control */
+.content-card.focused {
+    -webkit-transform: translateY(-8px) scale(1.08);
+    transform: translateY(-8px) scale(1.08);
+    z-index: 10;
+    box-shadow: 0 0 0 var(--focus-border) var(--color-focus), var(--shadow-lg);
+}
+
+.content-card.focused::after {
+    opacity: 1;
+}
+
+.content-card.focused .card-info {
+    opacity: 1;
+    -webkit-transform: translateY(0);
+    transform: translateY(0);
+}
+
+.card-poster {
+    width: 100%;
+    height: var(--poster-height);
+    background: var(--color-bg-panel);
+    border-radius: var(--border-radius-lg);
+    object-fit: cover;
+    display: block;
+}
+
+.card-poster.loading {
+    background: linear-gradient(
+        90deg,
+        var(--color-bg-panel) 0%,
+        var(--color-bg-elevated) 50%,
+        var(--color-bg-panel) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-animation: shimmer 2s infinite;
+    animation: shimmer 2s infinite;
+}
+
+.card-info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: var(--spacing-sm);
+    z-index: 3;
+    opacity: 0;
+    -webkit-transform: translateY(8px);
+    transform: translateY(8px);
+    -webkit-transition: opacity var(--transition-normal), transform var(--transition-normal);
+    transition: opacity var(--transition-normal), transform var(--transition-normal);
+}
+
+.content-card:hover .card-info,
+.content-card.focused .card-info {
+    opacity: 1;
+    -webkit-transform: translateY(0);
+    transform: translateY(0);
+}
+
+.card-title {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: 4px;
+    color: var(--color-text-primary);
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+    line-height: var(--line-height-snug);
+}
+
+.card-meta {
+    font-size: 18px;
+    color: var(--color-text-secondary);
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+}
+
+.card-rating {
+    color: var(--color-brand-gold);
+    font-weight: var(--font-weight-medium);
+}
+
+/* ============================================
+   BACKDROP CARDS (horizontal format)
+   ============================================ */
+
+.backdrop-card {
+    position: relative;
+    -webkit-flex-shrink: 0;
+    flex-shrink: 0;
+    width: var(--backdrop-width);
+    cursor: pointer;
+    -webkit-transition: transform var(--transition-normal);
+    transition: transform var(--transition-normal);
+    border-radius: var(--border-radius-lg);
+    overflow: hidden;
+}
+
+.backdrop-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 60%;
+    background: var(--gradient-card-overlay);
+    opacity: 0;
+    -webkit-transition: opacity var(--transition-normal);
+    transition: opacity var(--transition-normal);
+    pointer-events: none;
+}
+
+.backdrop-card:hover {
+    -webkit-transform: translateY(-6px) scale(1.04);
+    transform: translateY(-6px) scale(1.04);
+}
+
+.backdrop-card:hover::after {
+    opacity: 1;
+}
+
+.backdrop-card.focused {
+    -webkit-transform: translateY(-8px) scale(1.08);
+    transform: translateY(-8px) scale(1.08);
+    z-index: 10;
+    box-shadow: 0 0 0 var(--focus-border) var(--color-focus), var(--shadow-lg);
+}
+
+.backdrop-card.focused::after {
+    opacity: 1;
+}
+
+.card-backdrop {
+    width: 100%;
+    height: var(--backdrop-height);
+    background: var(--color-bg-panel);
+    border-radius: var(--border-radius-lg);
+    object-fit: cover;
+    display: block;
+}
+
+/* ============================================
+   PAGE CONTAINER
+   ============================================ */
+
+.page-container {
+    min-height: 100%;
+    padding-bottom: var(--spacing-3xl);
+    -webkit-animation: fadeIn var(--transition-slow);
+    animation: fadeIn var(--transition-slow);
+}
+
+/* ============================================
+   FOCUS SYSTEM (global, remote control)
+   ============================================ */
+
+.focusable {
+    position: relative;
+}
+
+.focusable.focused {
+    outline: none;
+}
+
+/* Red focus ring — no glow, no pulse, clean and visible */
+.focusable.focused::before {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: -4px;
+    right: -4px;
+    bottom: -4px;
+    border: var(--focus-border) solid var(--color-focus);
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+/* Live streams hide VOD controls */
+.player-page.is-live .player-progress,
+.player-page.is-live #btn-rewind,
+.player-page.is-live #btn-forward {
+    display: none !important;
+}
+
+/* ============================================
+   FLEXBOX GAP FALLBACK (Chromium M63)
+   ============================================ */
+
+.hero-meta > * + *         { margin-left: var(--spacing-md); }
+.hero-meta-item > * + *    { margin-left: var(--spacing-xs); }
+.hero-actions > * + *      { margin-left: var(--spacing-md); }
+.content-row > * + *       { margin-left: var(--spacing-md); }
+
+/* ============================================
+   RTL LAYOUT (Arabic)
+   Sidebar on right, content on left, mirrored margins
+   ============================================ */
+
+html[dir="rtl"] .sidebar {
+    left: auto;
+    right: 0;
+    border-right: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
+    -webkit-animation-name: slideInRight;
+    animation-name: slideInRight;
+}
+
+html[dir="rtl"] .sidebar.expanded .sidebar-logo-mark,
+html[dir="rtl"] .sidebar:hover .sidebar-logo-mark {
+    padding-left: 0;
+    padding-right: 24px;
+}
+
+html[dir="rtl"] .main-content {
+    left: auto;
+    right: 88px;
+    width: calc(100% - 88px);
+}
+
+html[dir="rtl"] .menu-icon {
+    margin-right: 0;
+    margin-left: 0;
+}
+
+html[dir="rtl"] .sidebar.expanded .menu-icon,
+html[dir="rtl"] .sidebar:hover .menu-icon {
+    margin-right: 0;
+    margin-left: 14px;
+}
+
+html[dir="rtl"] .menu-label {
+    -webkit-transform: translateX(-10px);
+    transform: translateX(-10px);
+}
+
+html[dir="rtl"] .sidebar.expanded .menu-label,
+html[dir="rtl"] .sidebar:hover .menu-label {
+    -webkit-transform: translateX(0);
+    transform: translateX(0);
+}
+
+html[dir="rtl"] .btn-icon {
+    margin-right: 0;
+    margin-left: var(--spacing-sm);
+}
+    margin-left: var(--spacing-sm);
+}
+
+/* RTL gap fallbacks */
+html[dir="rtl"] .hero-meta > * + *,
+html[dir="rtl"] .hero-actions > * + *,
+html[dir="rtl"] .content-row > * + * {
+    margin-left: 0;
+    margin-right: var(--spacing-md);
+}
+
+html[dir="rtl"] .hero-meta-item > * + * {
+    margin-left: 0;
+    margin-right: var(--spacing-xs);
+}

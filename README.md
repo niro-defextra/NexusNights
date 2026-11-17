@@ -16,6 +16,7 @@ A Netflix-style **watch-together Discord Activity**. Browse a catalogue (powered
 - **Continue watching** stored per Discord user.
 - **Library:** scans a media folder, parses filenames, enriches metadata from TMDB (per language), generates thumbnails, sprites and subtitles.
 - **Multi-provider streaming** with health tracking and failover, plus a providers dashboard.
+- **External subtitles:** search and download subtitles from OpenSubtitles.com in 75+ languages directly from the player.
 
 ## Requirements
 
@@ -83,6 +84,8 @@ Copy `.env.example` to `.env`. **Never commit `.env`.**
 | `ALLOW_GUEST` | no | Allow login without Discord (**never enable in production**) |
 | `CONTROL_ROLE_IDS` | no | Comma-separated Discord role IDs that can always control playback |
 | `STREAMING_PROVIDERS_ENABLED` | no | Enable external streaming providers |
+| `OPENSUBTITLES_API_KEY` | no | OpenSubtitles.com API key for higher download limits (optional) |
+| `OPENSUBTITLES_USER_AGENT` | no | User agent for OpenSubtitles API (default: NexusNight v1.0) |
 
 ## Scripts
 

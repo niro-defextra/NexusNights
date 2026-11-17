@@ -1,0 +1,46 @@
+# Tizen Web application project metadata
+project_type: web_app
+profile: tv-samsung
+api_version: "10.0"
+build_type: Release
+output_name: NexusNightsTv
+output_path: ""
+opt: false
+signing_profile: ""
+trust_anchor: []
+files:
+  - config.xml
+  - index.html
+  - icon.png
+  - css/global.css
+  - css/components.css
+  - css/pages.css
+  - js/config.js
+  - js/api.js
+  - js/navigation.js
+  - js/focus.js
+  - js/player.js
+  - js/app.js
+  - js/pages/home.js
+  - js/pages/movies.js
+  - js/pages/series.js
+  - js/pages/details.js
+  - js/pages/search.js
+  - js/pages/sports.js
+  - js/pages/settings.js
+excludes:
+  - Build/*
+  - Debug/*
+  - Release/*
+  - Test/*
+  - .buildResult/*
+  - .sign/*
+  - .wgt
+  - tizen_web_project.yaml
+  - README.md
+  - FEATURES.md
+  - BACKEND_SETUP.md
+  - INSTALL_GUIDE.md
+  - build.ps1
+  - quick-start.ps1
+deps: []

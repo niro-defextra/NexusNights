@@ -207,8 +207,29 @@ export class Room {
       return { ok: true, changed: true };
     }
 
+    if (cmd.type === 'clear' || (cmd.type === 'select' && !cmd.mediaId)) {
+      this.state = {
+        mediaId: null,
+        position: 0,
+        playing: false,
+        hold: false,
+        at: now,
+        version: s.version + 1,
+        subtitleId: null,
+        audioTrack: 0,
+        playbackRate: 1,
+      };
+      this.started = false;
+      this.streamUrl = null;
+      for (const m of this.members.values()) {
+        m.awaitingLoad = false;
+        m.stalled = false;
+      }
+      return { ok: true, changed: true };
+    }
+
     if (cmd.type === 'select') {
-      if (!this.deps.mediaExists(cmd.mediaId)) return { ok: false, code: 'unknown_media' };
+      if (!cmd.mediaId || !this.deps.mediaExists(cmd.mediaId)) return { ok: false, code: 'unknown_media' };
       // several controllers' players fire "next episode" at the same moment → apply once
       if (s.mediaId === cmd.mediaId && now - this.lastSelectAt < 3000) return { ok: true, changed: false };
       this.lastSelectAt = now;

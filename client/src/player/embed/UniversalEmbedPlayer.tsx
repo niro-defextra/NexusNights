@@ -6,6 +6,8 @@ import { useI18n } from '../../i18n';
 import { EMPTY_CAPABILITIES, PROVIDER_COMPATIBILITY_REPORTS } from './provider-compatibility';
 import { mapProviderEmbedUrl, remapVidApiNestedPlayerFrame } from '../../util/url-utils';
 import type { EmbedPlayerCapabilities, EmbedPlayerState } from './types';
+import { screenManager } from '../../native/screen';
+import { registerBackHandler } from '../../native/back-button';
 import './nexusnight-videojs-skin.css';
 
 interface UniversalEmbedPlayerProps {
@@ -246,6 +248,35 @@ export function UniversalEmbedPlayer({
       void rootRef.current.requestFullscreen();
     }
   };
+
+  useEffect(() => {
+    const on = () => {
+      const isFullscreen = !!document.fullscreenElement;
+      if (isFullscreen) {
+        void screenManager.enterVideoFullscreen();
+      } else {
+        void screenManager.exitVideoFullscreen();
+      }
+    };
+    document.addEventListener('fullscreenchange', on);
+    void screenManager.setKeepAwake(true);
+    return () => {
+      document.removeEventListener('fullscreenchange', on);
+      void screenManager.exitVideoFullscreen();
+      void screenManager.setKeepAwake(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    return registerBackHandler(() => {
+      if (document.fullscreenElement) {
+        void document.exitFullscreen();
+        return true;
+      }
+      onBack();
+      return true;
+    });
+  }, [onBack]);
 
   const currentReport = PROVIDER_COMPATIBILITY_REPORTS[activeProvider] || PROVIDER_COMPATIBILITY_REPORTS.vixsrc;
 

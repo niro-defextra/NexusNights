@@ -17,6 +17,7 @@ export const Fullscreen = (p: P<SVGSVGElement>) => <svg {...base(p)}><path d="M8
 export const ExitFullscreen = (p: P<SVGSVGElement>) => <svg {...base(p)}><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" /></svg>;
 export const Subtitles = (p: P<SVGSVGElement>) => <svg {...base(p)}><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M6 11h4M14 11h4M6 15h8" /></svg>;
 export const AudioTracks = (p: P<SVGSVGElement>) => <svg {...base(p)}><path d="M9 18V5l12-2v13M9 13a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" /></svg>;
+export const Sliders = (p: P<SVGSVGElement>) => <svg {...base(p)}><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>;
 export const Gauge = (p: P<SVGSVGElement>) => <svg {...base(p)}><path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" /><path d="m9.17 14.83 5.66-5.66" /><circle cx="12" cy="12" r="9" /></svg>;
 export const Next = (p: P<SVGSVGElement>) => <svg {...base({ ...p, fill: 'currentColor', stroke: 'none' })}><path d="M5 4v16l11-8z" /><path d="M19 5v14" /></svg>;
 export const Skip = ({ dir, ...p }: P<SVGSVGElement> & { dir: 'fwd' | 'back' }) => <svg {...base({ ...p, fill: 'currentColor', stroke: 'none' })}>{dir === 'fwd' ? <><path d="m2 5 10 7-10 7z" /><path d="m13 5 10 7-10 7z" /></> : <><path d="m22 5-10 7 10 7z" /><path d="m11 5L1 12l10 7z" /></>}</svg>;
@@ -68,5 +69,38 @@ export const Search = (p: P<SVGSVGElement>) => (
 export const Discord = (p: P<SVGSVGElement>) => (
   <svg {...base({ ...p, fill: 'currentColor', stroke: 'none' })}>
     <path d="M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 0 0-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 0 0-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z" />
+  </svg>
+);
+
+export const Trophy = (p: P<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+    <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+    <path d="M4 22h16" />
+    <path d="M10 14.66V17c0 .55-.45 1-1 1H8v4h8v-4h-1c-.55 0-1-.45-1-1v-2.34" />
+    <path d="M6 4h12a2 2 0 0 1 2 2v3a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6V6a2 2 0 0 1 2-2z" />
+  </svg>
+);
+
+export const Calendar = (p: P<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </svg>
+);
+
+export const Radio = (p: P<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="2" />
+    <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14" />
+  </svg>
+);
+
+export const ShieldCheck = (p: P<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    <path d="m9 12 2 2 4-4" />
   </svg>
 );

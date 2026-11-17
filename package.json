@@ -14,6 +14,11 @@
     "dev:client": "npm run dev -w client",
     "dev:client:tunnel": "npm run dev:tunnel -w client",
     "build": "npm run build -w client && npm run build -w server",
+    "build:browser": "npm run build -w client",
+    "build:android": "node scripts/build-android.js",
+    "build:apk": "node scripts/build-android.js",
+    "cap:sync": "npm run build -w client && npx cap sync android",
+    "cap:open": "npx cap open android",
     "start": "npm run start -w server",
     "scan": "npm run scan -w server",
     "list": "npm run list -w server",
@@ -21,9 +26,20 @@
     "sample-media": "npm run sample-media -w server"
   },
   "devDependencies": {
+    "@capacitor/cli": "^6.2.3",
     "concurrently": "^9.1.0"
   },
   "dependencies": {
+    "@capacitor-community/keep-awake": "^5.0.1",
+    "@capacitor/android": "^6.2.3",
+    "@capacitor/app": "^6.0.3",
+    "@capacitor/core": "^6.2.3",
+    "@capacitor/network": "^6.0.4",
+    "@capacitor/preferences": "^6.0.4",
+    "@capacitor/screen-orientation": "^6.0.4",
+    "@capacitor/share": "^6.0.4",
+    "@capacitor/splash-screen": "^6.0.4",
+    "@capacitor/status-bar": "^6.0.3",
     "@discord/embedded-app-sdk": "^2.5.0"
   }
 }
