@@ -72,6 +72,19 @@ export interface TmdbPagedResponse<T> {
   total_results: number;
 }
 
+export interface TmdbVideo {
+  iso_639_1: string;
+  iso_3166_1: string;
+  name: string;
+  key: string;
+  site: string;
+  size: number;
+  type: string;
+  official: boolean;
+  published_at: string;
+  id: string;
+}
+
 type Params = Record<string, string | number | undefined>;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -264,6 +277,21 @@ export class TmdbClient {
 
   async getImages(kind: 'movie' | 'tv', id: number): Promise<TmdbImagesResponse | null> {
     return this.request<TmdbImagesResponse>(`/${kind}/${id}/images`);
+  }
+
+  async getVideos(kind: 'movie' | 'tv', id: number, language?: string) {
+    const lang = language ?? this.cfg.tmdb.languages[0] ?? 'en-US';
+    return this.request<{ id: number; results: TmdbVideo[] }>(`/${kind}/${id}/videos`, { language: lang });
+  }
+
+  async getRecommendations(kind: 'movie' | 'tv', id: number, page = 1, language?: string) {
+    const lang = language ?? this.cfg.tmdb.languages[0] ?? 'en-US';
+    return this.request<TmdbPagedResponse<TmdbSearchHit>>(`/${kind}/${id}/recommendations`, { page, language: lang });
+  }
+
+  async getSimilar(kind: 'movie' | 'tv', id: number, page = 1, language?: string) {
+    const lang = language ?? this.cfg.tmdb.languages[0] ?? 'en-US';
+    return this.request<TmdbPagedResponse<TmdbSearchHit>>(`/${kind}/${id}/similar`, { page, language: lang });
   }
 }
 

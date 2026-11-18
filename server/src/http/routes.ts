@@ -102,6 +102,23 @@ function prepareProviderSources(config: PlaybackConfig): void {
   }
 }
 
+/**
+ * Ensures all playback sources returned to clients are native HLS streams (zero embeds/iframes)
+ */
+function convertToNativeSources(sources: PlaybackSourcePublic[]): PlaybackSourcePublic[] {
+  return sources.map((s) => {
+    if (s.type === 'embed') {
+      return {
+        ...s,
+        url: `/api/streaming/resolve-native`,
+        type: 'hls' as const,
+        provider: `${s.provider} (Native Sniffer)`,
+      };
+    }
+    return s;
+  });
+}
+
 const notFound = (res: Response) => res.status(404).json({ error: 'not_found' });
 const FILE_OPTS = { maxAge: '7d', immutable: true, dotfiles: 'allow' as const };
 
@@ -636,6 +653,17 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         playbackConfig.source = nativeSource;
       }
 
+      // Guarantee 100% native player playback (eliminate third-party embeds)
+      if (playbackConfig.source && playbackConfig.source.type === 'embed') {
+        playbackConfig.source = {
+          ...playbackConfig.source,
+          url: `/api/streaming/resolve-native`,
+          type: 'hls',
+          provider: `${playbackConfig.source.provider} (Native Sniffer)`,
+        };
+      }
+      playbackConfig.alternatives = convertToNativeSources(playbackConfig.alternatives);
+
       const introDbSegments = await withDeadline(introDbSegmentsPromise, { found: false }, 1500);
       skipTimings = mergeSkipSegments(skipTimings, introDbSegments);
       if (!skipTimings.found) skipTimings = null;
@@ -842,6 +870,17 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         }
         playbackConfig.source = nativeSource;
       }
+
+      // Guarantee 100% native player playback (eliminate third-party embeds)
+      if (playbackConfig.source && playbackConfig.source.type === 'embed') {
+        playbackConfig.source = {
+          ...playbackConfig.source,
+          url: `/api/streaming/resolve-native`,
+          type: 'hls',
+          provider: `${playbackConfig.source.provider} (Native Sniffer)`,
+        };
+      }
+      playbackConfig.alternatives = convertToNativeSources(playbackConfig.alternatives);
 
       const introDbSegments = await withDeadline(introDbSegmentsPromise, { found: false }, 1500);
       skipTimings = mergeSkipSegments(skipTimings, introDbSegments);
@@ -1523,6 +1562,42 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     res.json({ results, total_results: results.length, page: 1, total_pages: 1 });
   }));
 
+  // TMDB Videos (trailers)
+  router.get('/tmdb/videos/:kind(movie|tv)/:id', apiLimiter, wrap(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const kind = req.params.kind as 'movie' | 'tv';
+    if (isNaN(id)) return res.status(400).json({ error: 'invalid_id' });
+    const data = await svc.tmdb.getVideos(kind, id);
+    const videos = (data?.results || [])
+      .filter((v: any) => v.site === 'YouTube')
+      .sort((a: any, b: any) => {
+        // Prioritize: Trailer > Teaser > everything else; official first
+        const typeScore = (t: string) => t === 'Trailer' ? 3 : t === 'Teaser' ? 2 : 1;
+        const diff = typeScore(b.type) - typeScore(a.type);
+        if (diff !== 0) return diff;
+        return (b.official ? 1 : 0) - (a.official ? 1 : 0);
+      });
+    res.json({ results: videos });
+  }));
+
+  // TMDB Recommendations
+  router.get('/tmdb/recommendations/:kind(movie|tv)/:id', apiLimiter, wrap(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const kind = req.params.kind as 'movie' | 'tv';
+    if (isNaN(id)) return res.status(400).json({ error: 'invalid_id' });
+    const data = await svc.tmdb.getRecommendations(kind, id);
+    res.json(data || { results: [], page: 1, total_pages: 0, total_results: 0 });
+  }));
+
+  // TMDB Similar
+  router.get('/tmdb/similar/:kind(movie|tv)/:id', apiLimiter, wrap(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const kind = req.params.kind as 'movie' | 'tv';
+    if (isNaN(id)) return res.status(400).json({ error: 'invalid_id' });
+    const data = await svc.tmdb.getSimilar(kind, id);
+    res.json(data || { results: [], page: 1, total_pages: 0, total_results: 0 });
+  }));
+
   router.get('/library', apiLimiter, (req, res) => {
     const lang = resolveLang(req.query.lang);
     const list = [...store.titles.values()]
@@ -1869,9 +1944,10 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     const kind = req.body?.kind === 'series' ? 'series' : 'movie';
     const season = req.body?.season ? parseInt(req.body.season, 10) : undefined;
     const episode = req.body?.episode ? parseInt(req.body.episode, 10) : undefined;
+    const provider = req.body?.provider ? String(req.body.provider).replace(/\s*\([^)]*\)/g, '').trim() : undefined;
 
     try {
-      const resolved = await streamResolver.resolve({ tmdbId, kind, season, episode });
+      const resolved = await streamResolver.resolve({ tmdbId, kind, season, episode, provider });
       res.json({
         ok: true,
         streamId: resolved.id,

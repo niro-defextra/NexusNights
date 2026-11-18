@@ -6,10 +6,10 @@
  * - TMDB-only titles (e.g., "tmdb:76479") - Metadata exploration
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, u } from '../api';
 import type { EpisodeSummary, TitleDetail } from '../api-types';
-import { Play, Star, Plus, ExternalLink, Users } from '../components/Icons';
+import { Play, Star, Plus, ExternalLink, Users, ChevronRight } from '../components/Icons';
 import { Skel } from '../components/Skeleton';
 import { ErrorState } from '../components/States';
 import { WatchPartyButton } from '../components/WatchPartyButton';
@@ -400,7 +400,8 @@ function TmdbTvView({ data }: { data: TmdbTvDetail }) {
 }
 
 /**
- * Local title (full playback support) - reuse existing TitlePage logic
+ * Local title (full playback support)
+ * Enhanced with: trailer auto-play, immersive idle mode, recommendations
  */
 function LocalTitle({ id }: { id: string }) {
   const { lang, t, num } = useI18n();
@@ -408,6 +409,16 @@ function LocalTitle({ id }: { id: string }) {
   const progress = useMemo(() => allProgress(), [id]);
   const [season, setSeason] = useState<number | null>(null);
   const data = d.data;
+
+  // ── Trailer state ──────────────────────────────────────────────────────────
+  const [trailerKey, setTrailerKey] = useState<string | null>(null);
+  const [trailerPhase, setTrailerPhase] = useState<'idle' | 'backdrop' | 'immersive'>('idle');
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const immersiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heroRef = useRef<HTMLElement>(null);
+
+  // ── Recommendations state ──────────────────────────────────────────────────
+  const [recommendations, setRecommendations] = useState<any[]>([]);
 
   const resumeEp = useMemo(() => {
     if (!data) return undefined;
@@ -420,10 +431,81 @@ function LocalTitle({ id }: { id: string }) {
     return undefined;
   }, [data, progress]);
 
-  useEffect(() => { setSeason(null); window.scrollTo(0, 0); }, [id]);
+  useEffect(() => { setSeason(null); setTrailerPhase('idle'); setTrailerKey(null); window.scrollTo(0, 0); }, [id]);
   useEffect(() => {
     if (data && season === null && data.seasons.length) setSeason(resumeEp?.season ?? data.seasons[0].season);
   }, [data, season, resumeEp]);
+
+  // ── Fetch trailer + recommendations from TMDB ─────────────────────────────
+  useEffect(() => {
+    if (!data?.tmdbId) return;
+    const kind = data.kind === 'series' ? 'tv' : 'movie';
+    const tmdbId = data.tmdbId;
+
+    // Fetch trailer
+    fetch(u(`/api/tmdb/videos/${kind}/${tmdbId}`))
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.results?.length) setTrailerKey(d.results[0].key);
+      })
+      .catch(() => {});
+
+    // Fetch recommendations
+    fetch(u(`/api/tmdb/recommendations/${kind}/${tmdbId}`))
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.results?.length) {
+          setRecommendations(d.results.filter((r: any) => r.poster_path).slice(0, 12));
+        }
+      })
+      .catch(() => {});
+  }, [data?.tmdbId, data?.kind]);
+
+  // ── Idle timer: 5s → backdrop trailer, 5s more → immersive ────────────────
+  const resetIdleTimer = useCallback(() => {
+    // If in immersive → exit to idle, cancel everything
+    if (trailerPhase === 'immersive') {
+      setTrailerPhase('idle');
+    }
+
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (immersiveTimerRef.current) clearTimeout(immersiveTimerRef.current);
+
+    if (!trailerKey) return;
+
+    idleTimerRef.current = setTimeout(() => {
+      setTrailerPhase('backdrop');
+      immersiveTimerRef.current = setTimeout(() => {
+        setTrailerPhase('immersive');
+      }, 5000);
+    }, 5000);
+  }, [trailerKey, trailerPhase]);
+
+  useEffect(() => {
+    if (!trailerKey) return;
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'] as const;
+    const handler = () => resetIdleTimer();
+
+    events.forEach(e => window.addEventListener(e, handler, { passive: true }));
+    resetIdleTimer(); // Start the first timer
+
+    return () => {
+      events.forEach(e => window.removeEventListener(e, handler));
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (immersiveTimerRef.current) clearTimeout(immersiveTimerRef.current);
+    };
+  }, [trailerKey, resetIdleTimer]);
+
+  // ── Watch trailer button handler ───────────────────────────────────────────
+  const playTrailerNow = useCallback(() => {
+    if (!trailerKey) return;
+    setTrailerPhase('backdrop');
+    if (immersiveTimerRef.current) clearTimeout(immersiveTimerRef.current);
+    immersiveTimerRef.current = setTimeout(() => {
+      setTrailerPhase('immersive');
+    }, 5000);
+  }, [trailerKey]);
 
   if (d.error && !data) {
     const nf = d.error instanceof ApiError && d.error.status === 404;
@@ -448,38 +530,157 @@ function LocalTitle({ id }: { id: string }) {
     data.kind === 'series' ? fmtCount(data.episodeCount, 'episodeCount1', 'episodesCount', t) : null,
   ].filter(Boolean);
 
+  const isImmersive = trailerPhase === 'immersive';
+  const showTrailerVideo = trailerPhase === 'backdrop' || trailerPhase === 'immersive';
+
   return (
     <div className="pb-20">
-      <section className="relative isolate min-h-[min(66dvh,34rem)] overflow-hidden">
-        {img ? <img src={u(img)} alt="" className="absolute inset-0 -z-20 size-full object-cover" /> : <div className="absolute inset-0 -z-20 bg-[radial-gradient(ellipse_at_70%_20%,#3a1219,#0a0708_70%)]" />}
-        <div className="absolute inset-0 -z-10 bg-gradient-to-r from-ink via-ink/75 to-ink/20 rtl:bg-gradient-to-l" />
-        <div className="absolute inset-0 -z-10 bg-gradient-to-t from-ink via-ink/20 to-ink/60" />
-        <div className="flex min-h-[min(66dvh,34rem)] items-end px-[var(--pad)] pb-10 pt-28">
+      {/* ── Immersive overlay ─────────────────────────────────────────────── */}
+      {isImmersive && (
+        <div
+          className="fixed inset-0 z-[999] bg-black animate-[fade_0.6s_ease]"
+          onClick={() => setTrailerPhase('idle')}
+          onMouseMove={() => setTrailerPhase('idle')}
+        >
+          <iframe
+            src={`https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&mute=0&controls=0&modestbranding=1&rel=0&showinfo=0&loop=1&playlist=${trailerKey}`}
+            className="size-full"
+            allow="autoplay; encrypted-media"
+            allowFullScreen
+          />
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 animate-pulse text-sm text-white/50 pointer-events-none">
+            {t('moveToExit') || 'حرّك الماوس للخروج'}
+          </div>
+        </div>
+      )}
+
+      {/* ── Hero section ──────────────────────────────────────────────────── */}
+      <section ref={heroRef} className="relative isolate min-h-[min(72dvh,38rem)] overflow-hidden">
+        {/* Backdrop: static image OR trailer video */}
+        {showTrailerVideo && trailerKey ? (
+          <div className="absolute inset-0 -z-20 animate-[fade_1s_ease]">
+            <iframe
+              src={`https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&showinfo=0&loop=1&playlist=${trailerKey}`}
+              className="absolute inset-0 size-full scale-[1.2] pointer-events-none"
+              style={{ border: 'none' }}
+              allow="autoplay; encrypted-media"
+              tabIndex={-1}
+            />
+          </div>
+        ) : img ? (
+          <img src={u(img)} alt="" className="absolute inset-0 -z-20 size-full object-cover" />
+        ) : (
+          <div className="absolute inset-0 -z-20 bg-[radial-gradient(ellipse_at_70%_20%,#3a1219,#0a0708_70%)]" />
+        )}
+
+        {/* Gradient overlays */}
+        <div className="absolute inset-0 -z-10 bg-gradient-to-r from-ink via-ink/80 to-ink/10 rtl:bg-gradient-to-l" />
+        <div className="absolute inset-0 -z-10 bg-gradient-to-t from-ink via-ink/30 to-ink/50" />
+
+        {/* Hero content */}
+        <div className="flex min-h-[min(72dvh,38rem)] items-end px-[var(--pad)] pb-12 pt-28">
           <div className="max-w-[min(42rem,100%)] animate-rise">
-            <p className="mb-2 text-xs font-medium uppercase tracking-[0.3em] text-gilt">{data.kind === 'series' ? t('series') : t('movie')}</p>
-            <h1 className="text-balance font-display text-[clamp(2rem,5.4vw,3.8rem)] font-extrabold leading-[1.05] tracking-wide">{data.title}</h1>
+            <p className="mb-2 text-xs font-medium uppercase tracking-[0.3em] text-gilt">
+              {data.kind === 'series' ? t('series') : t('movie')}
+            </p>
+            <h1 className="text-balance font-display text-[clamp(2rem,5.4vw,3.8rem)] font-extrabold leading-[1.05] tracking-wide">
+              {data.title}
+            </h1>
+
+            {/* Meta row */}
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-dust">
-              {data.rating ? <span className="inline-flex items-center gap-1 font-semibold text-gilt"><Star className="size-3.5" />{data.rating.toFixed(1)}</span> : null}
+              {data.rating ? (
+                <span className="inline-flex items-center gap-1 font-semibold text-gilt">
+                  <Star className="size-3.5" />{data.rating.toFixed(1)}
+                </span>
+              ) : null}
               {meta.map((m, i) => <span key={i}>{m}</span>)}
-              {data.genres.slice(0, 4).map((g) => <span key={g} className="rounded-sm border border-white/15 px-1.5 py-px text-[0.72rem] uppercase tracking-wider">{g}</span>)}
+              {data.genres.slice(0, 4).map((g) => (
+                <span key={g} className="rounded-sm border border-white/15 px-1.5 py-px text-[0.72rem] uppercase tracking-wider">{g}</span>
+              ))}
             </div>
-            <p dir="auto" className="mt-4 max-w-prose leading-relaxed text-bone/85">{data.overview || t('synopsis')}</p>
-            {playId && (
-              <div className="mt-6 flex flex-wrap items-center gap-3">
-                <button onClick={() => go.watch(playId)} className="group inline-flex h-11 items-center gap-2.5 rounded-md bg-blood px-7 font-semibold text-white shadow-[0_8px_30px_-8px_rgba(220,48,68,0.7)] transition-all hover:bg-blood-hot active:scale-[0.97]">
+
+            {/* Tagline */}
+            {data.tagline && (
+              <p className="mt-3 text-gilt/80 italic text-sm">{data.tagline}</p>
+            )}
+
+            {/* Overview */}
+            <p dir="auto" className="mt-4 max-w-prose text-[0.94rem] leading-relaxed text-bone/85 line-clamp-4">
+              {data.overview || t('synopsis')}
+            </p>
+
+            {/* Action buttons */}
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              {playId && (
+                <button
+                  onClick={() => go.watch(playId)}
+                  className="group inline-flex h-12 items-center gap-2.5 rounded-lg bg-blood px-8 font-semibold text-white shadow-[0_8px_30px_-8px_rgba(220,48,68,0.7)] transition-all hover:bg-blood-hot hover:shadow-[0_12px_40px_-6px_rgba(220,48,68,0.85)] active:scale-[0.97]"
+                >
                   <Play className="size-5 transition-transform group-hover:scale-110 rtl:-scale-x-100" />
                   {hasProgress ? t('resume') : t('play')}
-                  {data.kind === 'series' && resumeEp?.season != null && <span className="text-white/75">· {t('season', { n: resumeEp.season })} {t('episodeShort', { n: resumeEp.episode ?? 0 })}</span>}
+                  {data.kind === 'series' && resumeEp?.season != null && (
+                    <span className="text-white/75">· {t('season', { n: resumeEp.season })} {t('episodeShort', { n: resumeEp.episode ?? 0 })}</span>
+                  )}
                 </button>
-                <WatchPartyButton mediaId={playId} title={data.title || ''} />
-              </div>
-            )}
+              )}
+
+              {/* Watch Trailer button */}
+              {trailerKey && (
+                <button
+                  onClick={playTrailerNow}
+                  className="group inline-flex h-12 items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-6 text-sm font-medium text-bone backdrop-blur-sm transition-all hover:border-white/30 hover:bg-white/10 active:scale-[0.97]"
+                >
+                  <svg className="size-5 text-blood transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="5 3 19 12 5 21 5 3" fill="currentColor" />
+                  </svg>
+                  {t('watchTrailer') || 'مشاهدة الإعلان'}
+                </button>
+              )}
+
+              {playId && <WatchPartyButton mediaId={playId} title={data.title || ''} />}
+            </div>
           </div>
         </div>
       </section>
 
+      {/* ── Details grid (for movies) ─────────────────────────────────────── */}
+      {data.kind === 'movie' && (
+        <section className="px-[var(--pad)] pt-6">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3 max-w-md rounded-xl bg-white/[0.03] border border-white/[0.06] p-5 text-sm">
+            {data.year && (
+              <>
+                <span className="text-dust">{t('releaseDate') || 'تاريخ الإصدار'}</span>
+                <span className="font-medium text-bone text-end">{data.year}</span>
+              </>
+            )}
+            {data.runtimeSec && data.runtimeSec > 0 && (
+              <>
+                <span className="text-dust">{t('duration') || 'المدة'}</span>
+                <span className="font-medium text-bone text-end">{fmtRuntime(data.runtimeSec, t)}</span>
+              </>
+            )}
+            {data.genres.length > 0 && (
+              <>
+                <span className="text-dust">{t('genres') || 'التصنيفات'}</span>
+                <span className="font-medium text-bone text-end">{data.genres.join(' · ')}</span>
+              </>
+            )}
+            {data.rating && (
+              <>
+                <span className="text-dust">{t('rating') || 'التقييم'}</span>
+                <span className="inline-flex items-center gap-1 font-medium text-gilt justify-end">
+                  <Star className="size-3" />{data.rating.toFixed(1)}
+                </span>
+              </>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* ── Episodes (series) ──────────────────────────────────────────────── */}
       {data.kind === 'series' && cur && (
-        <section className="px-[var(--pad)] pt-4">
+        <section className="px-[var(--pad)] pt-6">
           <div className="mb-4 flex items-end justify-between gap-4 border-b border-white/10 pb-3">
             <h2 className="font-display text-xl font-semibold tracking-[0.12em]">{t('episodes')}</h2>
             {data.seasons.length > 1 && (
@@ -498,7 +699,67 @@ function LocalTitle({ id }: { id: string }) {
           </ol>
         </section>
       )}
+
+      {/* ── Recommendations ────────────────────────────────────────────────── */}
+      {recommendations.length > 0 && (
+        <section className="px-[var(--pad)] pt-10">
+          <h2 className="mb-5 font-display text-xl font-semibold tracking-[0.12em]">
+            {t('recommended') || 'قد يعجبك أيضًا'}
+          </h2>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+            {recommendations.map((rec) => (
+              <RecommendationCard key={rec.id} item={rec} kind={data.kind} />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
+  );
+}
+
+/** Recommendation card */
+function RecommendationCard({ item, kind }: { item: any; kind: string }) {
+  const title = item.title || item.name || '';
+  const year = (item.release_date || item.first_air_date || '').substring(0, 4);
+  const posterUrl = item.poster_path
+    ? `https://image.tmdb.org/t/p/w342${item.poster_path}`
+    : null;
+  const rating = item.vote_average ? item.vote_average.toFixed(1) : null;
+
+  // Determine if this is a movie or tv based on media_type or fallback to parent kind
+  const itemKind = item.media_type === 'tv' ? 'series' : item.media_type === 'movie' ? 'movie' : kind;
+
+  return (
+    <a
+      href={hrefs.globalTitle(itemKind as 'movie' | 'series', item.id)}
+      className="group relative overflow-hidden rounded-lg bg-crypt ring-1 ring-white/5 transition-all duration-300 hover:-translate-y-1 hover:ring-white/15 hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.9),0_0_16px_rgba(179,32,47,0.2)]"
+    >
+      {posterUrl ? (
+        <img
+          src={posterUrl}
+          alt={title}
+          loading="lazy"
+          decoding="async"
+          className="aspect-[2/3] w-full object-cover transition-transform duration-500 group-hover:scale-105"
+        />
+      ) : (
+        <div className="aspect-[2/3] w-full bg-crypt flex items-center justify-center text-xs text-dust">
+          {title}
+        </div>
+      )}
+      {/* Hover overlay */}
+      <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/90 via-black/30 to-transparent p-2.5 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+        <p className="text-xs font-semibold leading-tight line-clamp-2">{title}</p>
+        <div className="mt-1 flex items-center gap-2 text-[0.65rem] text-dust">
+          {year && <span>{year}</span>}
+          {rating && rating !== '0.0' && (
+            <span className="inline-flex items-center gap-0.5 text-gilt">
+              <Star className="size-2.5" />{rating}
+            </span>
+          )}
+        </div>
+      </div>
+    </a>
   );
 }
 
