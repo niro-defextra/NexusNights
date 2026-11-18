@@ -28,6 +28,7 @@
                 : (this.kind === 'movie' ? NexusAPI.getMovieDetails(this.tmdbId) : NexusAPI.getSeriesDetails(this.tmdbId));
             request.then(function (data) {
                 self.data = data;
+                self.tmdbId = Number(data && data.tmdbId) || self.tmdbId;
                 self.renderContent();
             }).catch(function (error) {
                 console.error('[DetailsPage] Error:', error);
@@ -44,7 +45,7 @@
             var backdropUrl = d.backdropUrl ? NexusConfig.getImageUrl(d.backdropUrl, 'backdrop') : null;
             var posterUrl = d.posterUrl ? NexusConfig.getImageUrl(d.posterUrl, 'poster') : null;
             var logoUrl = d.logoUrl ? NexusConfig.getImageUrl(d.logoUrl, 'logo') : null;
-            var title = NexusConfig.escapeHtml(d.title || 'NEXUSNIGHT');
+            var title = NexusConfig.escapeHtml(d.title || 'NexusNights');
             var html = '<div class="details-page">';
             if (backdropUrl) html += '<div class="details-backdrop" style="background-image:url(\'' + NexusConfig.escapeHtml(backdropUrl) + '\')"></div>';
             html += '<div class="details-content"><div class="details-header">';
@@ -273,24 +274,34 @@
                     tmdbId: self.tmdbId,
                     localId: self.localId,
                     type: self.kind || 'movie',
-                    title: (self.data && (self.data.title || self.data.name)) || playback.title || 'NEXUSNIGHT',
+                    title: (self.data && (self.data.title || self.data.name)) || playback.title || 'NexusNights',
                     year: self.data && (self.data.releaseYear || (self.data.release_date && self.data.release_date.split('-')[0])),
                     season: extraMeta.season || (self.kind === 'series' ? (self.selectedSeason || 1) : undefined),
                     episode: extraMeta.episode || (self.kind === 'series' ? 1 : undefined),
                     posterUrl: playback.posterUrl || (self.data && self.data.posterUrl),
-                    backdropUrl: playback.backdropUrl || (self.data && self.data.backdropUrl)
+                    backdropUrl: playback.backdropUrl || (self.data && self.data.backdropUrl),
+                    skipTimings: playback.skipTimings || null
                 };
                 NexusApp.hideToast();
+                if (self.kind === 'series' && self.tmdbId) {
+                    NexusPlayer.nextEpisodeHandler = function () {
+                        var curEp = extraMeta.episode || 1;
+                        var curSeason = extraMeta.season || (self.selectedSeason || 1);
+                        self.playEpisode(curSeason, curEp + 1);
+                    };
+                } else {
+                    NexusPlayer.nextEpisodeHandler = null;
+                }
                 NexusPlayer.play(playback.source, playback.alternatives, playback.subtitles, meta);
             }).catch(function (error) {
                 console.error('[DetailsPage] Playback error:', error);
-                NexusApp.showToast(error.message || 'فشل تحميل مصادر التشغيل');
+                NexusApp.showToast(NexusApp.describeError(error));
             });
         },
 
         showError: function (error) {
             NexusApp.showErrorState({
-                title: 'فشل تحميل التفاصيل',
+                title: NexusConfig.getLanguage() === 'ar' ? 'تعذّر تحميل التفاصيل' : 'Details unavailable',
                 message: error && error.message,
                 onAction: function () { Navigator.goBack(); }
             });

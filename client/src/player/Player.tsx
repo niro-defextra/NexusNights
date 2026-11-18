@@ -7,7 +7,7 @@ import { ArrowLeft, AudioTracks, ExitFullscreen, Fullscreen, Gauge, Lock, Next, 
 import { clamp, fmtTime } from '../format';
 import { useI18n } from '../i18n';
 import { ControlButton, Menu } from './Menu';
-import { SeekBar } from './SeekBar';
+import { SeekBar, type SeekMarker } from './SeekBar';
 import { SubtitleOverlay } from './Subtitles';
 import { parseVtt, type Cue } from './vtt';
 import { SubtitleSearchModal } from '../components/SubtitleSearchModal';
@@ -132,6 +132,12 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
   const [currentLevelIdx, setCurrentLevelIdx] = useState<number>(-1); // -1 = Auto
   const [flash, setFlash] = useState<{ kind: 'play' | 'pause' | 'back' | 'fwd'; n: number } | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const countdownRef = useRef<number | null>(null);
+  countdownRef.current = countdown;
+  const dismissedCountdown = useRef(false);
+  const [seekRipple, setSeekRipple] = useState<{ dir: 'fwd' | 'back'; seconds: number } | null>(null);
+  const seekRippleTimer = useRef<number>(0);
+  const activeSkipRef = useRef<SeekMarker | null>(null);
   const [showExternalSubModal, setShowExternalSubModal] = useState(false);
   const [externalSubtitles, setExternalSubtitles] = useState<Array<{ id: string; label: string; url: string }>>([]);
   const { toasts, showToast, removeToast } = useToast();
@@ -571,7 +577,19 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     const v = videoRef.current!;
     const on = <K extends keyof HTMLMediaElementEventMap>(n: K, f: () => void) => { v.addEventListener(n, f); return () => v.removeEventListener(n, f); };
     const offs = [
-      on('timeupdate', () => { setTime(v.currentTime); syncBuffered(); }),
+      on('timeupdate', () => {
+        setTime(v.currentTime);
+        syncBuffered();
+        // Netflix-style outro auto-detection: when entering outro segment or last 20 seconds of episode
+        if (hasNext && !dismissedCountdown.current && countdownRef.current === null) {
+          const d = effDuration();
+          const rem = d - v.currentTime;
+          const isOutro = activeSkipRef.current?.kind === 'outro';
+          if ((isOutro || (rem <= 20 && rem > 0 && d > 60))) {
+            setCountdown(5);
+          }
+        }
+      }),
       on('progress', syncBuffered),
       on('play', () => setPlaying(true)),
       on('pause', () => { setPlaying(false); cb.current.onProgress?.(v.currentTime, effDuration()); }),
@@ -587,13 +605,21 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
         setPlaying(false);
         cb.current.onProgress?.(effDuration(), effDuration());
         cb.current.onEnded?.();
-        if (hasNext) setCountdown(8);
+        if (hasNext && !dismissedCountdown.current && countdownRef.current === null) {
+          setCountdown(5);
+        }
       }),
     ];
     v.volume = volume;
     return () => offs.forEach((f) => f());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [media.id, hasNext]);
+
+  // reset countdown state on new episode
+  useEffect(() => {
+    dismissedCountdown.current = false;
+    setCountdown(null);
+  }, [media.id]);
 
   // periodic progress save
   useEffect(() => {
@@ -608,14 +634,17 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     };
   }, [media.id, effDuration]);
 
-  // next-episode countdown
+  // next-episode countdown (5 seconds, auto-advances if not cancelled)
   useEffect(() => {
     if (countdown === null) return;
-    if (countdown <= 0) { setCountdown(null); cb.current.onNext(); return; }
+    if (countdown <= 0) {
+      setCountdown(null);
+      cb.current.onNext();
+      return;
+    }
     const id = setTimeout(() => setCountdown((c) => (c === null ? null : c - 1)), 1000);
     return () => clearTimeout(id);
   }, [countdown]);
-  useEffect(() => { if (playing) setCountdown(null); }, [playing]);
 
   // ── subtitles (merge local + streaming + external) ───────────────────────────────────
   const allSubtitles = useMemo(() => {
@@ -818,7 +847,50 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     if (!controlled) seekTo(x);
     onUserSeek?.(x);
   };
-  const skip = (d: number) => { userSeek(videoRef.current!.currentTime + d); doFlash(d < 0 ? 'back' : 'fwd'); };
+  const triggerSeekWithRipple = useCallback((d: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    const cur = v.currentTime;
+    userSeek(cur + d);
+    const dir = d < 0 ? 'back' : 'fwd';
+
+    setSeekRipple((prev) => {
+      const accumulated = (prev && prev.dir === dir) ? prev.seconds + Math.abs(d) : Math.abs(d);
+      return { dir, seconds: accumulated };
+    });
+
+    window.clearTimeout(seekRippleTimer.current);
+    seekRippleTimer.current = window.setTimeout(() => {
+      setSeekRipple(null);
+    }, 750);
+  }, [userSeek]);
+
+  const skip = (d: number) => {
+    triggerSeekWithRipple(d);
+    doFlash(d < 0 ? 'back' : 'fwd');
+  };
+
+  // One active skip action at a time: recap → intro → credits.
+  const skipSegments = useMemo<SeekMarker[]>(() => {
+    if (!skipTimings?.found) return [];
+    const list: SeekMarker[] = [];
+    for (const kind of ['recap', 'intro', 'outro'] as const) {
+      const segment = skipTimings[kind];
+      if (segment) list.push({ start: segment.startTime, end: segment.endTime, kind });
+    }
+    return list;
+  }, [skipTimings]);
+
+  const activeSkip = useMemo(
+    () => skipSegments.find((segment) => time >= segment.start && time < segment.end) ?? null,
+    [skipSegments, time],
+  );
+  activeSkipRef.current = activeSkip;
+
+  const skipActiveSegment = useCallback(() => {
+    if (!activeSkip) return;
+    userSeek(activeSkip.kind === 'outro' ? Math.max(0, effDuration() - 0.5) : activeSkip.end + 0.5);
+  }, [activeSkip, effDuration]);
 
   // Listen for official postMessage events from external providers (e.g. VidAPI STORAGE_SET bridge)
   useEffect(() => {
@@ -973,8 +1045,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
   // The listener is registered rarely; it must always call the LATEST actions (their closures
   // depend on room permissions / state), otherwise a guest who was just granted control keeps
   // hitting the stale "not allowed" version.
-  const act = useRef({ togglePlay, skip, setVol, toggleMute });
-  act.current = { togglePlay, skip, setVol, toggleMute };
+  const act = useRef({ togglePlay, skip, skipActiveSegment, setVol, toggleMute });
+  act.current = { togglePlay, skip, skipActiveSegment, setVol, toggleMute };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
@@ -983,9 +1055,27 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       const v = videoRef.current!;
       const k = e.key.toLowerCase();
       let handled = true;
+
+      // Handle active countdown shortcuts
+      if (countdownRef.current !== null) {
+        if (k === 'enter') {
+          e.preventDefault();
+          setCountdown(null);
+          cb.current.onNext();
+          return;
+        }
+        if (k === 'escape') {
+          e.preventDefault();
+          dismissedCountdown.current = true;
+          setCountdown(null);
+          return;
+        }
+      }
+
       if (k === ' ' || k === 'k') act.current.togglePlay();
       else if (k === 'arrowleft' || k === 'j') act.current.skip(-10);
       else if (k === 'arrowright' || k === 'l') act.current.skip(10);
+      else if (k === 's' || k === 'س') act.current.skipActiveSegment();
       else if (k === 'arrowup') act.current.setVol(v.volume + 0.1);
       else if (k === 'arrowdown') act.current.setVol(v.volume - 0.1);
       else if (k === 'm') act.current.toggleMute();
@@ -1044,8 +1134,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     window.clearTimeout(clickTimer.current);
     const r = e.currentTarget.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width;
-    if (x < 0.3) skip(-10);
-    else if (x > 0.7) skip(10);
+    if (x < 0.35) triggerSeekWithRipple(-10);
+    else if (x > 0.65) triggerSeekWithRipple(10);
     else toggleFs();
   };
 
@@ -1119,7 +1209,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
 
       {/* top bar */}
       <div className={`pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start gap-3 bg-gradient-to-b from-black/85 to-transparent px-[max(1rem,2.5cqw)] pb-10 pt-[max(0.75rem,2cqh)] transition-opacity duration-300 ${showUi ? 'opacity-100' : 'opacity-0'}`}>
-        <button onClick={onBack} aria-label={t('back')} className={`pointer-events-auto inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-black/30 backdrop-blur transition hover:bg-white/15 active:scale-90 ${showUi ? '' : 'invisible'}`}>
+        <button onClick={onBack} aria-label={t('back')} className={`pointer-events-auto inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-black/60 transition hover:bg-white/15 active:scale-90 ${showUi ? '' : 'invisible'}`}>
           <ArrowLeft className={`size-5 ${iconFlip}`} />
         </button>
         <div className="min-w-0 pt-0.5">
@@ -1128,15 +1218,9 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
         </div>
         {currentSource && (
           <div className="pointer-events-auto ms-auto flex items-center gap-2">
-            {!isEmbed && currentSource.type === 'hls' && phase === 'ready' && (
-              <span className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-400">
-                <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                {t('nativeStreamActive')}
-              </span>
-            )}
             {startAt > 10 && (
               <span
-                className="hidden md:inline-flex rounded-full border border-gilt/40 bg-black/60 px-2.5 py-1 text-xs font-mono text-gilt"
+                className="hidden md:inline-flex rounded-full border border-white/20 bg-black/60 px-2.5 py-1 text-xs font-mono text-dust"
                 title={lang === 'ar' ? 'موضع التوقف المحفوظ' : 'Saved resume position'}
               >
                 {lang === 'ar' ? `الموضع السابق: ${fmtTime(startAt)}` : `Resume: ${fmtTime(startAt)}`}
@@ -1145,10 +1229,9 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
             <div className="relative">
               <button
                 onClick={() => setMenu(menu === 'source' ? null : 'source')}
-                className="flex items-center gap-1.5 rounded-full border border-white/20 bg-black/60 px-3 py-1 text-xs font-medium text-bone transition hover:border-gilt/60 hover:bg-white/10 active:scale-95"
+                className="flex items-center gap-1.5 rounded-full border border-white/20 bg-black/60 px-3 py-1 text-xs font-medium text-bone transition hover:border-white/40 hover:bg-white/10 active:scale-95"
                 title={lang === 'ar' ? 'تغيير مصدر البث' : 'Change streaming source'}
               >
-                <span className="size-1.5 rounded-full bg-gilt" />
                 <span>{currentSource.provider}</span>
                 {allSources.length > 1 && <span className="text-[10px] text-dust">({allSources.length})</span>}
               </button>
@@ -1183,7 +1266,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       {/* center indicators */}
       {!isEmbed && flash && (
         <div key={flash.n} className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center" onAnimationEnd={() => setFlash(null)}>
-          <div className="flex size-20 animate-pop items-center justify-center rounded-full bg-black/55 backdrop-blur-sm">
+          <div className="flex size-20 items-center justify-center rounded-full bg-black/60">
             {flash.kind === 'play' && <Play className={`size-9 ${iconFlip}`} />}
             {flash.kind === 'pause' && <Pause className="size-9" />}
             {flash.kind === 'back' && <Skip dir="back" className="size-10" />}
@@ -1192,7 +1275,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
         </div>
       )}
       {!isEmbed && phase === 'ready' && !playing && !buffering && !flash && (
-        <button onClick={togglePlay} aria-label={t('play')} className="absolute left-1/2 top-1/2 z-10 flex size-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/50 backdrop-blur-md transition hover:scale-105 hover:border-gilt/70 active:scale-95">
+        <button onClick={togglePlay} aria-label={t('play')} className="absolute left-1/2 top-1/2 z-10 flex size-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/25 bg-black/60 transition hover:bg-white/15 active:scale-95">
           <Play className={`size-9 ${iconFlip}`} />
         </button>
       )}
@@ -1202,11 +1285,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
 
       {/* preparing / error */}
       {(phase === 'preparing' || phase === 'loading') && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black/75 px-6 text-center backdrop-blur-sm">
-          <div className="relative flex items-center justify-center">
-            <span className="absolute inline-flex size-16 animate-ping rounded-full bg-gilt/20" />
-            <Spinner className="size-12 text-gilt" />
-          </div>
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black/80 px-6 text-center">
+          <Spinner className="size-12 text-bone" />
           <p className="font-display text-lg tracking-wide text-bone font-bold">
             {failoverMessage || (streamingLoading ? t('nativeStreamLoading') : t('preparing'))}
           </p>
@@ -1214,7 +1294,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
             <>
               <div className="h-1 w-64 overflow-hidden rounded-full bg-white/15">
                 <div
-                  className="h-full bg-gradient-to-r from-gilt to-blood-hot transition-[width] duration-700 animate-pulse"
+                  className="h-full bg-blood transition-[width] duration-700"
                   style={{ width: `${Math.max(15, prep * 100)}%` }}
                 />
               </div>
@@ -1238,50 +1318,128 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
 
       {holdLabel && (
         <div className="pointer-events-none absolute inset-x-0 top-[max(4.5rem,9cqh)] z-20 flex justify-center">
-          <div className="flex animate-fade items-center gap-2.5 rounded-full border border-gilt/30 bg-coal/90 px-4 py-2 text-sm shadow-xl backdrop-blur-md">
-            <Spinner className="size-4 text-gilt" />
+          <div className="flex items-center gap-2.5 rounded-full border border-white/15 bg-coal px-4 py-2 text-sm">
+            <Spinner className="size-4 text-bone" />
             <span>{holdLabel}</span>
           </div>
         </div>
       )}
 
-      {/* up next */}
-      {countdown !== null && !menu && (
-        <div className="absolute bottom-28 end-[max(1rem,2.5cqw)] z-30 w-72 animate-rise rounded-xl border border-white/10 bg-coal/95 p-4 shadow-2xl backdrop-blur-xl">
-          <p className="text-sm text-dust">{t('nextIn', { n: countdown })}</p>
-          <div className="mt-3 flex gap-2">
-            <button onClick={() => { setCountdown(null); onNext(); }} className="flex-1 rounded-md bg-blood py-2 text-sm font-semibold transition hover:bg-blood-hot">{t('playNow')}</button>
-            <button onClick={() => setCountdown(null)} className="rounded-md border border-white/15 px-4 py-2 text-sm transition hover:bg-white/10">{t('cancel')}</button>
+      {/* Netflix-style Quick Seek Ripple Feedback */}
+      {seekRipple && (
+        <div
+          className={`pointer-events-none absolute inset-y-0 z-30 flex w-1/3 items-center justify-center transition-opacity duration-200 ${
+            seekRipple.dir === 'back' ? 'start-0' : 'end-0'
+          }`}
+        >
+          <div className="flex flex-col items-center justify-center gap-2 rounded-full bg-black/70 p-6 backdrop-blur-xl border border-white/15 shadow-[0_0_40px_rgba(0,0,0,0.85)] animate-in zoom-in-75 duration-200">
+            <div className="relative flex items-center justify-center">
+              <svg
+                className={`size-12 text-bone ${seekRipple.dir === 'back' ? '-scale-x-100' : ''}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 12A9 9 0 1 1 12 3a9 9 0 0 1 8.5 6" />
+                <polyline points="21 3 21 9 15 9" />
+              </svg>
+              <span className="absolute font-mono text-[0.7rem] font-black text-bone">
+                {seekRipple.seconds}
+              </span>
+            </div>
+            <span className="font-mono text-xs font-bold text-bone">
+              {seekRipple.dir === 'back' ? `-${seekRipple.seconds}s` : `+${seekRipple.seconds}s`}
+            </span>
           </div>
         </div>
       )}
 
-      {/* AniSkip Intro / Outro floating action button */}
-      {!isEmbed && skipTimings?.intro && time >= skipTimings.intro.startTime && time <= skipTimings.intro.endTime && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            userSeek(skipTimings.intro!.endTime + 0.5);
-          }}
-          className="group absolute bottom-[max(4.5rem,11cqh)] end-[max(1.25rem,2.5cqw)] z-30 flex items-center gap-2 rounded-full border border-white/20 bg-black/85 px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold tracking-wide text-bone shadow-[0_12px_32px_rgba(0,0,0,0.85)] backdrop-blur-xl transition-all duration-200 hover:scale-105 hover:border-gilt hover:text-white hover:bg-black/95 active:scale-95"
+      {/* Up Next - Netflix-style floating card with 5s countdown & auto-advance */}
+      {countdown !== null && !menu && hasNext && (
+        <aside
+          role="dialog"
+          aria-label={t('nextEpisode')}
+          className="absolute bottom-24 end-[max(1.25rem,3cqw)] z-40 w-80 rounded-2xl border border-white/20 bg-black/95 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] backdrop-blur-2xl transition-all duration-300 animate-in fade-in slide-in-from-bottom-4"
         >
-          <Skip dir="fwd" className="size-4 text-gilt transition-transform duration-200 group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5 rtl:rotate-180" />
-          <span>{t('skipIntro')}</span>
-        </button>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-gilt">
+              {t('nextEpisode')}
+            </span>
+            <div className="relative flex size-7 items-center justify-center">
+              <svg className="size-7 -rotate-90 text-white/20" viewBox="0 0 36 36">
+                <circle cx="18" cy="18" r="14" fill="none" stroke="currentColor" strokeWidth="3" />
+                <circle
+                  cx="18"
+                  cy="18"
+                  r="14"
+                  fill="none"
+                  stroke="#dc3044"
+                  strokeWidth="3"
+                  strokeDasharray="88"
+                  strokeDashoffset={88 - (88 * (5 - countdown)) / 5}
+                  strokeLinecap="round"
+                  className="transition-all duration-1000 ease-linear"
+                />
+              </svg>
+              <span className="absolute font-mono text-xs font-bold text-bone">
+                {countdown}
+              </span>
+            </div>
+          </div>
+
+          <p className="mt-2 text-sm font-semibold text-bone line-clamp-1">
+            {subtitle ? `${title} • ${subtitle}` : title}
+          </p>
+          <p className="mt-0.5 text-xs text-dust">
+            {t('nextIn', { n: countdown })}
+          </p>
+
+          <div className="mt-4 flex gap-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                setCountdown(null);
+                onNext();
+              }}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blood-hot py-2.5 text-sm font-bold text-bone shadow-[0_0_20px_rgba(220,48,68,0.5)] transition-all duration-150 hover:bg-[#e83d51] hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <Play className="size-4 fill-current" />
+              <span>{t('playNow')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                dismissedCountdown.current = true;
+                setCountdown(null);
+              }}
+              className="rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-semibold text-dust transition-all duration-150 hover:bg-white/10 hover:text-bone"
+            >
+              {t('cancel')}
+            </button>
+          </div>
+        </aside>
       )}
 
-      {!isEmbed && skipTimings?.outro && time >= skipTimings.outro.startTime && time <= skipTimings.outro.endTime && (
+      {/* Skip recap / intro / credits — Netflix-style floating pill */}
+      {!isEmbed && activeSkip && (
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            userSeek(skipTimings.outro!.endTime + 0.5);
+            skipActiveSegment();
           }}
-          className="group absolute bottom-[max(4.5rem,11cqh)] end-[max(1.25rem,2.5cqw)] z-30 flex items-center gap-2 rounded-full border border-white/20 bg-black/85 px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold tracking-wide text-bone shadow-[0_12px_32px_rgba(0,0,0,0.85)] backdrop-blur-xl transition-all duration-200 hover:scale-105 hover:border-gilt hover:text-white hover:bg-black/95 active:scale-95"
+          className="group absolute bottom-[max(6.5rem,15cqh)] end-[max(1.25rem,3cqw)] z-30 flex items-center gap-2.5 rounded-full border border-white/40 bg-black/85 px-5 py-2.5 text-sm font-bold text-bone shadow-[0_12px_36px_rgba(0,0,0,0.85)] backdrop-blur-xl transition-all duration-200 hover:scale-105 hover:border-white hover:bg-white hover:text-black active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bone/80 sm:px-6"
         >
-          <Skip dir="fwd" className="size-4 text-gilt transition-transform duration-200 group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5 rtl:rotate-180" />
-          <span>{t('skipOutro')}</span>
+          <Skip dir="fwd" className="size-4 rtl:rotate-180 transition-transform duration-200 group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5" />
+          <span>
+            {activeSkip.kind === 'recap' ? t('skipRecap') : activeSkip.kind === 'intro' ? t('skipIntro') : t('skipCredits')}
+          </span>
+          <kbd className="hidden sm:inline-block rounded bg-white/20 px-1.5 py-0.5 text-[0.68rem] font-mono font-bold text-bone group-hover:bg-black/20 group-hover:text-black">
+            S
+          </kbd>
         </button>
       )}
 
@@ -1294,8 +1452,9 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
               duration={duration}
               buffered={bufEnd}
               sprite={media.sprite}
+              markers={skipSegments}
               onSeek={userSeek}
-              label="Seek"
+              label={t('seek')}
               disabled={controlled && !canControl}
               onDisabledClick={onDisabledControlClick}
             />
@@ -1325,7 +1484,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
             </span>
 
             {controlled && !canControl && !theatreMode && (
-              <span className="ms-2 inline-flex items-center gap-1 rounded-md bg-gilt/15 border border-gilt/30 px-2 py-0.5 text-[0.7rem] font-medium text-gilt" title={t('hostPlaybackLocked')}>
+              <span className="ms-2 inline-flex items-center gap-1 rounded-md border border-white/20 bg-white/5 px-2 py-0.5 text-[0.7rem] font-medium text-dust" title={t('hostPlaybackLocked')}>
                 <Lock className="size-3" />
                 <span className="@max-sm:hidden">{t('hostControlOnly')}</span>
               </span>
@@ -1425,7 +1584,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
                     items={[
                       { id: 'off', label: t('off') },
                       ...allSubtitles.map((s: any) => ({ id: s.id, label: s.label })),
-                      { id: '__search__', label: lang === 'ar' ? '🔍 بحث عن ترجمات...' : '🔍 Search subtitles...', hint: 'Stremio / OpenSubs' }
+                      { id: '__search__', label: lang === 'ar' ? 'بحث عن ترجمات...' : 'Search subtitles...', hint: 'Stremio / OpenSubs' }
                     ]}
                     footer={
                       subId && subId !== 'off' ? (

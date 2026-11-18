@@ -34,8 +34,40 @@
             
             document.addEventListener('keydown', function(e) {
                 self.log('Key pressed:', e.keyCode);
-                if (self.isPlayerOpen() && e.keyCode !== 10009 && e.keyCode !== 461 && window.NexusPlayer) {
-                    NexusPlayer.showControls();
+                var playerOpen = self.isPlayerOpen() && window.NexusPlayer;
+                var backKey = e.keyCode === 10009 || e.keyCode === 461;
+
+                if (playerOpen && !backKey) {
+                    var modalOpen = NexusPlayer.isAnyModalOpen && NexusPlayer.isAnyModalOpen();
+                    var controlsVisible = self.playerControlsVisible();
+
+                    // If Next Episode countdown card is active:
+                    if (NexusPlayer.nextEpisodeActive) {
+                        if (e.keyCode === 13) {
+                            e.preventDefault();
+                            NexusPlayer.playNextEpisode();
+                            return;
+                        }
+                    }
+
+                    // Hidden chrome: d-pad left/right scrub, OK skips the
+                    // active segment. Visible chrome keeps spatial focus.
+                    if (!modalOpen && !controlsVisible) {
+                        if (e.keyCode === 37) {
+                            e.preventDefault();
+                            if (NexusPlayer.seekBy(-10000)) return;
+                        } else if (e.keyCode === 39) {
+                            e.preventDefault();
+                            if (NexusPlayer.seekBy(10000)) return;
+                        } else if (e.keyCode === 13) {
+                            e.preventDefault();
+                            if (NexusPlayer.skipActiveSegment && NexusPlayer.skipActiveSegment()) return;
+                            NexusPlayer.showControls();
+                            return;
+                        }
+                    }
+
+                    if (!modalOpen) NexusPlayer.showControls();
                 }
                 
                 switch (e.keyCode) {
@@ -68,10 +100,10 @@
                         }
                         break;
                     case 412: // MediaRewind
-                        if (self.isPlayerOpen()) { e.preventDefault(); NexusPlayer.skip(-10); NexusPlayer.showControls(); }
+                        if (self.isPlayerOpen()) { e.preventDefault(); NexusPlayer.seekBy(-10000); }
                         break;
                     case 417: // MediaFastForward
-                        if (self.isPlayerOpen()) { e.preventDefault(); NexusPlayer.skip(10); NexusPlayer.showControls(); }
+                        if (self.isPlayerOpen()) { e.preventDefault(); NexusPlayer.seekBy(10000); }
                         break;
                     case 413: // MediaStop
                         if (self.isPlayerOpen()) { e.preventDefault(); NexusPlayer.stop(); }
@@ -126,6 +158,11 @@
 
         isPlayerOpen: function() {
             return !!document.getElementById('player-page');
+        },
+
+        playerControlsVisible: function() {
+            var controls = document.getElementById('player-controls');
+            return !!(controls && controls.classList.contains('visible'));
         },
 
         registerMediaKeys: function() {
@@ -359,6 +396,12 @@
         back: function() {
             this.log('Back pressed');
             if (this.isPlayerOpen() && window.NexusPlayer) {
+                // If Next Episode countdown card is active, dismiss it first
+                if (NexusPlayer.nextEpisodeActive) {
+                    NexusPlayer.nextEpisodeDismissed = true;
+                    NexusPlayer.clearNextEpisodeCountdown();
+                    return;
+                }
                 // If a player modal (subtitles, audio, sources, etc.) is open,
                 // close it first instead of stopping playback.
                 if (NexusPlayer.isAnyModalOpen && NexusPlayer.isAnyModalOpen()) {

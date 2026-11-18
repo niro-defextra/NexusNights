@@ -1,4 +1,4 @@
-/**
+﻿/**
  * NEXUSNIGHT TV - Cinema Player Adapter
  * AVPlay hardware engine for Samsung TV; HTML5 + Hls.js for browser / webview fallback.
  * Full custom subtitle parser & overlay (Arabic / English / Provider tracks).
@@ -12,6 +12,24 @@
         return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 6L9 17l-5-5"/></svg>';
     }
     var PLAYER_ICON_DOWNLOAD = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" style="vertical-align: -2px;"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>';
+    var SKIP_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><polygon points="5 4 15 12 5 20"/><rect x="17" y="4" width="2.5" height="16"/></svg>';
+
+    // AniSkip wins for intro/outro; IntroDB fills recap and preview.
+    function mergeSkipTimings(primary, secondary) {
+        var merged = { found: false };
+        var keys = ['recap', 'intro', 'outro', 'preview'];
+        for (var i = 0; i < keys.length; i++) {
+            var key = keys[i];
+            var segment = (primary && primary[key]) || (secondary && secondary[key]);
+            if (!segment) continue;
+            var start = Number(segment.startTime);
+            var end = Number(segment.endTime);
+            if (!isFinite(start) || !isFinite(end) || end <= start) continue;
+            merged[key] = { startTime: start, endTime: end };
+            merged.found = true;
+        }
+        return merged;
+    }
 
     window.NexusPlayer = {
         currentSource: null,
@@ -36,6 +54,15 @@
         stopping: false,
         skippedEmbedSources: 0,
         lastProgressSaveTime: 0,
+        skipTimings: null,
+        activeSkipSegment: null,
+        seekHudTimeout: null,
+        skipRequestId: 0,
+        nextEpisodeHandler: null,
+        nextCountdownTimer: null,
+        nextCountdownSec: 5,
+        nextEpisodeActive: false,
+        nextEpisodeDismissed: false,
 
         init: function () {
             this.useAVPlay = typeof webapis !== 'undefined' && !!webapis.avplay;
@@ -54,6 +81,9 @@
             this.alternatives = Array.isArray(alternatives) ? alternatives.slice(0) : [];
             this.subtitles = Array.isArray(subtitles) ? subtitles.slice(0) : [];
             this.meta = meta || {};
+            this.currentSource = source;
+            // Sports streams have no TMDB metadata and no subtitle/audio tracks.
+            this.isSports = !(meta && meta.tmdbId);
             this.sourceIndex = 0;
             this.currentTime = 0;
             this.duration = 0;
@@ -61,6 +91,12 @@
             this.skippedEmbedSources = 0;
             this.activeSubtitleIndex = -1;
             this.subtitleCues = [];
+            this.skipTimings = (meta && meta.skipTimings) || null;
+            this.activeSkipSegment = null;
+            this.skipRequestId += 1;
+            this.nextEpisodeActive = false;
+            this.nextEpisodeDismissed = false;
+            this.clearNextEpisodeCountdown();
 
             this.showPlayerPage();
 
@@ -71,8 +107,29 @@
 
             // Fetch extra unified subtitles (Arabic & English) if TMDB metadata is available
             this.fetchExternalSubtitles();
+            this.fetchSkipSegments(this.skipRequestId);
 
             this.trySource(source);
+        },
+
+        fetchSkipSegments: function (requestId) {
+            var self = this;
+            if (!this.meta || !this.meta.tmdbId || !window.NexusAPI || !NexusAPI.getSkipSegments) {
+                this.updateSkipSegment();
+                return;
+            }
+            var kind = this.meta.type === 'series' ? 'series' : 'movie';
+            NexusAPI.getSkipSegments(kind, this.meta.tmdbId, this.meta.season, this.meta.episode)
+                .then(function (segments) {
+                    if (requestId !== self.skipRequestId) return;
+                    if (segments && segments.found) {
+                        self.skipTimings = mergeSkipTimings(self.skipTimings, segments);
+                    }
+                    self.updateSkipSegment();
+                })
+                .catch(function () {
+                    if (requestId === self.skipRequestId) self.updateSkipSegment();
+                });
         },
 
         fetchExternalSubtitles: function () {
@@ -298,7 +355,7 @@
 
             var titleEl = document.getElementById('player-title');
             if (titleEl) {
-                var computedTitle = (this.meta && this.meta.title) || source.title || (this.isLive ? 'بث مباشر' : 'NEXUSNIGHT');
+                var computedTitle = (this.meta && this.meta.title) || source.title || (this.isLive ? 'بث مباشر' : 'NexusNights');
                 if (this.meta && this.meta.season && this.meta.episode) {
                     computedTitle += ' • S' + this.meta.season + 'E' + this.meta.episode;
                 } else if (this.meta && this.meta.year) {
@@ -314,7 +371,12 @@
                     badgeEl.innerHTML = '<span class="live-dot"></span> ' + NexusConfig.t('player_live_badge');
                 } else {
                     badgeEl.className = 'player-badge';
-                    badgeEl.textContent = (source.quality || '1080p') + ' • ' + (source.provider || 'HD');
+                    var badgeParts = [];
+                    if (source.quality) badgeParts.push(source.quality);
+                    if (source.provider) badgeParts.push(source.provider);
+                    badgeEl.textContent = badgeParts.join(' • ');
+                    if (badgeParts.length) badgeEl.classList.remove('hidden');
+                    else badgeEl.classList.add('hidden');
                 }
             }
 
@@ -367,7 +429,7 @@
                             self.saveWatchProgress();
                         }
                     },
-                    onstreamcompleted: function () { self.stop(); },
+                    onstreamcompleted: function () { self.handleStreamCompleted(); },
                     onerror: function (error) {
                         if (attemptId !== self.playAttemptId) return;
                         console.warn('[AVPlay] Playback error encountered, falling back to HTML5 engine:', error);
@@ -446,7 +508,7 @@
                     self.saveWatchProgress();
                 }
             });
-            video.addEventListener('ended', function () { self.stop(); });
+            video.addEventListener('ended', function () { self.handleStreamCompleted(); });
             video.addEventListener('error', function () {
                 if (attemptId !== self.playAttemptId) return;
                 console.error('[HTML5] Video error:', video.error);
@@ -509,7 +571,7 @@
             var frame = document.createElement('iframe');
             frame.id = 'provider-embed';
             frame.src = source.embedUrl || source.url;
-            frame.title = 'NEXUSNIGHT playback';
+            frame.title = 'NexusNights playback';
             frame.setAttribute('allowfullscreen', 'true');
             frame.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture');
             frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
@@ -595,6 +657,7 @@
             if (this.stopping) return;
             this.stopping = true;
             console.log('[NexusPlayer] Stopping playback');
+            this.clearNextEpisodeCountdown();
             this.saveWatchProgress();
             clearTimeout(this.controlsTimeout);
             this.cleanupEngine();
@@ -607,6 +670,10 @@
             this.activeSubtitleIndex = -1;
             this.meta = null;
             this.isLive = false;
+            this.skipTimings = null;
+            this.activeSkipSegment = null;
+            this.skipRequestId += 1;
+            clearTimeout(this.seekHudTimeout);
             this.hidePlayerPage();
             this.stopping = false;
             if (window.Navigator && Navigator.restoreCurrent) Navigator.restoreCurrent();
@@ -644,12 +711,215 @@
             }
         },
 
-        seek: function (positionMs) {
+        canPlayNextEpisode: function () {
+            if (this.isSports || !this.meta) return false;
+            if (typeof this.nextEpisodeHandler === 'function') return true;
+            if (this.meta.type === 'series' && this.meta.episode) return true;
+            return false;
+        },
+
+        handleStreamCompleted: function () {
+            this.saveWatchProgress();
+            if (this.canPlayNextEpisode() && !this.nextEpisodeDismissed) {
+                this.showNextEpisodeCountdown();
+            } else {
+                this.stop();
+            }
+        },
+
+        showNextEpisodeCountdown: function () {
+            var self = this;
+            if (this.nextEpisodeActive) return;
+            this.nextEpisodeActive = true;
+            this.nextCountdownSec = 5;
+
+            var card = document.getElementById('player-next-episode-card');
+            if (!card) return;
+
+            var label = document.getElementById('player-next-sec');
+            if (label) label.textContent = '5';
+
+            var titleEl = document.getElementById('player-next-title');
+            if (titleEl && this.meta) {
+                var nextEp = (Number(this.meta.episode) || 0) + 1;
+                var s = Number(this.meta.season) || 1;
+                titleEl.textContent = (NexusConfig.getLanguage() === 'ar' ? 'الحلقة التالية: S' : 'Next Episode: S') + s + ' E' + nextEp;
+            }
+
+            card.classList.remove('hidden');
+            if (window.FocusManager) {
+                var playBtn = document.getElementById('btn-next-play-now');
+                if (playBtn) FocusManager.focus(playBtn);
+            }
+
+            this.clearNextEpisodeCountdown();
+            this.nextCountdownTimer = setInterval(function () {
+                self.nextCountdownSec -= 1;
+                var lbl = document.getElementById('player-next-sec');
+                if (lbl) lbl.textContent = String(self.nextCountdownSec);
+
+                if (self.nextCountdownSec <= 0) {
+                    self.clearNextEpisodeCountdown();
+                    self.playNextEpisode();
+                }
+            }, 1000);
+        },
+
+        clearNextEpisodeCountdown: function () {
+            if (this.nextCountdownTimer) {
+                clearInterval(this.nextCountdownTimer);
+                this.nextCountdownTimer = null;
+            }
+            this.nextEpisodeActive = false;
+            var card = document.getElementById('player-next-episode-card');
+            if (card) card.classList.add('hidden');
+        },
+
+        playNextEpisode: function () {
+            var handler = this.nextEpisodeHandler;
+            var meta = this.meta;
+            this.clearNextEpisodeCountdown();
+            if (typeof handler === 'function') {
+                this.stop();
+                handler();
+                return;
+            }
+            if (meta && meta.type === 'series' && meta.episode) {
+                var nextEp = (Number(meta.episode) || 0) + 1;
+                var season = Number(meta.season) || 1;
+                this.stop();
+                if (window.DetailsPage && typeof DetailsPage.playEpisode === 'function') {
+                    DetailsPage.playEpisode(season, nextEp);
+                }
+                return;
+            }
+            this.stop();
+        },
+
+        applySeek: function (positionMs) {
             try {
-                if (this.activeEngine === 'avplay') webapis.avplay.seekTo(positionMs);
-                else if (this.activeEngine === 'html5' && this.videoElement) this.videoElement.currentTime = positionMs / 1000;
-                this.showControls();
+                if (this.activeEngine === 'avplay' && typeof webapis !== 'undefined' && webapis.avplay) {
+                    webapis.avplay.seekTo(positionMs);
+                } else if (this.activeEngine === 'html5' && this.videoElement) {
+                    this.videoElement.currentTime = positionMs / 1000;
+                }
+                this.currentTime = positionMs;
+                this.updateProgress();
             } catch (error) { console.error('[NexusPlayer] Seek failed:', error); }
+        },
+
+        seek: function (positionMs) {
+            this.applySeek(positionMs);
+            this.showControls();
+        },
+
+        seekBy: function (deltaMs) {
+            if (this.isLive || this.activeEngine === 'embed' || !this.duration) return false;
+            var next = this.currentTime + deltaMs;
+            if (next < 0) next = 0;
+            if (next > this.duration) next = this.duration;
+            this.applySeek(next);
+            this.showSeekHud(deltaMs);
+            return true;
+        },
+
+        showSeekHud: function (deltaMs) {
+            var hud = document.getElementById('player-seek-hud');
+            if (!hud) return;
+
+            var page = document.getElementById('player-page');
+            if (page) page.classList.add('seeking');
+
+            var direction = document.getElementById('player-seek-hud-direction');
+            var current = document.getElementById('player-seek-hud-current');
+            var total = document.getElementById('player-seek-hud-total');
+            var fill = document.getElementById('player-seek-hud-fill');
+
+            hud.classList.remove('hidden');
+            if (direction) {
+                direction.textContent = deltaMs === 0 ? '' : (deltaMs < 0 ? '-10s' : '+10s');
+            }
+            if (current) current.textContent = this.formatTime(this.currentTime);
+            if (total) total.textContent = this.formatTime(this.duration);
+            if (fill && this.duration > 0) {
+                var pct = (this.currentTime / this.duration) * 100;
+                if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+                fill.style.width = pct + '%';
+            }
+
+            clearTimeout(this.seekHudTimeout);
+            this.seekHudTimeout = window.setTimeout(function () {
+                var el = document.getElementById('player-seek-hud');
+                if (el) el.classList.add('hidden');
+                var shell = document.getElementById('player-page');
+                if (shell) shell.classList.remove('seeking');
+            }, 900);
+        },
+
+        getActiveSkipSegment: function () {
+            var timings = this.skipTimings;
+            if (!timings || !timings.found) return null;
+            var seconds = this.currentTime / 1000;
+            var order = ['recap', 'intro', 'outro'];
+            for (var i = 0; i < order.length; i++) {
+                var key = order[i];
+                var segment = timings[key];
+                if (!segment) continue;
+                var start = Number(segment.startTime);
+                var end = Number(segment.endTime);
+                if (seconds >= start && seconds < end) {
+                    return { key: key, startTime: start, endTime: end };
+                }
+            }
+            return null;
+        },
+
+        updateSkipSegment: function () {
+            var button = document.getElementById('btn-skip-segment');
+            if (!button) return;
+
+            var segment = this.getActiveSkipSegment();
+            var prevKey = this.activeSkipSegment ? this.activeSkipSegment.key : null;
+            var nextKey = segment ? segment.key : null;
+            this.activeSkipSegment = segment;
+
+            if (!segment || this.isLive || this.activeEngine === 'embed') {
+                if (prevKey !== null) {
+                    button.classList.add('hidden');
+                    if (window.FocusManager && FocusManager.currentFocused === button) {
+                        FocusManager.register(document.querySelectorAll('#player-controls .focusable'));
+                    }
+                }
+                return;
+            }
+
+            var label = document.getElementById('btn-skip-label');
+            if (label) {
+                label.textContent = NexusConfig.t(
+                    segment.key === 'recap' ? 'player_skip_recap' :
+                    (segment.key === 'intro' ? 'player_skip_intro' : 'player_skip_credits')
+                );
+            }
+
+            if (prevKey === nextKey) return;
+            button.classList.remove('hidden');
+
+            var controls = document.getElementById('player-controls');
+            if (window.FocusManager && controls && controls.classList.contains('visible')) {
+                FocusManager.register(document.querySelectorAll('#player-controls .focusable, #btn-skip-segment'));
+            }
+        },
+
+        skipActiveSegment: function () {
+            var segment = this.getActiveSkipSegment();
+            if (!segment || this.isLive) return false;
+            var target = segment.key === 'outro'
+                ? Math.max(0, this.duration - 500)
+                : (segment.endTime + 0.4) * 1000;
+            if (this.duration > 0 && target > this.duration) target = this.duration;
+            this.applySeek(target);
+            this.updateSkipSegment();
+            return true;
         },
 
         skip: function (seconds) {
@@ -677,8 +947,8 @@
             document.body.classList.add('player-open');
 
             // Build player title with metadata
-            var titleText = 'NEXUSNIGHT';
-            var badgeText = '1080p';
+            var titleText = 'NexusNights';
+            var badgeText = '';
             
             if (this.meta) {
                 if (this.meta.title) {
@@ -689,14 +959,14 @@
                     }
                 }
                 if (this.meta.isLive) {
-                    badgeText = 'LIVE • ' + (this.meta.quality || '1080p');
+                    badgeText = NexusConfig.t('player_live_badge');
                 } else if (this.meta.quality) {
                     badgeText = this.meta.quality;
                 }
             }
             
             if (this.currentSource && this.currentSource.provider) {
-                badgeText += ' • ' + this.currentSource.provider;
+                badgeText += (badgeText ? ' • ' : '') + this.currentSource.provider;
             }
 
             // SVG Icons
@@ -721,7 +991,7 @@
                 '<button class="player-button player-button-icon-only focusable" id="btn-player-back" title="' + NexusConfig.t('player_back') + '">' + backSvg + '</button>' +
                 '<div class="player-title-artwork">' +
                 '<span class="player-title" id="player-title">' + NexusConfig.escapeHtml(titleText) + '</span>' +
-                '<span class="player-badge" id="player-badge">' + NexusConfig.escapeHtml(badgeText) + '</span>' +
+                (badgeText ? '<span class="player-badge" id="player-badge">' + NexusConfig.escapeHtml(badgeText) + '</span>' : '') +
                 '</div>' +
                 '</div>' +
                 '</div>' +
@@ -732,6 +1002,38 @@
                 '<div class="player-subtitle-container">' +
                 '<div class="player-subtitle-text" id="player-subtitle-text"></div>' +
                 '</div>' +
+                '</div>' +
+
+                // One community skip action: recap, intro, or credits
+                '<button type="button" class="player-skip-button hidden focusable" id="btn-skip-segment">' +
+                SKIP_ICON +
+                '<span id="btn-skip-label">' + NexusConfig.t('player_skip_intro') + '</span>' +
+                '</button>' +
+
+                // Next Episode Card (Netflix Style with 5s countdown)
+                '<div class="player-next-card hidden" id="player-next-episode-card">' +
+                '<div class="player-next-card-inner">' +
+                '<div class="player-next-header">' +
+                '<span class="player-next-badge">' + (NexusConfig.getLanguage() === 'ar' ? 'الحلقة التالية' : 'NEXT EPISODE') + '</span>' +
+                '<span class="player-next-timer"><span id="player-next-sec">5</span>s</span>' +
+                '</div>' +
+                '<div class="player-next-info" id="player-next-title"></div>' +
+                '<div class="player-next-actions">' +
+                '<button class="player-button cinematic-button focusable player-button-primary" id="btn-next-play-now">' +
+                (NexusConfig.getLanguage() === 'ar' ? 'تشغيل الآن' : 'Play Now') +
+                '</button>' +
+                '<button class="player-button cinematic-button focusable" id="btn-next-cancel">' +
+                (NexusConfig.getLanguage() === 'ar' ? 'إلغاء' : 'Cancel') +
+                '</button>' +
+                '</div>' +
+                '</div>' +
+                '</div>' +
+
+                // Quiet seek feedback while the controls are hidden
+                '<div class="player-seek-hud hidden" id="player-seek-hud">' +
+                '<span class="player-seek-hud-direction" id="player-seek-hud-direction">+10s</span>' +
+                '<div class="player-seek-hud-time"><span id="player-seek-hud-current">00:00</span><span class="player-seek-hud-sep">/</span><span id="player-seek-hud-total">00:00</span></div>' +
+                '<div class="player-seek-hud-track"><div class="player-seek-hud-fill" id="player-seek-hud-fill"></div></div>' +
                 '</div>' +
 
                 // Premium Loading Overlay with Logo
@@ -774,8 +1076,8 @@
                 '<button class="player-button cinematic-button focusable" id="btn-rewind" title="' + NexusConfig.t('player_rewind') + '">' + rewindSvg + '<span class="button-label">10s</span></button>' +
                 '<button class="player-button player-button-play cinematic-button focusable" id="btn-play-pause" title="' + NexusConfig.t('player_play') + ' / ' + NexusConfig.t('player_pause') + '">' + playSvg + '</button>' +
                 '<button class="player-button cinematic-button focusable" id="btn-forward" title="' + NexusConfig.t('player_forward') + '"><span class="button-label">10s</span>' + forwardSvg + '</button>' +
-                '<button class="player-button cinematic-button focusable" id="btn-subtitles">' + ccSvg + '<span class="button-label" id="btn-subtitles-label">' + NexusConfig.t('player_subtitles') + '</span></button>' +
-                '<button class="player-button cinematic-button focusable" id="btn-audio">' + audioSvg + '<span class="button-label" id="btn-audio-label">' + NexusConfig.t('player_audio') + '</span></button>' +
+                (this.isSports ? '' : '<button class="player-button cinematic-button focusable" id="btn-subtitles">' + ccSvg + '<span class="button-label" id="btn-subtitles-label">' + NexusConfig.t('player_subtitles') + '</span></button>') +
+                (this.isSports ? '' : '<button class="player-button cinematic-button focusable" id="btn-audio">' + audioSvg + '<span class="button-label" id="btn-audio-label">' + NexusConfig.t('player_audio') + '</span></button>') +
                 '<button class="player-button player-button-icon-only cinematic-button focusable" id="btn-close-player" title="' + NexusConfig.t('player_close_short') + '">' + closeSvg + '</button>' +
                 '</div>' +
 
@@ -850,6 +1152,7 @@
             var forward = document.getElementById('btn-forward');
             var backBtn = document.getElementById('btn-player-back');
             var closeBtn = document.getElementById('btn-close-player');
+            var skipBtn = document.getElementById('btn-skip-segment');
             var subBtn = document.getElementById('btn-subtitles');
             var srcBtn = document.getElementById('btn-sources');
             var retry = document.getElementById('btn-player-retry');
@@ -861,6 +1164,7 @@
             if (toggle) toggle.onclick = function () { self.togglePlayPause(); };
             if (rewind) rewind.onclick = function () { self.skip(-10); };
             if (forward) forward.onclick = function () { self.skip(10); };
+            if (skipBtn) skipBtn.onclick = function () { self.skipActiveSegment(); };
             if (backBtn) backBtn.onclick = function () { self.stop(); };
             if (closeBtn) closeBtn.onclick = function () { self.stop(); };
             if (retry) retry.onclick = function () { self.retryCurrent(); };
@@ -893,7 +1197,15 @@
                 };
             }
 
-            FocusManager.register(document.querySelectorAll('#player-page .player-buttons .focusable'));
+            var nextPlayBtn = document.getElementById('btn-next-play-now');
+            var nextCancelBtn = document.getElementById('btn-next-cancel');
+            if (nextPlayBtn) nextPlayBtn.onclick = function () { self.playNextEpisode(); };
+            if (nextCancelBtn) nextCancelBtn.onclick = function () {
+                self.nextEpisodeDismissed = true;
+                self.clearNextEpisodeCountdown();
+            };
+
+            FocusManager.register(document.querySelectorAll('#player-page .player-buttons .focusable, #btn-skip-segment, #player-next-episode-card .focusable'));
         },
 
         openSubtitlesModal: function () {
@@ -1304,8 +1616,18 @@
                 progressBar.style.width = pct + '%';
             }
 
-            // Subtitle cue display
+            // Skip action + subtitle cue display
+            this.updateSkipSegment();
             this.renderActiveSubtitleCue();
+
+            // Next Episode Countdown check for series:
+            if (this.canPlayNextEpisode() && !this.nextEpisodeActive && !this.nextEpisodeDismissed && this.duration > 60000) {
+                var rem = this.duration - this.currentTime;
+                var isOutro = this.activeSkipSegment && this.activeSkipSegment.key === 'outro';
+                if (isOutro || (rem <= 20000 && rem > 0)) {
+                    this.showNextEpisodeCountdown();
+                }
+            }
         },
 
         renderActiveSubtitleCue: function () {
@@ -1371,8 +1693,14 @@
             controls.classList.add('visible');
             if (header) header.classList.add('visible');
 
+            // The chrome owns the timeline now; the transient seek HUD steps aside.
+            var seekHud = document.getElementById('player-seek-hud');
+            if (seekHud) seekHud.classList.add('hidden');
+            var shell = document.getElementById('player-page');
+            if (shell) shell.classList.remove('seeking');
+
             if (wasHidden && window.FocusManager) {
-                FocusManager.register(document.querySelectorAll('#player-controls .focusable'));
+                FocusManager.register(document.querySelectorAll('#player-controls .focusable, #btn-skip-segment'));
             }
 
             clearTimeout(this.controlsTimeout);

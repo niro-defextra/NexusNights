@@ -1,0 +1,813 @@
+/* ==========================================================================
+   NEXUSNIGHT — /downloads
+   A single dark field. Three devices suspended in it. One crimson band.
+   Type: Bricolage Grotesque (Latin display) / Alexandria (Arabic display)
+         Hanken Grotesk (text) / IBM Plex Mono (measured values only)
+   ========================================================================== */
+
+.dl {
+  --dl-ink: #0a0708;
+  --dl-coal: #120d0f;
+  --dl-crypt: #1a1316;
+  --dl-ash: #2b2125;
+  --dl-bone: #f2ebe3;
+  --dl-dust: #a89c95;
+  --dl-blood: #b3202f;
+  --dl-blood-hot: #dc3044;
+  --dl-gilt: #d4af6a;
+  --dl-rule: rgba(242, 235, 227, 0.12);
+  --dl-rule-strong: rgba(242, 235, 227, 0.24);
+
+  position: relative;
+  isolation: isolate;
+  background: var(--dl-ink);
+  color: var(--dl-bone);
+  font-family: var(--font-sans);
+  overflow-x: clip;
+}
+
+.dl ::selection {
+  background: var(--dl-blood);
+  color: #fff;
+}
+
+.dl a:focus-visible,
+.dl button:focus-visible {
+  outline: 2px solid var(--dl-gilt);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
+/* ── scroll progress: a hairline the page never draws by default ─────────── */
+
+.dl-progress {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline: 0;
+  height: 2px;
+  z-index: 70;
+  transform-origin: 0 50%;
+  transform: scaleX(var(--p, 0));
+  background: var(--dl-blood);
+  pointer-events: none;
+}
+
+[dir='rtl'] .dl-progress {
+  transform-origin: 100% 50%;
+}
+
+/* ── shared type ─────────────────────────────────────────────────────────── */
+
+.dl-display {
+  font-family: var(--font-dl-display);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  text-wrap: balance;
+  margin: 0;
+}
+
+[dir='rtl'] .dl-display {
+  font-family: var(--font-dl-ar-display);
+  font-weight: 600;
+  letter-spacing: normal;
+  line-height: 1.22;
+}
+
+.dl-lede {
+  color: var(--dl-dust);
+  font-size: 1.0625rem;
+  line-height: 1.75;
+  max-width: 52ch;
+  margin: 0;
+  text-wrap: pretty;
+}
+
+[dir='rtl'] .dl-lede {
+  line-height: 1.9;
+}
+
+.dl-mono {
+  font-family: var(--font-dl-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.dl-pad {
+  padding-inline: var(--pad);
+}
+
+/* ── hero ────────────────────────────────────────────────────────────────── */
+
+.dl-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 100svh;
+  padding-block: calc(var(--header-h) + 3rem) 0;
+  padding-inline: var(--pad);
+}
+
+/* Narrow screens: the scene sits under the copy, never behind it. */
+.dl-hero__copy {
+  order: 1;
+}
+
+.dl-hero__stage {
+  position: relative;
+  order: 2;
+  height: min(50svh, 400px);
+  margin-block-start: 1.5rem;
+  margin-inline: calc(var(--pad) * -1);
+  opacity: 1;
+  -webkit-mask-image: radial-gradient(100% 92% at 50% 46%, #000 62%, transparent 100%);
+  mask-image: radial-gradient(100% 92% at 50% 46%, #000 62%, transparent 100%);
+  pointer-events: none;
+}
+
+.dl-hero__foot {
+  position: relative;
+  order: 3;
+  inset: auto;
+  margin-inline: calc(var(--pad) * -1);
+  padding: 1.15rem var(--pad);
+  border-block-start: 1px solid var(--dl-rule);
+  border-block-end: 1px solid var(--dl-rule);
+}
+
+.dl-hero__stage canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.dl-stage-host {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+@media (min-width: 900px) {
+  .dl-stage-host {
+    position: relative;
+    inset: auto;
+  }
+}
+
+/* anchor landings clear the fixed bar */
+.dl-row,
+.dl-section[id] {
+  scroll-margin-block-start: calc(var(--header-h) + 1.25rem);
+}
+
+.dl-hero__copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  max-width: 41rem;
+}
+
+.dl-hero__title {
+  font-size: clamp(2.7rem, 11.5vw, 4.2rem);
+}
+
+/* Arabic sets wider and taller in the same optical size — drop it a step. */
+[dir='rtl'] .dl-hero__title {
+  font-size: clamp(2.3rem, 4.4vw, 4.35rem);
+}
+
+.dl-hero__title em {
+  font-style: normal;
+  color: var(--dl-gilt);
+}
+
+.dl-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-block-start: 0.5rem;
+}
+
+.dl-hero__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 2.5rem;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--dl-dust);
+}
+
+[dir='rtl'] .dl-hero__foot {
+  letter-spacing: normal;
+  font-size: 0.75rem;
+}
+
+.dl-hero__foot > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.dl-hero__foot > span + span::before {
+  content: '';
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--dl-gilt);
+  opacity: 0.8;
+  margin-inline-end: 0.2rem;
+}
+
+@media (min-width: 900px) {
+  .dl-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 45fr) minmax(0, 55fr);
+    align-items: center;
+    gap: clamp(1rem, 3vw, 3rem);
+    padding-block: calc(var(--header-h) + 3rem) 6.5rem;
+  }
+
+  .dl-hero__stage {
+    height: min(70svh, 640px);
+    margin-block-start: 0;
+    margin-inline-end: calc(var(--pad) * -1);
+    margin-inline-start: 0;
+    -webkit-mask-image: radial-gradient(86% 90% at 58% 48%, #000 68%, transparent 100%);
+    mask-image: radial-gradient(86% 90% at 58% 48%, #000 68%, transparent 100%);
+  }
+
+  .dl-hero__foot {
+    position: absolute;
+    inset-block-end: 0;
+    inset-inline: 0;
+    margin-inline: 0;
+    padding: 1.15rem var(--pad);
+    border-block-end: 0;
+    background: linear-gradient(to top, var(--dl-ink) 40%, rgba(10, 7, 8, 0.72));
+  }
+
+  .dl-hero__title {
+    font-size: clamp(3.4rem, 5.4vw, 5.5rem);
+  }
+}
+
+/* ── jump rail: three doors, no cards ────────────────────────────────────── */
+
+.dl-jump {
+  margin-block-start: 0.75rem;
+  border-block-start: 1px solid var(--dl-rule);
+}
+
+.dl-jump a {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.9rem;
+  border-block-end: 1px solid var(--dl-rule);
+  color: var(--dl-bone);
+  text-decoration: none;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: color 180ms ease, padding-inline-start 260ms var(--ease-out-expo);
+}
+
+.dl-jump a span:last-child {
+  font-size: 0.6875rem;
+  color: var(--dl-dust);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  transition: color 180ms ease;
+}
+
+[dir='rtl'] .dl-jump a span:last-child {
+  letter-spacing: normal;
+  font-size: 0.75rem;
+}
+
+.dl-jump a:hover,
+.dl-jump a:focus-visible {
+  color: var(--dl-gilt);
+  padding-inline-start: 0.55rem;
+}
+
+.dl-jump a:hover span:last-child {
+  color: var(--dl-bone);
+}
+
+/* ── buttons ─────────────────────────────────────────────────────────────── */
+
+.dl-btn {
+  --btn-bg: var(--dl-blood);
+  --btn-fg: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  min-height: 3rem;
+  padding: 0.8rem 1.6rem;
+  border-radius: 999px;
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: background 200ms ease, transform 200ms var(--ease-out-expo), border-color 200ms ease;
+}
+
+.dl-btn:hover {
+  background: var(--dl-blood-hot);
+  transform: translateY(-1px);
+}
+
+.dl-btn:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.dl-btn--ghost {
+  --btn-bg: transparent;
+  --btn-fg: var(--dl-bone);
+  border-color: var(--dl-rule-strong);
+}
+
+.dl-btn--ghost:hover {
+  background: rgba(242, 235, 227, 0.06);
+  border-color: var(--dl-bone);
+}
+
+.dl-btn svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+}
+
+/* ── platform dossiers ───────────────────────────────────────────────────── */
+
+.dl-section {
+  padding-block: clamp(3rem, 6vw, 5rem);
+  padding-inline: var(--pad);
+  border-block-start: 1px solid var(--dl-rule);
+}
+
+.dl-row {
+  display: grid;
+  gap: clamp(2.25rem, 5vw, 5rem);
+  align-items: center;
+  padding-block: clamp(3.25rem, 6vw, 6rem);
+  border-block-start: 1px solid var(--dl-rule);
+}
+
+.dl-row:first-of-type {
+  border-block-start: 0;
+}
+
+.dl-row__body {
+  min-width: 0;
+  max-width: 34rem;
+}
+
+.dl-row__name {
+  font-family: var(--font-dl-display);
+  font-weight: 600;
+  font-size: clamp(2rem, 4vw, 3rem);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  margin: 0 0 1rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.85rem;
+}
+
+[dir='rtl'] .dl-row__name {
+  font-family: var(--font-dl-ar-display);
+  letter-spacing: normal;
+  line-height: 1.3;
+}
+
+.dl-row__name small {
+  font-family: var(--font-dl-mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dl-dust);
+}
+
+[dir='rtl'] .dl-row__name small {
+  letter-spacing: normal;
+  font-size: 0.75rem;
+}
+
+.dl-spec {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 1.5rem;
+  border-block-start: 1px solid var(--dl-rule);
+  margin: 1.9rem 0 1.9rem;
+}
+
+.dl-spec > div {
+  padding-block: 0.8rem;
+  border-block-end: 1px solid var(--dl-rule);
+  min-width: 0;
+}
+
+.dl-spec dt {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--dl-dust);
+  margin: 0;
+}
+
+[dir='rtl'] .dl-spec dt {
+  letter-spacing: normal;
+  font-size: 0.75rem;
+  text-transform: none;
+}
+
+.dl-spec dd {
+  margin: 0.3rem 0 0;
+  font-family: var(--font-dl-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
+  color: var(--dl-bone);
+  overflow-wrap: anywhere;
+}
+
+.dl-row__note {
+  margin: 0.9rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--dl-dust);
+  line-height: 1.6;
+}
+
+/* art plate */
+
+.dl-art {
+  position: relative;
+  perspective: 1400px;
+  min-width: 0;
+}
+
+.dl-art::before {
+  content: '';
+  position: absolute;
+  inset: 8% 6%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(179, 32, 47, 0.22), transparent 72%);
+  filter: blur(28px);
+  opacity: 0.55;
+  transition: opacity 600ms ease;
+  pointer-events: none;
+}
+
+.dl-row:hover .dl-art::before {
+  opacity: 0.9;
+}
+
+.dl-art__inner {
+  position: relative;
+  transform: rotateY(-8deg) rotateX(3deg);
+  transform-origin: 50% 60%;
+  transition: transform 700ms var(--ease-out-expo);
+  will-change: transform;
+}
+
+[dir='rtl'] .dl-art__inner {
+  transform: rotateY(8deg) rotateX(3deg);
+}
+
+.dl-row:hover .dl-art__inner,
+.dl-row:focus-within .dl-art__inner {
+  transform: rotateY(0deg) rotateX(0deg) translateY(-6px);
+}
+
+.dl-art svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 440px;
+  overflow: visible;
+}
+
+/* ink lines carry the drawing; a single gilt mark per plate earns attention */
+
+.da-line {
+  fill: none;
+  stroke: rgba(242, 235, 227, 0.34);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.da-line--faint {
+  stroke: rgba(242, 235, 227, 0.16);
+}
+
+.da-line--crimson {
+  stroke: var(--dl-blood);
+}
+
+.da-line--gilt {
+  stroke: var(--dl-gilt);
+}
+
+.da-fill {
+  fill: var(--dl-coal);
+}
+
+.da-fill--crypt {
+  fill: var(--dl-crypt);
+}
+
+.da-fill--crimson {
+  fill: rgba(179, 32, 47, 0.18);
+}
+
+.da-fill--bone {
+  fill: var(--dl-bone);
+}
+
+.da-fill--gilt {
+  fill: var(--dl-gilt);
+}
+
+.da-glow {
+  filter: drop-shadow(0 0 18px rgba(179, 32, 47, 0.45));
+}
+
+/* ── install path ────────────────────────────────────────────────────────── */
+
+.dl-path {
+  display: grid;
+  gap: 2rem;
+  margin-block-start: 2.25rem;
+}
+
+.dl-step {
+  min-width: 0;
+}
+
+.dl-step__index {
+  font-family: var(--font-dl-mono);
+  font-size: 0.6875rem;
+  color: var(--dl-gilt);
+  letter-spacing: 0.16em;
+  display: block;
+  margin-block-end: 0.7rem;
+}
+
+.dl-step h3 {
+  font-family: var(--font-dl-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.5rem;
+}
+
+[dir='rtl'] .dl-step h3 {
+  font-family: var(--font-dl-ar-display);
+  letter-spacing: normal;
+  font-size: 1.1875rem;
+}
+
+.dl-step p {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.7;
+  color: var(--dl-dust);
+}
+
+@media (min-width: 860px) {
+  .dl-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .dl-row--flip .dl-art {
+    order: 2;
+  }
+
+  .dl-row--flip .dl-row__body {
+    order: 1;
+  }
+
+  .dl-path {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+  }
+
+  .dl-step {
+    padding-inline: 2rem;
+  }
+
+  .dl-step:first-child {
+    padding-inline-start: 0;
+  }
+
+  .dl-step + .dl-step {
+    border-inline-start: 1px solid var(--dl-rule);
+  }
+}
+
+/* ── the crimson band: Discord activity ──────────────────────────────────── */
+
+.dl-band {
+  position: relative;
+  overflow: hidden;
+  background: var(--dl-blood);
+  color: #fff;
+  padding-block: clamp(3rem, 6.5vw, 5.5rem);
+  padding-inline: var(--pad);
+}
+
+.dl-band::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(80% 120% at 88% 12%, rgba(10, 7, 8, 0.55), transparent 62%);
+  pointer-events: none;
+}
+
+.dl-band__inner {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 2.25rem;
+  align-items: end;
+}
+
+.dl-band h2 {
+  font-family: var(--font-dl-display);
+  font-weight: 500;
+  font-size: clamp(2rem, 4.6vw, 3.5rem);
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+  margin: 0;
+  max-width: 22ch;
+  text-wrap: balance;
+}
+
+[dir='rtl'] .dl-band h2 {
+  font-family: var(--font-dl-ar-display);
+  font-weight: 600;
+  letter-spacing: normal;
+  line-height: 1.3;
+}
+
+.dl-band p {
+  margin: 1.15rem 0 0;
+  max-width: 46ch;
+  font-size: 0.9375rem;
+  line-height: 1.75;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.dl-band .dl-btn {
+  --btn-bg: var(--dl-ink);
+  --btn-fg: var(--dl-bone);
+  white-space: nowrap;
+}
+
+.dl-band .dl-btn:hover {
+  background: #000;
+}
+
+.dl-band__meta {
+  margin: 1rem 0 0;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+@media (min-width: 860px) {
+  .dl-band__inner {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 3rem;
+  }
+}
+
+/* ── closing ─────────────────────────────────────────────────────────────── */
+
+.dl-close {
+  display: grid;
+  gap: 2rem;
+  padding-block: clamp(3.5rem, 7vw, 6rem) clamp(5rem, 9vw, 8rem);
+}
+
+.dl-close h2 {
+  font-family: var(--font-dl-display);
+  font-weight: 500;
+  font-size: clamp(1.75rem, 3.6vw, 2.75rem);
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+  margin: 0;
+  max-width: 26ch;
+}
+
+[dir='rtl'] .dl-close h2 {
+  font-family: var(--font-dl-ar-display);
+  font-weight: 600;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+
+.dl-close__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 2rem;
+}
+
+.dl-close__links a {
+  color: var(--dl-bone);
+  text-decoration: none;
+  font-size: 0.875rem;
+  border-block-end: 1px solid var(--dl-rule-strong);
+  padding-block-end: 0.25rem;
+  transition: color 180ms ease, border-color 180ms ease;
+}
+
+.dl-close__links a:hover {
+  color: var(--dl-gilt);
+  border-color: var(--dl-gilt);
+}
+
+@media (min-width: 860px) {
+  .dl-close {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+}
+
+/* ── reveal ──────────────────────────────────────────────────────────────── */
+
+/* Reveal only exists once JS is live: without it, every section is readable. */
+.dl-reveal {
+  opacity: 1;
+}
+
+.dl-anim .dl-reveal {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.dl-anim .dl-reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 760ms var(--ease-out-expo) calc(var(--i, 0) * 90ms),
+    transform 760ms var(--ease-out-expo) calc(var(--i, 0) * 90ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dl-anim .dl-reveal,
+  .dl-anim .dl-reveal.is-in {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .dl-art__inner,
+  .dl-row:hover .dl-art__inner {
+    transform: none;
+  }
+}
+
+/* ── narrow screens ──────────────────────────────────────────────────────── */
+
+@media (max-width: 899px) {
+  .dl-art svg {
+    max-height: 290px;
+  }
+
+  .dl-row {
+    gap: 1.5rem;
+    padding-block: 2.75rem;
+  }
+
+  .dl-row__body {
+    order: 1;
+  }
+
+  .dl-art {
+    order: 2;
+  }
+}
+
+@media (max-width: 520px) {
+  .dl-spec {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dl-hero__foot {
+    font-size: 0.625rem;
+    gap: 0.4rem 1.25rem;
+  }
+}
