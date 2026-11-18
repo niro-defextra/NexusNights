@@ -1262,6 +1262,12 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     ]);
     if (!movie) return notFound(res);
 
+    // Fallback overview to English if localized is empty
+    if (!movie.overview) {
+      const enMovie = await svc.tmdb.getMovieDetail(tmdbId, 'en-US').catch(() => null);
+      if (enMovie?.overview) movie.overview = enMovie.overview;
+    }
+
     const logoInfo = selectBestLogo(imagesData?.logos, lang, movie.original_language);
     const detail = discovery.movieDetailToGlobal(movie, logoInfo);
     res.json(detail);
@@ -1280,6 +1286,12 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
       svc.tmdb.getImages('tv', tmdbId).catch(() => null),
     ]);
     if (!tv) return notFound(res);
+
+    // Fallback overview to English if localized is empty
+    if (!tv.overview) {
+      const enTv = await svc.tmdb.getTvDetail(tmdbId, 'en-US').catch(() => null);
+      if (enTv?.overview) tv.overview = enTv.overview;
+    }
 
     const logoInfo = selectBestLogo(imagesData?.logos, lang, tv.original_language);
     const detail = discovery.tvDetailToGlobal(tv, logoInfo);

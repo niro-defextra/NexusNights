@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { api, ApiError, u } from '../api';
 import type { GlobalTitleDetail } from '../api-types';
 import { ErrorState } from '../components/States';
@@ -24,6 +24,83 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoFailed, setLogoFailed] = useState(false);
   const episodesRef = useRef<HTMLDivElement>(null);
+
+  // ── Trailer & AFK Cinema Idle State ─────────────────────────────────────────
+  const [trailerKey, setTrailerKey] = useState<string | null>(null);
+  const [trailerPhase, setTrailerPhase] = useState<'idle' | 'backdrop' | 'immersive'>('idle');
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const immersiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Recommendations State ───────────────────────────────────────────────────
+  const [recommendations, setRecommendations] = useState<any[]>([]);
+
+  // ── Fetch trailer + recommendations ─────────────────────────────────────────
+  useEffect(() => {
+    setTrailerPhase('idle');
+    setTrailerKey(null);
+    setRecommendations([]);
+
+    const kindParam = kind === 'series' ? 'tv' : 'movie';
+    fetch(u(`/api/tmdb/videos/${kindParam}/${tmdbId}`))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.results?.length) setTrailerKey(d.results[0].key);
+      })
+      .catch(() => {});
+
+    fetch(u(`/api/tmdb/recommendations/${kindParam}/${tmdbId}`))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.results?.length) {
+          setRecommendations(d.results.filter((r: any) => r.poster_path).slice(0, 12));
+        }
+      })
+      .catch(() => {});
+  }, [kind, tmdbId]);
+
+  // ── AFK timer: 5s → backdrop trailer, 5s more → fullscreen immersive ────────
+  const resetIdleTimer = useCallback(() => {
+    if (trailerPhase === 'immersive') {
+      setTrailerPhase('idle');
+    }
+
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (immersiveTimerRef.current) clearTimeout(immersiveTimerRef.current);
+
+    if (!trailerKey) return;
+
+    idleTimerRef.current = setTimeout(() => {
+      setTrailerPhase('backdrop');
+      immersiveTimerRef.current = setTimeout(() => {
+        setTrailerPhase('immersive');
+      }, 5000);
+    }, 5000);
+  }, [trailerKey, trailerPhase]);
+
+  useEffect(() => {
+    if (!trailerKey) return;
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'] as const;
+    const handler = () => resetIdleTimer();
+
+    events.forEach((e) => window.addEventListener(e, handler, { passive: true }));
+    resetIdleTimer();
+
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, handler));
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (immersiveTimerRef.current) clearTimeout(immersiveTimerRef.current);
+    };
+  }, [trailerKey, resetIdleTimer]);
+
+  const playTrailerNow = useCallback(() => {
+    if (!trailerKey) return;
+    setTrailerPhase('backdrop');
+    if (immersiveTimerRef.current) clearTimeout(immersiveTimerRef.current);
+    immersiveTimerRef.current = setTimeout(() => {
+      setTrailerPhase('immersive');
+    }, 5000);
+  }, [trailerKey]);
 
   const detail = useAsync(
     (s) => (kind === 'movie' ? api.discoveryMovie(tmdbId, lang, s) : api.discoveryTV(tmdbId, lang, s)),
@@ -134,11 +211,43 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
     }
   };
 
+  const isImmersive = trailerPhase === 'immersive';
+  const showTrailerVideo = trailerPhase === 'backdrop' || trailerPhase === 'immersive';
+
   return (
     <div className="min-h-screen pb-16" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+      {/* ── Immersive Fullscreen Theater Mode ─────────────────────────────── */}
+      {isImmersive && trailerKey && (
+        <div
+          className="fixed inset-0 z-[999] bg-black animate-[fade_0.6s_ease]"
+          onClick={() => setTrailerPhase('idle')}
+          onMouseMove={() => setTrailerPhase('idle')}
+        >
+          <iframe
+            src={`https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&mute=0&controls=0&modestbranding=1&rel=0&showinfo=0&loop=1&playlist=${trailerKey}`}
+            className="size-full"
+            allow="autoplay; encrypted-media"
+            allowFullScreen
+          />
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 animate-pulse text-sm text-white/80 pointer-events-none font-medium bg-black/60 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md">
+            {t('moveToExit')}
+          </div>
+        </div>
+      )}
+
       {/* Hero Banner Section */}
       <div className="relative isolate h-[clamp(28rem,60vh,38rem)] w-full overflow-hidden select-none">
-        {title.backdropUrl ? (
+        {showTrailerVideo && trailerKey ? (
+          <div className="absolute inset-0 -z-20 animate-[fade_1s_ease]">
+            <iframe
+              src={`https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&showinfo=0&loop=1&playlist=${trailerKey}`}
+              className="absolute inset-0 size-full scale-[1.25] pointer-events-none"
+              style={{ border: 'none' }}
+              allow="autoplay; encrypted-media"
+              tabIndex={-1}
+            />
+          </div>
+        ) : title.backdropUrl ? (
           <img
             src={u(title.backdropUrl)}
             alt=""
@@ -231,6 +340,18 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
                 <span>{kind === 'series' ? (lang === 'ar' ? 'اختر حلقة' : 'Select Episode') : t('play')}</span>
               </button>
 
+              {trailerKey && (
+                <button
+                  onClick={playTrailerNow}
+                  className="group inline-flex h-11 sm:h-12 items-center gap-2 rounded-xl border border-white/15 bg-white/[0.08] px-5 font-semibold text-bone backdrop-blur-md transition-all duration-200 hover:border-white/30 hover:bg-white/[0.14] active:scale-[0.98]"
+                >
+                  <svg className="size-4 text-blood transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                  <span>{t('watchTrailer')}</span>
+                </button>
+              )}
+
               {kind === 'movie' && (
                 <WatchPartyButton
                   mediaId={title.localId || `streaming-movie-${tmdbId}`}
@@ -264,7 +385,7 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
                 {t('synopsis')}
               </h2>
               <p className="text-bone/85 leading-relaxed text-sm sm:text-base">
-                {title.overview || t('synopsis')}
+                {title.overview || t('noSynopsis')}
               </p>
             </div>
 
@@ -430,6 +551,51 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
           </div>
         </div>
       </div>
+
+      {/* ── Recommendations Section (قد يعجبك أيضًا) ────────────────────── */}
+      {recommendations.length > 0 && (
+        <div className="container mx-auto max-w-6xl px-[var(--pad)] pt-12">
+          <h2 className="mb-5 font-display text-xl sm:text-2xl font-bold tracking-wide text-bone">
+            {t('recommended')}
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+            {recommendations.map((rec) => {
+              const recKind = rec.media_type === 'tv' || (!rec.title && rec.name) ? 'tv' : 'movie';
+              const recTitle = rec.title || rec.name;
+              const recYear = (rec.release_date || rec.first_air_date || '').substring(0, 4);
+              return (
+                <a
+                  key={rec.id}
+                  href={`#/${recKind}/${rec.id}`}
+                  className="group relative overflow-hidden rounded-xl bg-crypt ring-1 ring-white/5 transition-all duration-300 hover:-translate-y-1.5 hover:ring-blood/50 hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.95),0_0_20px_rgba(179,32,47,0.3)]"
+                >
+                  <img
+                    src={`https://image.tmdb.org/t/p/w342${rec.poster_path}`}
+                    alt={recTitle}
+                    loading="lazy"
+                    decoding="async"
+                    className="aspect-[2/3] w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  />
+                  <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/95 via-black/40 to-transparent p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                    <p className="text-xs sm:text-sm font-bold text-bone leading-tight line-clamp-2">
+                      {recTitle}
+                    </p>
+                    <div className="mt-1 flex items-center gap-2 text-[0.7rem] text-dust">
+                      {recYear && <span>{recYear}</span>}
+                      {rec.vote_average ? (
+                        <span className="inline-flex items-center gap-0.5 text-gilt font-semibold">
+                          <Star className="size-2.5 fill-gilt text-gilt" />
+                          {rec.vote_average.toFixed(1)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
