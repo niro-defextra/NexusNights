@@ -64,7 +64,7 @@ export function TopBar() {
 
   const isHome = route.name === 'home';
   const isSports = route.name === 'sports' || route.name === 'sports-watch';
-  const isRooms = route.name === 'discover-rooms';
+  const isDownloads = route.name === 'downloads';
   const isAdminActive = route.name === 'admin-dashboard';
   const isProvidersActive = route.name === 'providers';
 
@@ -80,11 +80,11 @@ export function TopBar() {
         }`}
       >
         {/* Logo */}
-        <a href={hrefs.home} className="group flex items-center gap-2 shrink-0 outline-none" aria-label="NexusNight Home">
+        <a href={hrefs.home} className="group flex items-center gap-2 shrink-0 outline-none" aria-label="NexusNights Home">
           <Sigil className="size-6 sm:size-7 text-blood-hot transition-transform duration-700 ease-[var(--ease-out-expo)] group-hover:rotate-180 group-hover:scale-110" />
           <span lang="en" dir="ltr" className="font-display text-[1.25rem] sm:text-[1.45rem] font-extrabold tracking-[0.03em] text-bone select-none">
             <span className="text-blood-hot">NEXUS</span>
-            <span className="text-gilt">NIGHT</span>
+            <span className="text-gilt">NIGHTS</span>
           </span>
         </a>
 
@@ -115,19 +115,17 @@ export function TopBar() {
             )}
           </a>
 
-          {!isDiscordActivity && (
-            <a
-              href={hrefs.discoverRooms}
-              className={`relative py-1 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 ${
-                isRooms ? 'text-bone font-medium' : 'text-dust/80 hover:text-bone focus-visible:text-gilt'
-              }`}
-            >
-              {t('discoverRooms')}
-              {isRooms && (
-                <span className="absolute -bottom-1.5 inset-x-0 h-0.5 bg-gilt rounded-full shadow-[0_0_8px_rgba(212,175,106,0.85)]" />
-              )}
-            </a>
-          )}
+          <a
+            href={hrefs.downloads}
+            className={`relative py-1 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 ${
+              isDownloads ? 'text-bone font-medium' : 'text-dust/80 hover:text-bone focus-visible:text-gilt'
+            }`}
+          >
+            {lang === 'ar' ? 'التنزيلات' : 'Downloads'}
+            {isDownloads && (
+              <span className="absolute -bottom-1.5 inset-x-0 h-0.5 bg-gilt rounded-full shadow-[0_0_8px_rgba(212,175,106,0.85)]" />
+            )}
+          </a>
 
           {!isDiscordActivity && (
             <a
@@ -328,17 +326,15 @@ export function TopBar() {
               {isSports && <span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />}
             </a>
 
-            {!isDiscordActivity && (
-              <a
-                href={hrefs.discoverRooms}
-                className={`flex items-center justify-between rounded-xl px-3.5 py-3 transition-all duration-200 active:scale-[0.98] ${
-                  isRooms ? 'bg-gilt/15 text-gilt font-medium' : 'text-bone hover:bg-white/[0.05]'
-                }`}
-              >
-                <span>{t('discoverRooms')}</span>
-                {isRooms && <span className="size-2 rounded-full bg-gilt shadow-[0_0_8px_rgba(212,175,106,0.8)]" />}
-              </a>
-            )}
+            <a
+              href={hrefs.downloads}
+              className={`flex items-center justify-between rounded-xl px-3.5 py-3 transition-all duration-200 active:scale-[0.98] ${
+                isDownloads ? 'bg-gilt/15 text-gilt font-medium' : 'text-bone hover:bg-white/[0.05]'
+              }`}
+            >
+              <span>{lang === 'ar' ? 'التنزيلات' : 'Downloads'}</span>
+              {isDownloads && <span className="size-2 rounded-full bg-gilt shadow-[0_0_8px_rgba(212,175,106,0.8)]" />}
+            </a>
 
             {!isDiscordActivity && (
               <a

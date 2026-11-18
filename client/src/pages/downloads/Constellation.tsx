@@ -128,7 +128,7 @@ export default function Constellation({ active }: { active: PlatformId | null })
 
     /* ── ambient stardust particles ───────────────────────────────────────── */
 
-    const particleCount = 180;
+    const particleCount = 220;
     const particleGeo = new THREE.BufferGeometry();
     const particlePos = new Float32Array(particleCount * 3);
     const particleColors = new Float32Array(particleCount * 3);
@@ -137,9 +137,9 @@ export default function Constellation({ active }: { active: PlatformId | null })
     const colBone = new THREE.Color(0xf2ebe3);
 
     for (let i = 0; i < particleCount; i++) {
-      particlePos[i * 3] = (Math.random() - 0.5) * 12;
-      particlePos[i * 3 + 1] = (Math.random() - 0.5) * 8;
-      particlePos[i * 3 + 2] = (Math.random() - 0.5) * 6 - 0.5;
+      particlePos[i * 3] = (Math.random() - 0.5) * 14;
+      particlePos[i * 3 + 1] = (Math.random() - 0.5) * 9;
+      particlePos[i * 3 + 2] = (Math.random() - 0.5) * 7 - 0.5;
 
       const pick = i % 3 === 0 ? colBlood : i % 3 === 1 ? colGilt : colBone;
       particleColors[i * 3] = pick.r;
@@ -150,64 +150,50 @@ export default function Constellation({ active }: { active: PlatformId | null })
     particleGeo.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
 
     const particleMat = new THREE.PointsMaterial({
-      size: 0.038,
+      size: 0.042,
       vertexColors: true,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.65,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const particles = new THREE.Points(particleGeo, particleMat);
     scene.add(particles);
 
-    /* ── screens ─────────────────────────────────────────────────────────── */
+    /* ── screen texture generator ─────────────────────────────────────────── */
 
     function screenTexture(
       kind: 'phone' | 'tv' | 'tile',
     ): THREE.CanvasTexture {
-      const w = kind === 'tv' ? 1024 : 704;
-      const h = kind === 'tv' ? 576 : 704;
+      const w = kind === 'tv' ? 1280 : kind === 'phone' ? 720 : 1280;
+      const h = kind === 'tv' ? 720 : kind === 'phone' ? 1440 : 800;
       const c = document.createElement('canvas');
       c.width = w;
       c.height = h;
       const g = c.getContext('2d');
       if (!g) throw new Error('no 2d');
 
-      const bg = g.createLinearGradient(0, 0, w * 0.4, h);
-      bg.addColorStop(0, '#2d181d');
-      bg.addColorStop(0.55, '#190f12');
-      bg.addColorStop(1, '#0e0a0b');
-      g.fillStyle = bg;
-      g.fillRect(0, 0, w, h);
-
-      // soft crimson bloom, upper-left, like a lamp off frame
-      const bloom = g.createRadialGradient(w * 0.18, h * 0.16, 0, w * 0.18, h * 0.16, w * 0.7);
-      bloom.addColorStop(0, 'rgba(220,48,68,0.38)');
-      bloom.addColorStop(1, 'rgba(179,32,47,0)');
-      g.fillStyle = bloom;
-      g.fillRect(0, 0, w, h);
-
       // Authentic NexusNight Sigil + Brand Typography
-      const sigil = (cx: number, cy: number, r: number, withWordmark = true) => {
+      const drawSigil = (cx: number, cy: number, r: number) => {
         g.save();
         g.translate(cx, cy);
 
-        // Ambient radial glow
-        const rad = g.createRadialGradient(0, 0, 2, 0, 0, r * 1.55);
-        rad.addColorStop(0, 'rgba(220,48,68,0.35)');
-        rad.addColorStop(0.6, 'rgba(179,32,47,0.1)');
+        // Ambient radial aura
+        const rad = g.createRadialGradient(0, 0, 2, 0, 0, r * 1.6);
+        rad.addColorStop(0, 'rgba(220,48,68,0.4)');
+        rad.addColorStop(0.6, 'rgba(179,32,47,0.12)');
         rad.addColorStop(1, 'rgba(179,32,47,0)');
         g.fillStyle = rad;
         g.beginPath();
-        g.arc(0, 0, r * 1.55, 0, Math.PI * 2);
+        g.arc(0, 0, r * 1.6, 0, Math.PI * 2);
         g.fill();
 
-        // Outer Circle
+        // Outer Ring
         g.beginPath();
         g.arc(0, 0, r, 0, Math.PI * 2);
-        g.fillStyle = 'rgba(220,48,68,0.12)';
+        g.fillStyle = 'rgba(220,48,68,0.15)';
         g.fill();
-        g.lineWidth = Math.max(2, r * 0.065);
+        g.lineWidth = Math.max(2, r * 0.07);
         g.strokeStyle = '#dc3044';
         g.stroke();
 
@@ -218,88 +204,528 @@ export default function Constellation({ active }: { active: PlatformId | null })
         g.lineTo(0, r * 0.88);
         g.lineTo(-r * 0.88, 0);
         g.closePath();
-        g.lineWidth = Math.max(1.8, r * 0.055);
+        g.lineWidth = Math.max(1.8, r * 0.06);
         g.strokeStyle = '#d4af6a';
         g.stroke();
 
-        // Inner jewel
+        // Center Jewel Pip
         g.beginPath();
-        g.arc(0, 0, r * 0.18, 0, Math.PI * 2);
+        g.arc(0, 0, r * 0.2, 0, Math.PI * 2);
         g.fillStyle = '#d4af6a';
         g.fill();
-
-        if (withWordmark) {
-          const fontSize = Math.max(12, Math.round(r * 0.36));
-          g.font = `800 ${fontSize}px system-ui, -apple-system, sans-serif`;
-          
-          const yOff = r + fontSize * 1.35;
-          const nexus = 'NEXUS ';
-          const nights = 'NIGHTS';
-          const nexusWidth = g.measureText(nexus).width;
-          const nightsWidth = g.measureText(nights).width;
-          const totalWidth = nexusWidth + nightsWidth;
-          const startX = -totalWidth / 2;
-
-          g.textBaseline = 'middle';
-          g.fillStyle = '#dc3044';
-          g.fillText(nexus, startX, yOff);
-          g.fillStyle = '#d4af6a';
-          g.fillText(nights, startX + nexusWidth, yOff);
-        }
 
         g.restore();
       };
 
-      if (kind === 'phone') {
-        sigil(w / 2, h * 0.32, w * 0.18, true);
-        // title rule + two content rows
-        g.fillStyle = 'rgba(242,235,227,0.95)';
-        g.fillRect(w * 0.16, h * 0.56, w * 0.32, 5);
-        g.fillStyle = 'rgba(242,235,227,0.34)';
-        for (let i = 0; i < 3; i++) {
-          g.fillRect(w * 0.16, h * 0.62 + i * 48, w * (0.5 - i * 0.08), 4);
-        }
-        // live pip & timeline
+      const drawBrand = (x: number, y: number, r: number, fontSize: number) => {
+        drawSigil(x, y, r);
+        g.save();
+        g.font = `800 ${fontSize}px system-ui, -apple-system, sans-serif`;
+        g.textBaseline = 'middle';
         g.fillStyle = '#dc3044';
-        g.fillRect(w * 0.16, h * 0.86, w * 0.055, 5);
-        g.fillStyle = 'rgba(242,235,227,0.42)';
-        g.fillRect(w * 0.24, h * 0.86, w * 0.6, 5);
-      } else if (kind === 'tv') {
-        sigil(w * 0.22, h * 0.40, h * 0.18, true);
-        // a rail of three poster blocks at the right
-        for (let i = 0; i < 3; i++) {
-          g.fillStyle = i === 0 ? 'rgba(220,48,68,0.22)' : 'rgba(242,235,227,0.08)';
-          g.fillRect(w * 0.60 + i * (w * 0.11), h * 0.26, w * 0.09, h * 0.46);
-          g.fillStyle = i === 0 ? '#d4af6a' : 'rgba(242,235,227,0.24)';
-          g.fillRect(w * 0.60 + i * (w * 0.11), h * 0.26, w * 0.09, 3);
-        }
-        // progress bar with crimson accent
-        g.fillStyle = 'rgba(242,235,227,0.22)';
-        g.fillRect(w * 0.075, h * 0.84, w * 0.85, 4);
-        g.fillStyle = '#dc3044';
-        g.fillRect(w * 0.075, h * 0.84, w * 0.32, 4);
-      } else {
-        // the voice room: three seats and a stage
-        for (let i = 0; i < 3; i++) {
-          const y = h * 0.28 + i * h * 0.17;
-          g.beginPath();
-          g.arc(w * 0.2, y, w * 0.055, 0, Math.PI * 2);
-          g.fillStyle = i === 0 ? 'rgba(220,48,68,0.7)' : 'rgba(242,235,227,0.2)';
-          g.fill();
-          g.fillStyle = 'rgba(242,235,227,0.26)';
-          g.fillRect(w * 0.3, y - 5, w * (0.4 - i * 0.06), 5);
-        }
-        // stage play mark
+        g.fillText('NEXUS', x + r + 10, y);
+        const nw = g.measureText('NEXUS ').width;
+        g.fillStyle = '#d4af6a';
+        g.fillText('NIGHTS', x + r + 10 + nw, y);
+        g.restore();
+      };
+
+      if (kind === 'tv') {
+        // Deep cinema gradient
+        const bg = g.createLinearGradient(0, 0, w, h);
+        bg.addColorStop(0, '#1c080e');
+        bg.addColorStop(0.4, '#0f080b');
+        bg.addColorStop(1, '#070506');
+        g.fillStyle = bg;
+        g.fillRect(0, 0, w, h);
+
+        // Cosmic nebula wash
+        const nebula = g.createRadialGradient(w * 0.25, h * 0.25, 10, w * 0.25, h * 0.25, w * 0.7);
+        nebula.addColorStop(0, 'rgba(220,48,68,0.32)');
+        nebula.addColorStop(0.5, 'rgba(140,25,37,0.12)');
+        nebula.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = nebula;
+        g.fillRect(0, 0, w, h);
+
+        // 1. Top Navigation Bar
+        drawBrand(64, 48, 18, 22);
+
+        // Nav tabs
+        const navs = ['الرئيسية (Home)', 'أفلام (Movies)', 'مسلسلات (Series)', 'بث مباشر (Sports)'];
+        g.font = '600 15px system-ui, sans-serif';
+        let nx = 340;
+        navs.forEach((item, idx) => {
+          if (idx === 0) {
+            g.fillStyle = '#f2ebe3';
+            g.fillText(item, nx, 48);
+            g.fillStyle = '#d4af6a';
+            g.fillRect(nx, 64, g.measureText(item).width, 3);
+          } else {
+            g.fillStyle = 'rgba(242,235,227,0.55)';
+            if (idx === 3) {
+              // green live dot
+              g.save();
+              g.fillStyle = '#10b981';
+              g.beginPath();
+              g.arc(nx - 8, 48, 4, 0, Math.PI * 2);
+              g.fill();
+              g.restore();
+            }
+            g.fillText(item, nx, 48);
+          }
+          nx += g.measureText(item).width + 36;
+        });
+
+        // Top-right Profile & Clock
+        g.fillStyle = 'rgba(242,235,227,0.85)';
+        g.font = '700 16px monospace';
+        g.fillText('21:45', w - 110, 48);
         g.beginPath();
-        g.moveTo(w * 0.72, h * 0.42);
-        g.lineTo(w * 0.72, h * 0.68);
-        g.lineTo(w * 0.9, h * 0.55);
-        g.closePath();
-        g.fillStyle = 'rgba(242,235,227,0.92)';
+        g.arc(w - 48, 48, 16, 0, Math.PI * 2);
+        g.fillStyle = '#2b2125';
         g.fill();
-        // live bar
+        g.lineWidth = 1.5;
+        g.strokeStyle = '#d4af6a';
+        g.stroke();
+
+        // 2. Featured Hero Premiere Banner
+        // Badge
+        g.fillStyle = 'rgba(220,48,68,0.25)';
+        g.fillRect(64, 130, 160, 26);
+        g.strokeStyle = '#dc3044';
+        g.lineWidth = 1;
+        g.strokeRect(64, 130, 160, 26);
         g.fillStyle = '#dc3044';
-        g.fillRect(w * 0.16, h * 0.85, w * 0.42, 4);
+        g.font = '800 12px system-ui, sans-serif';
+        g.fillText('العرض الأول • PREMIERE', 76, 147);
+
+        // Title
+        g.fillStyle = '#ffffff';
+        g.font = '900 48px system-ui, sans-serif';
+        g.fillText('DUNE: PART TWO', 64, 210);
+
+        // Meta tags
+        const tags = ['4K ULTRA HD', 'DOLBY ATMOS', '★ 9.1', '2h 46m'];
+        let tx = 64;
+        g.font = '700 12px monospace';
+        tags.forEach((tag, i) => {
+          const tw = g.measureText(tag).width + 16;
+          g.fillStyle = i === 2 ? 'rgba(212,175,106,0.2)' : 'rgba(255,255,255,0.08)';
+          g.fillRect(tx, 232, tw, 22);
+          g.fillStyle = i === 2 ? '#d4af6a' : 'rgba(255,255,255,0.7)';
+          g.fillText(tag, tx + 8, 247);
+          tx += tw + 10;
+        });
+
+        // CTA Buttons
+        // Primary "Watch Now"
+        g.fillStyle = '#dc3044';
+        g.beginPath();
+        g.roundRect ? g.roundRect(64, 276, 170, 44, 8) : g.rect(64, 276, 170, 44);
+        g.fill();
+        g.fillStyle = '#ffffff';
+        g.font = '800 16px system-ui, sans-serif';
+        g.fillText('▶  مشاهدة الآن', 96, 303);
+
+        // Secondary "Watchlist"
+        g.fillStyle = 'rgba(255,255,255,0.08)';
+        g.beginPath();
+        g.roundRect ? g.roundRect(248, 276, 140, 44, 8) : g.rect(248, 276, 140, 44);
+        g.fill();
+        g.strokeStyle = 'rgba(255,255,255,0.2)';
+        g.stroke();
+        g.fillStyle = 'rgba(255,255,255,0.85)';
+        g.font = '600 15px system-ui, sans-serif';
+        g.fillText('+ المفضلة', 282, 303);
+
+        // 3. Trending Carousel (Bottom Row)
+        g.fillStyle = '#ffffff';
+        g.font = '800 18px system-ui, sans-serif';
+        g.fillText('الأكثر رواجاً الليلة • Trending Tonight', 64, 385);
+
+        const posters = [
+          { title: 'Interstellar', cat: 'Sci-Fi · 4K', col: '#1e3a5f', bar: 0.65 },
+          { title: 'Oppenheimer', cat: 'Drama · HDR', col: '#4a1515', bar: 0.35 },
+          { title: 'Cyberpunk 2077', cat: 'Anime · 1080p', col: '#1f4037', bar: 0.9 },
+          { title: 'Real Madrid vs Man City', cat: 'دوري الأبطال • 2 : 1 LIVE', col: '#0d253a', live: true },
+        ];
+
+        posters.forEach((p, i) => {
+          const px = 64 + i * 285;
+          const py = 410;
+          const pw = 265;
+          const ph = 240;
+
+          // Poster card
+          const cardGrad = g.createLinearGradient(px, py, px, py + ph);
+          cardGrad.addColorStop(0, p.col);
+          cardGrad.addColorStop(1, '#0e0b0d');
+          g.fillStyle = cardGrad;
+          g.beginPath();
+          g.roundRect ? g.roundRect(px, py, pw, ph, 10) : g.rect(px, py, pw, ph);
+          g.fill();
+          g.strokeStyle = i === 0 ? 'rgba(212,175,106,0.5)' : 'rgba(255,255,255,0.12)';
+          g.stroke();
+
+          // Live pill if sports
+          if (p.live) {
+            g.fillStyle = '#dc3044';
+            g.fillRect(px + 12, py + 12, 60, 20);
+            g.fillStyle = '#ffffff';
+            g.font = '800 10px sans-serif';
+            g.fillText('مباشر 🔴', px + 20, py + 26);
+          }
+
+          // Title & Meta
+          g.fillStyle = '#ffffff';
+          g.font = '800 16px system-ui, sans-serif';
+          g.fillText(p.title, px + 14, py + ph - 42);
+
+          g.fillStyle = p.live ? '#10b981' : 'rgba(242,235,227,0.6)';
+          g.font = '600 12px sans-serif';
+          g.fillText(p.cat, px + 14, py + ph - 22);
+
+          // Progress bar
+          if (p.bar) {
+            g.fillStyle = 'rgba(255,255,255,0.2)';
+            g.fillRect(px + 14, py + ph - 10, pw - 28, 3);
+            g.fillStyle = '#dc3044';
+            g.fillRect(px + 14, py + ph - 10, (pw - 28) * p.bar, 3);
+          }
+        });
+
+        // Global cinema bottom progress
+        g.fillStyle = 'rgba(255,255,255,0.1)';
+        g.fillRect(0, h - 6, w, 6);
+        g.fillStyle = '#dc3044';
+        g.fillRect(0, h - 6, w * 0.42, 6);
+      } else if (kind === 'phone') {
+        // Phone screen (720x1440)
+        const bg = g.createLinearGradient(0, 0, w, h);
+        bg.addColorStop(0, '#1c0a10');
+        bg.addColorStop(0.35, '#0e090b');
+        bg.addColorStop(1, '#050405');
+        g.fillStyle = bg;
+        g.fillRect(0, 0, w, h);
+
+        // Status Bar
+        g.fillStyle = 'rgba(255,255,255,0.9)';
+        g.font = '800 24px monospace';
+        g.fillText('21:45', 48, 54);
+        g.font = '700 18px sans-serif';
+        g.fillText('5G  100%', w - 130, 54);
+
+        // Dynamic Island pill
+        g.fillStyle = '#000000';
+        g.beginPath();
+        g.roundRect ? g.roundRect(w / 2 - 80, 26, 160, 42, 21) : g.rect(w / 2 - 80, 26, 160, 42);
+        g.fill();
+        g.strokeStyle = 'rgba(255,255,255,0.15)';
+        g.stroke();
+
+        // App Bar
+        drawBrand(50, 130, 20, 26);
+
+        // Search icon circle
+        g.beginPath();
+        g.arc(w - 60, 130, 22, 0, Math.PI * 2);
+        g.fillStyle = 'rgba(255,255,255,0.08)';
+        g.fill();
+
+        // 1. "Continue Watching" Card
+        const cwx = 40;
+        const cwy = 190;
+        const cww = w - 80;
+        const cwh = 340;
+
+        const cwGrad = g.createLinearGradient(cwx, cwy, cwx + cww, cwy + cwh);
+        cwGrad.addColorStop(0, '#2d1018');
+        cwGrad.addColorStop(1, '#110d10');
+        g.fillStyle = cwGrad;
+        g.beginPath();
+        g.roundRect ? g.roundRect(cwx, cwy, cww, cwh, 18) : g.rect(cwx, cwy, cww, cwh);
+        g.fill();
+        g.strokeStyle = 'rgba(220,48,68,0.4)';
+        g.stroke();
+
+        // Movie poster image representation
+        g.fillStyle = 'rgba(0,0,0,0.5)';
+        g.fillRect(cwx, cwy + 180, cww, cwh - 180);
+
+        g.fillStyle = '#ffffff';
+        g.font = '800 28px system-ui, sans-serif';
+        g.fillText('Interstellar', cwx + 24, cwy + 230);
+        g.fillStyle = '#d4af6a';
+        g.font = '600 18px sans-serif';
+        g.fillText('متبقي 42 دقيقة • 1h 48m left', cwx + 24, cwy + 265);
+
+        // Play button circle
+        g.beginPath();
+        g.arc(cwx + cww - 54, cwy + 245, 30, 0, Math.PI * 2);
+        g.fillStyle = '#dc3044';
+        g.fill();
+        g.fillStyle = '#ffffff';
+        g.beginPath();
+        g.moveTo(cwx + cww - 48, cwy + 245);
+        g.lineTo(cwx + cww - 60, cwy + 235);
+        g.lineTo(cwx + cww - 60, cwy + 255);
+        g.fill();
+
+        // Progress bar inside card
+        g.fillStyle = 'rgba(255,255,255,0.2)';
+        g.fillRect(cwx + 24, cwy + cwh - 24, cww - 48, 6);
+        g.fillStyle = '#dc3044';
+        g.fillRect(cwx + 24, cwy + cwh - 24, (cww - 48) * 0.72, 6);
+
+        // 2. Room Watch Party Card
+        const rwx = 40;
+        const rwy = 560;
+        const rww = w - 80;
+        const rwh = 140;
+
+        g.fillStyle = 'rgba(255,255,255,0.06)';
+        g.beginPath();
+        g.roundRect ? g.roundRect(rwx, rwy, rww, rwh, 16) : g.rect(rwx, rwy, rww, rwh);
+        g.fill();
+        g.strokeStyle = 'rgba(212,175,106,0.3)';
+        g.stroke();
+
+        g.fillStyle = '#d4af6a';
+        g.font = '800 20px system-ui, sans-serif';
+        g.fillText('سهرة ديسكورد المشتركة • Live Room', rwx + 20, rwy + 45);
+
+        g.fillStyle = 'rgba(242,235,227,0.7)';
+        g.font = '600 16px sans-serif';
+        g.fillText('4 أصدقاء يشاهدون الآن في نفس اللحظة', rwx + 20, rwy + 80);
+
+        // Avatar bubbles
+        const aColors = ['#dc3044', '#d4af6a', '#3b82f6', '#10b981'];
+        aColors.forEach((ac, idx) => {
+          g.beginPath();
+          g.arc(rwx + rww - 40 - idx * 26, rwy + 65, 18, 0, Math.PI * 2);
+          g.fillStyle = ac;
+          g.fill();
+          g.lineWidth = 2;
+          g.strokeStyle = '#0e090b';
+          g.stroke();
+        });
+
+        // 3. Grid of Posters
+        g.fillStyle = '#ffffff';
+        g.font = '800 26px system-ui, sans-serif';
+        g.fillText('أحدث الإضافات • New Releases', 40, 750);
+
+        const mposters = [
+          { t: 'Gladiator II', col: '#3a1515' },
+          { t: 'Oppenheimer', col: '#182b3d' },
+          { t: 'Batman', col: '#221e25' },
+          { t: 'Spider-Man', col: '#331215' },
+        ];
+
+        mposters.forEach((mp, i) => {
+          const col = i % 2;
+          const row = Math.floor(i / 2);
+          const mw = (w - 100) / 2;
+          const mh = 220;
+          const mx = 40 + col * (mw + 20);
+          const my = 780 + row * (mh + 20);
+
+          const mg = g.createLinearGradient(mx, my, mx, my + mh);
+          mg.addColorStop(0, mp.col);
+          mg.addColorStop(1, '#0e0b0d');
+          g.fillStyle = mg;
+          g.beginPath();
+          g.roundRect ? g.roundRect(mx, my, mw, mh, 14) : g.rect(mx, my, mw, mh);
+          g.fill();
+          g.strokeStyle = 'rgba(255,255,255,0.1)';
+          g.stroke();
+
+          g.fillStyle = '#ffffff';
+          g.font = '800 18px system-ui, sans-serif';
+          g.fillText(mp.t, mx + 16, my + mh - 26);
+        });
+
+        // Bottom Navigation Bar
+        const by = h - 110;
+        g.fillStyle = 'rgba(10,7,8,0.92)';
+        g.fillRect(0, by, w, 110);
+        g.strokeStyle = 'rgba(255,255,255,0.1)';
+        g.beginPath();
+        g.moveTo(0, by);
+        g.lineTo(w, by);
+        g.stroke();
+
+        const tabs = ['الرئيسية', 'رياضة', 'التنزيلات', 'حسابي'];
+        tabs.forEach((tab, i) => {
+          const tx = (w / 4) * i + w / 8;
+          g.textAlign = 'center';
+          g.fillStyle = i === 2 ? '#d4af6a' : 'rgba(242,235,227,0.5)';
+          g.font = i === 2 ? '800 16px sans-serif' : '600 15px sans-serif';
+          g.fillText(tab, tx, by + 65);
+          if (i === 2) {
+            g.fillRect(tx - 16, by + 82, 32, 3);
+          }
+        });
+        g.textAlign = 'left';
+      } else {
+        // Discord Studio / Laptop Screen (1280x800)
+        g.fillStyle = '#1e1f22';
+        g.fillRect(0, 0, w, h);
+
+        // macOS Window Header
+        g.fillStyle = '#111214';
+        g.fillRect(0, 0, w, 44);
+        g.strokeStyle = 'rgba(255,255,255,0.06)';
+        g.beginPath();
+        g.moveTo(0, 44);
+        g.lineTo(w, 44);
+        g.stroke();
+
+        // Traffic lights
+        const tColors = ['#ff5f56', '#ffbd2e', '#27c93f'];
+        tColors.forEach((tc, idx) => {
+          g.beginPath();
+          g.arc(28 + idx * 20, 22, 6, 0, Math.PI * 2);
+          g.fillStyle = tc;
+          g.fill();
+        });
+
+        g.fillStyle = 'rgba(242,235,227,0.8)';
+        g.font = '700 14px system-ui, sans-serif';
+        g.fillText('Discord • # Cinema-Lounge • NexusNights Activity', 110, 27);
+
+        // 1. Left Sidebar (Channels & Voice Room)
+        const sw = 280;
+        g.fillStyle = '#18191c';
+        g.fillRect(0, 44, sw, h - 44);
+        g.strokeStyle = 'rgba(255,255,255,0.06)';
+        g.beginPath();
+        g.moveTo(sw, 44);
+        g.lineTo(sw, h);
+        g.stroke();
+
+        // Server header
+        drawBrand(24, 76, 14, 16);
+
+        g.fillStyle = 'rgba(242,235,227,0.4)';
+        g.font = '800 11px system-ui, sans-serif';
+        g.fillText('VOICE CHANNELS', 24, 130);
+
+        // Active voice room
+        g.fillStyle = 'rgba(220,48,68,0.15)';
+        g.beginPath();
+        g.roundRect ? g.roundRect(14, 145, sw - 28, 40, 8) : g.rect(14, 145, sw - 28, 40);
+        g.fill();
+        g.fillStyle = '#ffffff';
+        g.font = '700 14px system-ui, sans-serif';
+        g.fillText('🔊  Cinema Lounge (4)', 28, 170);
+
+        // Active voice participants with green rings
+        const users = [
+          { name: 'Karim (Host 👑)', col: '#dc3044', talking: true },
+          { name: 'Sarah', col: '#d4af6a', talking: true },
+          { name: 'Alex', col: '#3b82f6', talking: false },
+          { name: 'Zaid', col: '#10b981', talking: false },
+        ];
+
+        users.forEach((u, idx) => {
+          const uy = 210 + idx * 46;
+          // Avatar
+          g.beginPath();
+          g.arc(40, uy, 15, 0, Math.PI * 2);
+          g.fillStyle = u.col;
+          g.fill();
+          if (u.talking) {
+            g.lineWidth = 2.5;
+            g.strokeStyle = '#23a55a'; // Discord speaking green!
+            g.stroke();
+          }
+
+          g.fillStyle = u.talking ? '#ffffff' : 'rgba(242,235,227,0.65)';
+          g.font = '600 14px system-ui, sans-serif';
+          g.fillText(u.name, 68, uy + 5);
+        });
+
+        // 2. Main Stage Video Player (Center)
+        const vw = w - sw - 320;
+        const vh = h - 44;
+        const vx = sw;
+        const vy = 44;
+
+        // Player canvas
+        const pGrad = g.createLinearGradient(vx, vy, vx + vw, vy + vh);
+        pGrad.addColorStop(0, '#260a12');
+        pGrad.addColorStop(0.5, '#120b0e');
+        pGrad.addColorStop(1, '#070506');
+        g.fillStyle = pGrad;
+        g.fillRect(vx, vy, vw, vh);
+
+        // Live Cinema Art representation
+        drawSigil(vx + vw / 2, vy + vh / 2 - 30, 60);
+
+        g.fillStyle = '#ffffff';
+        g.font = '900 36px system-ui, sans-serif';
+        g.textAlign = 'center';
+        g.fillText('NEXUS NIGHTS CINEMA', vx + vw / 2, vy + vh / 2 + 55);
+
+        g.fillStyle = '#10b981';
+        g.font = '700 14px monospace';
+        g.fillText('● 1080p 60FPS • SYNCHRONIZED STREAM', vx + vw / 2, vy + vh / 2 + 85);
+        g.textAlign = 'left';
+
+        // In-player seekbar at bottom of stage
+        g.fillStyle = 'rgba(0,0,0,0.85)';
+        g.fillRect(vx, vy + vh - 60, vw, 60);
+
+        g.fillStyle = 'rgba(255,255,255,0.2)';
+        g.fillRect(vx + 24, vy + vh - 32, vw - 48, 4);
+        g.fillStyle = '#dc3044';
+        g.fillRect(vx + 24, vy + vh - 32, (vw - 48) * 0.64, 4);
+
+        g.fillStyle = '#ffffff';
+        g.font = '700 13px monospace';
+        g.fillText('01:14:20 / 02:26:00', vx + 24, vy + vh - 12);
+
+        // 3. Right Sidebar (In-Room Chat Stream)
+        const cx = w - 320;
+        g.fillStyle = '#18191c';
+        g.fillRect(cx, 44, 320, h - 44);
+        g.strokeStyle = 'rgba(255,255,255,0.06)';
+        g.beginPath();
+        g.moveTo(cx, 44);
+        g.lineTo(cx, h);
+        g.stroke();
+
+        g.fillStyle = 'rgba(242,235,227,0.4)';
+        g.font = '800 11px system-ui, sans-serif';
+        g.fillText('ROOM CHAT', cx + 20, 75);
+
+        const msgs = [
+          { u: 'Karim', m: 'الصوت والصورة خرافية 🔥', col: '#dc3044' },
+          { u: 'Sarah', m: 'The soundtrack in 4K is insane!', col: '#d4af6a' },
+          { u: 'Alex', m: 'Don’t forget the popcorn 🍿', col: '#3b82f6' },
+          { u: 'Zaid', m: 'Perfect sync guys! 👌', col: '#10b981' },
+        ];
+
+        msgs.forEach((msg, mi) => {
+          const my = 105 + mi * 68;
+          g.fillStyle = msg.col;
+          g.font = '700 13px system-ui, sans-serif';
+          g.fillText(msg.u, cx + 20, my);
+
+          g.fillStyle = '#f2ebe3';
+          g.font = '500 13px system-ui, sans-serif';
+          g.fillText(msg.m, cx + 20, my + 20);
+        });
+
+        // Chat Input box
+        g.fillStyle = 'rgba(255,255,255,0.06)';
+        g.beginPath();
+        g.roundRect ? g.roundRect(cx + 16, h - 56, 288, 40, 8) : g.rect(cx + 16, h - 56, 288, 40);
+        g.fill();
+        g.fillStyle = 'rgba(242,235,227,0.3)';
+        g.font = '500 13px sans-serif';
+        g.fillText('اكتب رسالة في الغرفة...', cx + 30, h - 31);
       }
 
       const tex = new THREE.CanvasTexture(c);
@@ -309,7 +735,7 @@ export default function Constellation({ active }: { active: PlatformId | null })
       return tex;
     }
 
-    /* ── slabs ───────────────────────────────────────────────────────────── */
+    /* ── bespoke 3D device assemblies ────────────────────────────────────── */
 
     function roundedRect(w: number, h: number, r: number) {
       const s = new THREE.Shape();
@@ -338,55 +764,114 @@ export default function Constellation({ active }: { active: PlatformId | null })
 
     const slabs: Slab[] = [];
 
-    function makeSlab(
-      id: PlatformId,
-      w: number,
-      h: number,
-      depth: number,
-      radius: number,
-      kind: 'phone' | 'tv' | 'tile',
-      position: [number, number, number],
-      rotation: [number, number, number],
-    ) {
-      const geo = new THREE.ExtrudeGeometry(roundedRect(w, h, radius), {
+    // Helper: Material presets
+    const titaniumMat = new THREE.MeshPhysicalMaterial({
+      color: 0x110d10,
+      metalness: 0.92,
+      roughness: 0.22,
+      clearcoat: 0.85,
+      clearcoatRoughness: 0.15,
+      envMapIntensity: 1.3,
+    });
+
+    const spaceGrayMat = new THREE.MeshPhysicalMaterial({
+      color: 0x181417,
+      metalness: 0.88,
+      roughness: 0.28,
+      clearcoat: 0.7,
+      clearcoatRoughness: 0.2,
+      envMapIntensity: 1.1,
+    });
+
+    const screenGlassMat = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.08,
+      roughness: 0.05,
+      metalness: 0.1,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.05,
+      depthWrite: false,
+    });
+
+    // 1. Samsung OLED Smart TV
+    function createTv(position: [number, number, number], rotation: [number, number, number]) {
+      const group = new THREE.Group();
+      const w = 2.8;
+      const h = 1.58;
+      const depth = 0.032;
+
+      // Ultra-thin OLED panel frame
+      const panelGeo = new THREE.ExtrudeGeometry(roundedRect(w, h, 0.035), {
         depth,
         bevelEnabled: true,
-        bevelThickness: 0.018,
-        bevelSize: 0.018,
-        bevelSegments: 3,
-        curveSegments: 10,
+        bevelThickness: 0.012,
+        bevelSize: 0.012,
+        bevelSegments: 2,
+        curveSegments: 8,
       });
-      geo.center();
+      panelGeo.center();
+      const panel = new THREE.Mesh(panelGeo, titaniumMat);
+      group.add(panel);
 
-      const body = new THREE.MeshPhysicalMaterial({
-        color: 0x0e0b0c,
-        metalness: 0.72,
-        roughness: 0.34,
-        clearcoat: 1,
-        clearcoatRoughness: 0.14,
-        envMapIntensity: 1.1,
-      });
-
-      const mesh = new THREE.Mesh(geo, body);
+      // Display Screen
       const screenMat = new THREE.MeshBasicMaterial({
-        map: screenTexture(kind),
-        transparent: false,
+        map: screenTexture('tv'),
         toneMapped: false,
       });
-      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.92, h * 0.93), screenMat);
-      screen.position.z = depth / 2 + 0.0195;
-      mesh.add(screen);
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.965, h * 0.95), screenMat);
+      screen.position.z = depth / 2 + 0.013;
+      group.add(screen);
 
-      // a hairline of gilt along the bottom edge — the one metal accent per device
-      const edge = new THREE.Mesh(
-        new THREE.PlaneGeometry(w * 0.92, 0.012),
-        new THREE.MeshBasicMaterial({ color: 0xd4af6a, transparent: true, opacity: 0.5 }),
+      // Reflective screen glass layer
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.965, h * 0.95), screenGlassMat);
+      glass.position.z = depth / 2 + 0.014;
+      group.add(glass);
+
+      // Bottom bezel brushed metal chin + glowing LED pip
+      const chin = new THREE.Mesh(
+        new THREE.PlaneGeometry(w * 0.965, 0.018),
+        new THREE.MeshBasicMaterial({ color: 0xd4af6a, transparent: true, opacity: 0.7 }),
       );
-      edge.position.set(0, -h * 0.465, depth / 2 + 0.0205);
-      mesh.add(edge);
+      chin.position.set(0, -h * 0.475, depth / 2 + 0.014);
+      group.add(chin);
 
-      const group = new THREE.Group();
-      group.add(mesh);
+      const led = new THREE.Mesh(
+        new THREE.CircleGeometry(0.008, 16),
+        new THREE.MeshBasicMaterial({ color: 0xdc3044 }),
+      );
+      led.position.set(0, -h * 0.475, depth / 2 + 0.015);
+      group.add(led);
+
+      // Rear electronics box
+      const rearGeo = new THREE.ExtrudeGeometry(roundedRect(1.7, 0.9, 0.03), {
+        depth: 0.05,
+        bevelEnabled: true,
+        bevelThickness: 0.01,
+        bevelSize: 0.01,
+      });
+      rearGeo.center();
+      const rear = new THREE.Mesh(rearGeo, titaniumMat);
+      rear.position.set(0, -0.1, -depth / 2 - 0.025);
+      group.add(rear);
+
+      // TV Stand (Neck + Base Plate)
+      const stem = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.32, 0.035), titaniumMat);
+      stem.position.set(0, -h / 2 - 0.12, -0.01);
+      group.add(stem);
+
+      const basePlateGeo = new THREE.ExtrudeGeometry(roundedRect(1.15, 0.32, 0.04), {
+        depth: 0.018,
+        bevelEnabled: true,
+        bevelThickness: 0.008,
+        bevelSize: 0.008,
+      });
+      basePlateGeo.center();
+      const basePlate = new THREE.Mesh(basePlateGeo, titaniumMat);
+      basePlate.rotation.x = Math.PI / 2;
+      basePlate.position.set(0, -h / 2 - 0.28, 0.08);
+      group.add(basePlate);
+
       group.position.set(...position);
       group.rotation.set(...rotation);
       root.add(group);
@@ -396,14 +881,195 @@ export default function Constellation({ active }: { active: PlatformId | null })
         screen: screenMat,
         base: new THREE.Vector3(...position),
         baseRot: new THREE.Euler(...rotation),
-        id,
-        phase: slabs.length * 2.1,
+        id: 'tv',
+        phase: 0,
       });
     }
 
-    makeSlab('tv', 2.55, 1.44, 0.09, 0.05, 'tv', [0.92, 0.74, -0.15], [0.03, -0.3, 0.02]);
-    makeSlab('android', 1.0, 2.0, 0.09, 0.12, 'phone', [-1.64, -0.08, 0.38], [0.04, 0.3, -0.05]);
-    makeSlab('discord', 1.3, 1.3, 0.09, 0.13, 'tile', [0.84, -1.16, 0.7], [0.09, -0.1, 0.04]);
+    // 2. Android Smartphone Flagship
+    function createPhone(position: [number, number, number], rotation: [number, number, number]) {
+      const group = new THREE.Group();
+      const w = 1.08;
+      const h = 2.18;
+      const depth = 0.055;
+      const radius = 0.16;
+
+      // Curved Titanium Chassis
+      const chassisGeo = new THREE.ExtrudeGeometry(roundedRect(w, h, radius), {
+        depth,
+        bevelEnabled: true,
+        bevelThickness: 0.02,
+        bevelSize: 0.02,
+        bevelSegments: 3,
+        curveSegments: 12,
+      });
+      chassisGeo.center();
+      const chassis = new THREE.Mesh(chassisGeo, titaniumMat);
+      group.add(chassis);
+
+      // OLED Screen
+      const screenMat = new THREE.MeshBasicMaterial({
+        map: screenTexture('phone'),
+        toneMapped: false,
+      });
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.94, h * 0.96), screenMat);
+      screen.position.z = depth / 2 + 0.021;
+      group.add(screen);
+
+      // Screen Glass Sheen
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.94, h * 0.96), screenGlassMat);
+      glass.position.z = depth / 2 + 0.022;
+      group.add(glass);
+
+      // Gilt bottom accent
+      const accent = new THREE.Mesh(
+        new THREE.PlaneGeometry(w * 0.94, 0.008),
+        new THREE.MeshBasicMaterial({ color: 0xd4af6a, transparent: true, opacity: 0.6 }),
+      );
+      accent.position.set(0, -h * 0.48, depth / 2 + 0.022);
+      group.add(accent);
+
+      // Rear Camera Island
+      const camPlateGeo = new THREE.ExtrudeGeometry(roundedRect(0.42, 0.46, 0.08), {
+        depth: 0.025,
+        bevelEnabled: true,
+        bevelThickness: 0.006,
+        bevelSize: 0.006,
+      });
+      camPlateGeo.center();
+      const camPlate = new THREE.Mesh(camPlateGeo, spaceGrayMat);
+      camPlate.position.set(-w * 0.23, h * 0.32, -depth / 2 - 0.015);
+      group.add(camPlate);
+
+      // 3 Camera Lenses
+      const lensPos: Array<[number, number]> = [
+        [-w * 0.28, h * 0.38],
+        [-w * 0.28, h * 0.26],
+        [-w * 0.18, h * 0.32],
+      ];
+      lensPos.forEach(([lx, ly]) => {
+        const ring = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.05, 0.05, 0.012, 24),
+          titaniumMat,
+        );
+        ring.rotation.x = Math.PI / 2;
+        ring.position.set(lx, ly, -depth / 2 - 0.032);
+        group.add(ring);
+
+        const lensGlass = new THREE.Mesh(
+          new THREE.CircleGeometry(0.04, 20),
+          new THREE.MeshBasicMaterial({ color: 0x070607 }),
+        );
+        lensGlass.rotation.y = Math.PI;
+        lensGlass.position.set(lx, ly, -depth / 2 - 0.039);
+        group.add(lensGlass);
+      });
+
+      // Side keys
+      const pwr = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.18, 0.02), titaniumMat);
+      pwr.position.set(w / 2 + 0.022, 0.2, 0);
+      group.add(pwr);
+
+      const vol = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.32, 0.02), titaniumMat);
+      vol.position.set(-w / 2 - 0.022, 0.25, 0);
+      group.add(vol);
+
+      group.position.set(...position);
+      group.rotation.set(...rotation);
+      root.add(group);
+
+      slabs.push({
+        group,
+        screen: screenMat,
+        base: new THREE.Vector3(...position),
+        baseRot: new THREE.Euler(...rotation),
+        id: 'android',
+        phase: 2.1,
+      });
+    }
+
+    // 3. Discord Studio / Laptop (Lid + Keyboard Base)
+    function createLaptop(position: [number, number, number], rotation: [number, number, number]) {
+      const group = new THREE.Group();
+      const lw = 1.9;
+      const lh = 1.25;
+      const ldepth = 0.03;
+
+      // Screen Lid
+      const lidGeo = new THREE.ExtrudeGeometry(roundedRect(lw, lh, 0.04), {
+        depth: ldepth,
+        bevelEnabled: true,
+        bevelThickness: 0.01,
+        bevelSize: 0.01,
+      });
+      lidGeo.center();
+      const lid = new THREE.Mesh(lidGeo, spaceGrayMat);
+      lid.position.set(0, lh * 0.45, 0);
+      group.add(lid);
+
+      // Screen
+      const screenMat = new THREE.MeshBasicMaterial({
+        map: screenTexture('tile'),
+        toneMapped: false,
+      });
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(lw * 0.94, lh * 0.92), screenMat);
+      screen.position.set(0, lh * 0.45, ldepth / 2 + 0.011);
+      group.add(screen);
+
+      // Screen Glass Sheen
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(lw * 0.94, lh * 0.92), screenGlassMat);
+      glass.position.set(0, lh * 0.45, ldepth / 2 + 0.012);
+      group.add(glass);
+
+      // Keyboard Chassis Base (tilted at ~105 deg hinge)
+      const baseGeo = new THREE.ExtrudeGeometry(roundedRect(lw, lh, 0.04), {
+        depth: ldepth + 0.008,
+        bevelEnabled: true,
+        bevelThickness: 0.01,
+        bevelSize: 0.01,
+      });
+      baseGeo.center();
+      const baseChassis = new THREE.Mesh(baseGeo, spaceGrayMat);
+      baseChassis.rotation.x = Math.PI / 2.3;
+      baseChassis.position.set(0, -0.06, lh * 0.45);
+      group.add(baseChassis);
+
+      // Keyboard deck texture/plane
+      const kbd = new THREE.Mesh(
+        new THREE.PlaneGeometry(lw * 0.88, lh * 0.52),
+        new THREE.MeshBasicMaterial({ color: 0x0c0a0c }),
+      );
+      kbd.rotation.x = -Math.PI / 2;
+      kbd.position.set(0, 0.018, -lh * 0.12);
+      baseChassis.add(kbd);
+
+      // Trackpad
+      const trackpad = new THREE.Mesh(
+        new THREE.PlaneGeometry(lw * 0.36, lh * 0.32),
+        new THREE.MeshBasicMaterial({ color: 0x1c171a }),
+      );
+      trackpad.rotation.x = -Math.PI / 2;
+      trackpad.position.set(0, 0.018, lh * 0.32);
+      baseChassis.add(trackpad);
+
+      group.position.set(...position);
+      group.rotation.set(...rotation);
+      root.add(group);
+
+      slabs.push({
+        group,
+        screen: screenMat,
+        base: new THREE.Vector3(...position),
+        baseRot: new THREE.Euler(...rotation),
+        id: 'discord',
+        phase: 4.2,
+      });
+    }
+
+    // Assemble the constellation
+    createTv([0.92, 0.62, -0.2], [0.03, -0.28, 0.02]);
+    createPhone([-1.72, -0.12, 0.44], [0.05, 0.32, -0.05]);
+    createLaptop([0.96, -1.18, 0.65], [0.08, -0.14, 0.03]);
 
     /* ── pointer + viewport ──────────────────────────────────────────────── */
 
