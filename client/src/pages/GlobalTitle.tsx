@@ -28,14 +28,55 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
   // ── Trailer & AFK Cinema Idle State ─────────────────────────────────────────
   const [trailerKey, setTrailerKey] = useState<string | null>(null);
   const [trailerPhase, setTrailerPhase] = useState<'idle' | 'backdrop' | 'immersive'>('idle');
+  const trailerKeyRef = useRef<string | null>(null);
+  trailerKeyRef.current = trailerKey;
+  const trailerPhaseRef = useRef<'idle' | 'backdrop' | 'immersive'>('idle');
+  trailerPhaseRef.current = trailerPhase;
+
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const immersiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Recommendations State ───────────────────────────────────────────────────
   const [recommendations, setRecommendations] = useState<any[]>([]);
 
+  // ── Clear all timers safely ─────────────────────────────────────────────────
+  const clearTimers = useCallback(() => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+    if (immersiveTimerRef.current) {
+      clearTimeout(immersiveTimerRef.current);
+      immersiveTimerRef.current = null;
+    }
+  }, []);
+
+  // ── Schedule AFK Idle Progression ──────────────────────────────────────────
+  const scheduleIdle = useCallback(() => {
+    clearTimers();
+    if (!trailerKeyRef.current) return;
+
+    idleTimerRef.current = setTimeout(() => {
+      setTrailerPhase('backdrop');
+
+      // Schedule phase 2: after 5 more seconds of continued AFK into fullscreen
+      immersiveTimerRef.current = setTimeout(() => {
+        setTrailerPhase('immersive');
+      }, 5000);
+    }, 5000);
+  }, [clearTimers]);
+
+  // ── Reset to normal when user moves / clicks / types ─────────────────────────
+  const handleUserActivity = useCallback(() => {
+    if (trailerPhaseRef.current !== 'idle') {
+      setTrailerPhase('idle');
+    }
+    scheduleIdle();
+  }, [scheduleIdle]);
+
   // ── Fetch trailer + recommendations ─────────────────────────────────────────
   useEffect(() => {
+    clearTimers();
     setTrailerPhase('idle');
     setTrailerKey(null);
     setRecommendations([]);
@@ -44,7 +85,9 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
     fetch(u(`/api/tmdb/videos/${kindParam}/${tmdbId}`))
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d?.results?.length) setTrailerKey(d.results[0].key);
+        if (d?.results?.length) {
+          setTrailerKey(d.results[0].key);
+        }
       })
       .catch(() => {});
 
@@ -56,51 +99,30 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
         }
       })
       .catch(() => {});
-  }, [kind, tmdbId]);
+  }, [kind, tmdbId, clearTimers]);
 
-  // ── AFK timer: 5s → backdrop trailer, 5s more → fullscreen immersive ────────
-  const resetIdleTimer = useCallback(() => {
-    if (trailerPhase === 'immersive') {
-      setTrailerPhase('idle');
-    }
-
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    if (immersiveTimerRef.current) clearTimeout(immersiveTimerRef.current);
-
-    if (!trailerKey) return;
-
-    idleTimerRef.current = setTimeout(() => {
-      setTrailerPhase('backdrop');
-      immersiveTimerRef.current = setTimeout(() => {
-        setTrailerPhase('immersive');
-      }, 5000);
-    }, 5000);
-  }, [trailerKey, trailerPhase]);
-
+  // ── Attach global user activity listeners ──────────────────────────────────
   useEffect(() => {
     if (!trailerKey) return;
 
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'] as const;
-    const handler = () => resetIdleTimer();
-
-    events.forEach((e) => window.addEventListener(e, handler, { passive: true }));
-    resetIdleTimer();
+    events.forEach((e) => window.addEventListener(e, handleUserActivity, { passive: true }));
+    scheduleIdle();
 
     return () => {
-      events.forEach((e) => window.removeEventListener(e, handler));
-      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-      if (immersiveTimerRef.current) clearTimeout(immersiveTimerRef.current);
+      events.forEach((e) => window.removeEventListener(e, handleUserActivity));
+      clearTimers();
     };
-  }, [trailerKey, resetIdleTimer]);
+  }, [trailerKey, handleUserActivity, scheduleIdle, clearTimers]);
 
   const playTrailerNow = useCallback(() => {
     if (!trailerKey) return;
+    clearTimers();
     setTrailerPhase('backdrop');
-    if (immersiveTimerRef.current) clearTimeout(immersiveTimerRef.current);
     immersiveTimerRef.current = setTimeout(() => {
       setTrailerPhase('immersive');
     }, 5000);
-  }, [trailerKey]);
+  }, [trailerKey, clearTimers]);
 
   const detail = useAsync(
     (s) => (kind === 'movie' ? api.discoveryMovie(tmdbId, lang, s) : api.discoveryTV(tmdbId, lang, s)),
@@ -224,9 +246,10 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
           onMouseMove={() => setTrailerPhase('idle')}
         >
           <iframe
-            src={`https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&mute=0&controls=0&modestbranding=1&rel=0&showinfo=0&loop=1&playlist=${trailerKey}`}
+            src={`https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&mute=0&controls=1&modestbranding=1&rel=0&loop=1&playlist=${trailerKey}&playsinline=1`}
             className="size-full"
-            allow="autoplay; encrypted-media"
+            style={{ border: 'none' }}
+            allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
             allowFullScreen
           />
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 animate-pulse text-sm text-white/80 pointer-events-none font-medium bg-black/60 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md">
@@ -240,10 +263,10 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
         {showTrailerVideo && trailerKey ? (
           <div className="absolute inset-0 -z-20 animate-[fade_1s_ease]">
             <iframe
-              src={`https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&showinfo=0&loop=1&playlist=${trailerKey}`}
+              src={`https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&loop=1&playlist=${trailerKey}&playsinline=1&enablejsapi=1`}
               className="absolute inset-0 size-full scale-[1.25] pointer-events-none"
               style={{ border: 'none' }}
-              allow="autoplay; encrypted-media"
+              allow="autoplay; encrypted-media; picture-in-picture"
               tabIndex={-1}
             />
           </div>

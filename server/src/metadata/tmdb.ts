@@ -280,8 +280,15 @@ export class TmdbClient {
   }
 
   async getVideos(kind: 'movie' | 'tv', id: number, language?: string) {
-    const lang = language ?? this.cfg.tmdb.languages[0] ?? 'en-US';
-    return this.request<{ id: number; results: TmdbVideo[] }>(`/${kind}/${id}/videos`, { language: lang });
+    if (language) {
+      const localized = await this.request<{ id: number; results: TmdbVideo[] }>(`/${kind}/${id}/videos`, { language });
+      if (localized?.results && localized.results.length > 0) return localized;
+    }
+    // Query without language filter to get all available trailers
+    const all = await this.request<{ id: number; results: TmdbVideo[] }>(`/${kind}/${id}/videos`, {});
+    if (all?.results && all.results.length > 0) return all;
+
+    return this.request<{ id: number; results: TmdbVideo[] }>(`/${kind}/${id}/videos`, { language: 'en-US' });
   }
 
   async getRecommendations(kind: 'movie' | 'tv', id: number, page = 1, language?: string) {
