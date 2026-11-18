@@ -27,10 +27,21 @@ import { unifiedSubtitles } from '../subtitles/unified-subtitles';
 import { subdlAPI } from '../subtitles/subdl-api';
 import { hianimeResolver } from '../streaming/hianime-resolver';
 import { aniSkipService } from '../streaming/aniskip-service';
+import { skipSegmentsService, mergeSkipSegments } from '../streaming/skip-segments-service';
 
 const wrap = (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler => (req, res, next) => {
   fn(req, res, next).catch(next);
 };
+
+/** Best-effort extras must never hold playback hostage. */
+const withDeadline = <T>(promise: Promise<T>, fallback: T, ms: number): Promise<T> =>
+  new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      () => { clearTimeout(timer); resolve(fallback); },
+    );
+  });
 
 /**
  * Register provider sources that need proxying (HLS with headers) and rewrite URLs
@@ -309,8 +320,36 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
   }));
 
   /**
+   * GET /api/streaming/skip-segments/:kind/:tmdbId
+   * IntroDB timestamps for recap / intro / credits / preview.
+   * kind: movie | tv; TV requires season + episode.
+   */
+  router.get('/streaming/skip-segments/:kind/:tmdbId', apiLimiter, wrap(async (req, res) => {
+    const kindParam = req.params.kind;
+    const tmdbId = parseInt(req.params.tmdbId, 10);
+    if ((kindParam !== 'movie' && kindParam !== 'tv') || isNaN(tmdbId) || tmdbId <= 0) {
+      return res.status(400).json({ error: 'invalid_parameters' });
+    }
+
+    const kind = kindParam === 'movie' ? 'movie' : 'series';
+    const season = req.query.season != null ? parseInt(String(req.query.season), 10) : undefined;
+    const episode = req.query.episode != null ? parseInt(String(req.query.episode), 10) : undefined;
+
+    if (kind === 'series' && (
+      season == null || episode == null ||
+      isNaN(season) || isNaN(episode) || season < 0 || episode < 1
+    )) {
+      return res.status(400).json({ error: 'invalid_parameters' });
+    }
+
+    const segments = await skipSegmentsService.getSegments({ tmdbId, kind, season, episode });
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.json(segments);
+  }));
+
+  /**
    * GET /api/streaming/aniskip/:malId/:episode
-   * Retrieves opening and ending skip timestamps
+   * Opening and ending timestamps from AniSkip.
    */
   router.get('/streaming/aniskip/:malId/:episode', apiLimiter, wrap(async (req, res) => {
     const malId = parseInt(req.params.malId, 10);
@@ -527,6 +566,9 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         (Array.isArray(tmdbMovieData.genres) && tmdbMovieData.genres.some((g: any) => g.id === 16))
       );
 
+      // Community skip markers, resolved while the stream is being prepared.
+      const introDbSegmentsPromise = skipSegmentsService.getIntroDbSegments({ tmdbId, kind: 'movie' });
+
       let skipTimings: any = null;
 
       // Automatic on-demand native HLS stream resolution (Direct Player Priority)
@@ -593,6 +635,10 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         }
         playbackConfig.source = nativeSource;
       }
+
+      const introDbSegments = await withDeadline(introDbSegmentsPromise, { found: false }, 1500);
+      skipTimings = mergeSkipSegments(skipTimings, introDbSegments);
+      if (!skipTimings.found) skipTimings = null;
 
       res.json({
         playback: playbackConfig,
@@ -723,6 +769,9 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         (Array.isArray(tmdbTvData.genres) && tmdbTvData.genres.some((g: any) => g.id === 16))
       );
 
+      // Community skip markers, resolved while the stream is being prepared.
+      const introDbSegmentsPromise = skipSegmentsService.getIntroDbSegments({ tmdbId, kind: 'series', season, episode });
+
       let skipTimings: any = null;
 
       // Automatic on-demand native HLS stream resolution (Direct Player Priority)
@@ -794,6 +843,10 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         playbackConfig.source = nativeSource;
       }
 
+      const introDbSegments = await withDeadline(introDbSegmentsPromise, { found: false }, 1500);
+      skipTimings = mergeSkipSegments(skipTimings, introDbSegments);
+      if (!skipTimings.found) skipTimings = null;
+
       res.json({
         playback: playbackConfig,
         skipTimings,
@@ -815,22 +868,43 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     res.json({ discordClientId: cfg.discord.clientId ?? null, guestAllowed: cfg.allowGuest, roleScope: cfg.controlRoleIds.length > 0 }));
 
   // OAuth2 code → access token. The client secret never leaves the server.
+  // The Discord Embedded App SDK requires a valid access_token to call
+  // `discordSdk.commands.authenticate()`. Without this step the Activity
+  // cannot identify users or access voice/guild info.
   router.post('/token', tokenLimiter, wrap(async (req, res) => {
     const code = typeof req.body?.code === 'string' ? req.body.code : '';
     if (!/^[\w.~-]{8,512}$/.test(code)) return res.status(400).json({ error: 'bad_code' });
     const { clientId, clientSecret, apiBase } = cfg.discord;
     if (!clientId || !clientSecret) return res.status(503).json({ error: 'discord_not_configured' });
     try {
+      // Build form body — include redirect_uri if configured (Discord requires
+      // it to match the one used in the authorize step).
+      const params: Record<string, string> = {
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: 'authorization_code',
+        code,
+      };
+      if (cfg.discord.redirectUri) {
+        params.redirect_uri = cfg.discord.redirectUri;
+      }
+
       const r = await fetch(`${apiBase}/oauth2/token`, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, grant_type: 'authorization_code', code }),
+        body: new URLSearchParams(params),
         signal: AbortSignal.timeout(10_000),
       });
-      const data = (await r.json().catch(() => null)) as { access_token?: string } | null;
-      if (!r.ok || !data?.access_token) return res.status(502).json({ error: 'token_exchange_failed' });
+
+      const data = (await r.json().catch(() => null)) as { access_token?: string; error?: string; error_description?: string } | null;
+      if (!r.ok || !data?.access_token) {
+        console.error('[Discord Token] Exchange failed:', r.status, data?.error, data?.error_description);
+        return res.status(502).json({ error: 'token_exchange_failed', detail: data?.error_description || data?.error });
+      }
+
       res.set('Cache-Control', 'no-store').json({ access_token: data.access_token });
-    } catch {
+    } catch (err) {
+      console.error('[Discord Token] Exchange error:', err);
       res.status(502).json({ error: 'token_exchange_failed' });
     }
   }));

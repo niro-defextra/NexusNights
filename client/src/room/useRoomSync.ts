@@ -7,8 +7,9 @@ import { decide } from './sync';
  * Keeps ONE player in step with the room's authoritative state:
  *  - applies every state broadcast immediately (play / pause / seek / hold / resume)
  *  - syncs subtitle, audio, and playback rate changes
- *  - every second corrects drift: >1.5s → seek, 0.4–1.5s → gentle playbackRate nudge
+ *  - every 1.5 seconds corrects drift: >2.5s → seek, 0.6–2.5s → gentle playbackRate nudge
  *  - handles the browser's autoplay block (late joiners) via onNeedsGesture
+ *  - debounces rapid event bursts to prevent seek-stutter
  * Player → room traffic only comes from real user input (never from this hook), so there are no echo loops.
  */
 export function useRoomSync(opts: {
@@ -31,6 +32,9 @@ export function useRoomSync(opts: {
     playbackRate: 1,
   });
 
+  // Debounce event-driven sync to avoid seeking 10 times in 100ms
+  const lastEventApply = useRef(0);
+
   useEffect(() => {
     if (!ready || !room.active) return;
 
@@ -39,6 +43,14 @@ export function useRoomSync(opts: {
       const s = r.getState();
       const h = handle.current;
       if (!s || !h || s.mediaId !== mediaId) return;
+
+      // Debounce events: at most one event-driven sync per 150ms
+      const now = Date.now();
+      if (cause === 'event') {
+        if (now - lastEventApply.current < 150) return;
+        lastEventApply.current = now;
+      }
+
       const d = decide(s, r.serverNow(), h.getTime(), h.getRate(), cause);
       if (d.seekTo !== undefined) h.seek(d.seekTo);
       if (Math.abs(h.getRate() - d.rate) > 0.001) h.setRate(d.rate);
@@ -71,7 +83,8 @@ export function useRoomSync(opts: {
 
     apply('event');
     const off = room.onState(() => apply('event'));
-    const iv = window.setInterval(() => apply('tick'), 1000);
+    // Slower tick interval (1500ms instead of 1000ms) — less aggressive correction
+    const iv = window.setInterval(() => apply('tick'), 1500);
     return () => { off(); window.clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, mediaId, room.active]);

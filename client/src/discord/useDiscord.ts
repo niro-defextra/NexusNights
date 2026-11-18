@@ -1,16 +1,26 @@
 /**
  * React Hook for Discord Activity Integration
- * Provides easy access to Discord context and functions
+ * Provides easy access to Discord context and functions.
+ *
+ * Key improvements:
+ *  - Uses authenticated user from the full OAuth flow (not just participants)
+ *  - Properly tracks SDK readiness with error recovery
+ *  - Provides channelId for automatic room-to-voice-channel mapping
+ *  - Clean subscribe/unsubscribe lifecycle
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import {
+  discordSdk,
+  isRealSDK,
   initializeDiscordSDK,
   getDiscordUser,
   getDiscordChannel,
   getVoiceChannelParticipants,
   subscribeToVoiceStateUpdates,
   setActivity,
+  getAuthedUser,
+  type AuthedDiscordUser,
 } from './DiscordSDK';
 
 export interface DiscordUser {
@@ -42,13 +52,15 @@ export interface UseDiscordReturn {
   error: Error | null;
   user: DiscordUser | null;
   channel: DiscordChannel | null;
+  channelId: string | null;
   participants: DiscordParticipant[];
+  isRealDiscord: boolean;
   updateActivity: (details: string, state?: string) => Promise<void>;
 }
 
 /**
- * Hook to access Discord Activity context
- * Automatically initializes SDK and provides user, channel, and participant data
+ * Hook to access Discord Activity context.
+ * Automatically initializes SDK and provides user, channel, and participant data.
  */
 export function useDiscord(): UseDiscordReturn {
   const [isReady, setIsReady] = useState(false);
@@ -57,6 +69,7 @@ export function useDiscord(): UseDiscordReturn {
   const [user, setUser] = useState<DiscordUser | null>(null);
   const [channel, setChannel] = useState<DiscordChannel | null>(null);
   const [participants, setParticipants] = useState<DiscordParticipant[]>([]);
+  const retryCount = useRef(0);
 
   useEffect(() => {
     let mounted = true;
@@ -65,13 +78,14 @@ export function useDiscord(): UseDiscordReturn {
     async function initialize() {
       try {
         setIsLoading(true);
-        
-        // Initialize Discord SDK
+        setError(null);
+
+        // Initialize Discord SDK (full authorize → token → authenticate cycle)
         await initializeDiscordSDK();
-        
+
         if (!mounted) return;
 
-        // Get Discord context
+        // Get Discord context (parallel fetch)
         const [discordUser, discordChannel, discordParticipants] = await Promise.all([
           getDiscordUser(),
           getDiscordChannel(),
@@ -85,22 +99,26 @@ export function useDiscord(): UseDiscordReturn {
         setParticipants(discordParticipants as any);
         setIsReady(true);
 
-        // Subscribe to participant updates
-        const unsub = subscribeToVoiceStateUpdates((newParticipants) => {
-          if (mounted) {
-            setParticipants(newParticipants as any);
-          }
+        // Subscribe to participant updates (joins / leaves)
+        unsubscribe = subscribeToVoiceStateUpdates((newParticipants) => {
+          if (mounted) setParticipants(newParticipants as any);
         });
-        unsubscribe = unsub;
       } catch (err) {
-        if (mounted) {
-          setError(err instanceof Error ? err : new Error('Discord initialization failed'));
-          console.error('[useDiscord] Initialization error:', err);
+        if (!mounted) return;
+        const e = err instanceof Error ? err : new Error('Discord initialization failed');
+        setError(e);
+        console.error('[useDiscord] Initialization error:', err);
+
+        // Retry up to 2 times with exponential backoff
+        if (retryCount.current < 2) {
+          retryCount.current++;
+          const delay = retryCount.current * 2000;
+          console.log(`[useDiscord] Retrying in ${delay}ms (attempt ${retryCount.current})…`);
+          setTimeout(() => { if (mounted) initialize(); }, delay);
+          return;
         }
       } finally {
-        if (mounted) {
-          setIsLoading(false);
-        }
+        if (mounted) setIsLoading(false);
       }
     }
 
@@ -112,13 +130,13 @@ export function useDiscord(): UseDiscordReturn {
     };
   }, []);
 
-  const updateActivity = async (details: string, state?: string) => {
+  const updateActivity = useCallback(async (details: string, state?: string) => {
     try {
       await setActivity(details, state);
     } catch (err) {
       console.error('[useDiscord] Failed to update activity:', err);
     }
-  };
+  }, []);
 
   return {
     isReady,
@@ -126,13 +144,15 @@ export function useDiscord(): UseDiscordReturn {
     error,
     user,
     channel,
+    channelId: discordSdk.channelId ?? null,
     participants,
+    isRealDiscord: isRealSDK,
     updateActivity,
   };
 }
 
 /**
- * Simpler hook if you only need to know if Discord is ready
+ * Simpler hook if you only need to know if Discord is ready.
  */
 export function useDiscordReady(): boolean {
   const [isReady, setIsReady] = useState(false);

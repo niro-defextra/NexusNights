@@ -26,10 +26,10 @@ export interface Decision {
 }
 
 /** Hard seek above this drift when a command just arrived / during the periodic check. */
-export const HARD_EVENT = 0.4;
-export const HARD_TICK = 1.5;
+export const HARD_EVENT = 1.0;   // was 0.4 — too aggressive, caused seek-stutter on every event
+export const HARD_TICK = 2.5;    // was 1.5 — give HLS time to stabilize before hard-seeking
 /** Between SOFT and HARD_TICK we nudge playbackRate instead of seeking (inaudible, no stutter). */
-export const SOFT = 0.4;
+export const SOFT = 0.6;         // was 0.4 — wider deadband for network jitter
 
 export function decide(s: SyncState, serverNow: number, current: number, rate: number, cause: 'event' | 'tick'): Decision {
   const target = expectedPosition(s, serverNow);
@@ -37,10 +37,10 @@ export function decide(s: SyncState, serverNow: number, current: number, rate: n
   const abs = Math.abs(drift);
   const shouldPlay = s.playing && !s.hold;
 
-  if (!shouldPlay) return { play: false, rate: 1, seekTo: abs > 0.25 ? s.position : undefined };
+  if (!shouldPlay) return { play: false, rate: 1, seekTo: abs > 0.5 ? s.position : undefined };
   if (abs > (cause === 'event' ? HARD_EVENT : HARD_TICK)) return { play: true, rate: 1, seekTo: target + 0.15 };
-  if (cause === 'tick' && abs > SOFT) return { play: true, rate: drift > 0 ? 0.94 : 1.06 };
-  if (abs < 0.12) return { play: true, rate: 1 };
+  if (cause === 'tick' && abs > SOFT) return { play: true, rate: drift > 0 ? 0.95 : 1.05 };
+  if (abs < 0.2) return { play: true, rate: 1 };
   return { play: true, rate }; // inside the hysteresis band: keep whatever we are doing
 }
 

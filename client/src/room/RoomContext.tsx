@@ -213,8 +213,14 @@ export function RoomProvider({ children }: { children: ReactNode }) {
     let clockTimer: number | undefined;
 
     s.on('connect', () => { setConnection('connected'); void syncClock(5); window.clearInterval(clockTimer); clockTimer = window.setInterval(() => void syncClock(3), 30_000); });
-    s.on('connect_error', () => setConnection('error'));
-    s.on('disconnect', () => setConnection('connecting'));
+    s.on('connect_error', (err) => { console.warn('[Room] Connection error:', err.message); setConnection('error'); });
+    s.on('disconnect', (reason) => {
+      console.warn('[Room] Disconnected:', reason);
+      // 'io server disconnect' means the server explicitly closed us — don't auto-reconnect
+      // 'io client disconnect' means we called .close() — expected during cleanup
+      // Otherwise (transport close, ping timeout) Socket.IO will auto-reconnect
+      setConnection(reason === 'io server disconnect' ? 'error' : 'connecting');
+    });
     s.on('fatal', () => setConnection('error'));
 
     s.on('room:snapshot', (d: { you: string; room: RoomInfo; chat: ChatMsg[]; waitingFor: string[]; serverNow: number }) => {
@@ -224,7 +230,13 @@ export function RoomProvider({ children }: { children: ReactNode }) {
       listeners.current.forEach((l) => l({ state: d.room.state, by: null, reason: 'snapshot' }));
     });
     s.on('room:update', (d: { room: RoomInfo }) => { setRoom(d.room); });
-    s.on('room:state', (d: { state: SyncState; waitingFor: string[]; by: string | null; reason: string }) => {
+    s.on('room:state', (d: { state: SyncState; waitingFor: string[]; by: string | null; reason: string; serverNow?: number }) => {
+      // Opportunistically refine clock offset from every state broadcast
+      if (d.serverNow) {
+        const freshOffset = d.serverNow - Date.now();
+        // Blend with existing offset (avoid jumps from a single outlier)
+        offset.current = offset.current === 0 ? freshOffset : Math.round(offset.current * 0.7 + freshOffset * 0.3);
+      }
       stateRef.current = d.state;
       setState(d.state); setWaitingFor(d.waitingFor);
       listeners.current.forEach((l) => l({ state: d.state, by: d.by, reason: d.reason }));

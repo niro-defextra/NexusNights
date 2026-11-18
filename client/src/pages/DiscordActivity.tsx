@@ -26,6 +26,24 @@ export function DiscordActivity() {
   const auth = useAuth();
   const discord = useDiscord();
 
+  // ── Auto-join Discord voice channel room ──────────────────────────────────
+  // When inside Discord, map the voice channel to a NexusNight room so all
+  // users in the same voice channel land in the same watch-party room.
+  useEffect(() => {
+    if (!discord.isReady || !discord.channelId) return;
+    // If we're already connected to a room, don't re-join
+    if (room.active && room.roomId) return;
+
+    const roomId = `dc-${discord.channelId}`;
+    const hash = window.location.hash;
+    // Only set if the hash doesn't already include a room param
+    if (!hash.includes('room=')) {
+      const separator = hash.includes('?') ? '&' : '?';
+      window.location.hash = `${hash}${separator}room=${encodeURIComponent(roomId)}`;
+      console.log('[DiscordActivity] Auto-joined room:', roomId);
+    }
+  }, [discord.isReady, discord.channelId, room.active, room.roomId]);
+
   const [activeTab, setActiveTab] = useState<'watch' | 'browse' | 'members'>('browse');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<GlobalTitleCard[]>([]);
@@ -296,10 +314,24 @@ export function DiscordActivity() {
         return;
       }
     } else {
-      window.location.hash = `#/discord?room=dc-voice`;
-      setTimeout(() => {
-        void room.send({ type: 'select', mediaId, position: 0 });
-      }, 300);
+      // No active room → join the Discord-channel-based room first, then select media.
+      const channelRoom = discord.channelId ? `dc-${discord.channelId}` : `dc-voice`;
+      const currentHash = window.location.hash.replace(/[?&]room=[^&]*/g, '');
+      const sep = currentHash.includes('?') ? '&' : '?';
+      window.location.hash = `${currentHash}${sep}room=${encodeURIComponent(channelRoom)}`;
+
+      // Wait for the room connection to establish, then select media.
+      const waitAndSelect = () => {
+        const check = setInterval(() => {
+          if (room.active) {
+            clearInterval(check);
+            void room.send({ type: 'select', mediaId, position: 0 });
+          }
+        }, 200);
+        // Safety timeout: stop checking after 10 seconds
+        setTimeout(() => clearInterval(check), 10_000);
+      };
+      waitAndSelect();
     }
     setActiveTab('watch');
     setSelectedShow(null);
