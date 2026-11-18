@@ -1,7 +1,6 @@
 import Hls from 'hls.js';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, u } from '../api';
-import { mapProviderEmbedUrl, remapVidApiNestedPlayerFrame } from '../util/url-utils';
 import type { EpisodeDetail, PlaybackErrorCode, PlaybackConfigPublic, PlaybackSourcePublic, AniSkipTimingsPublic } from '../api-types';
 import { ArrowLeft, AudioTracks, ExitFullscreen, Fullscreen, Gauge, Lock, Next, Pause, Play, Skip, Sliders, Spinner, Subtitles, Volume } from '../components/Icons';
 import { clamp, fmtTime } from '../format';
@@ -82,7 +81,6 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
   const { t, lang } = useI18n();
 
   const rootRef = useRef<HTMLDivElement>(null);
-  const embedFrameRef = useRef<HTMLIFrameElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const live = useRef(false); // HLS playlist still growing (transcode in progress)
@@ -100,7 +98,6 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     return [streamingConfig.source, ...streamingConfig.alternatives].filter(Boolean) as PlaybackSourcePublic[];
   }, [streamingConfig]);
   const currentSource = allSources[currentSourceIndex] || streamingConfig?.source || null;
-  const isEmbed = !!currentSource && currentSource.type === 'embed';
 
   useEffect(() => {
     setCurrentSourceIndex(0);
@@ -206,8 +203,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
         if (nextSource) {
           tried.add(nextSource.url);
           const nextIdx = allSources.indexOf(nextSource);
-          const isNextEmbed = nextSource.type === 'embed';
-          setFailoverMessage(isNextEmbed ? t('nativeStreamFallback') : t('fallbackPreparing'));
+          setFailoverMessage(t('fallbackPreparing'));
           setCurrentSourceIndex(nextIdx >= 0 ? nextIdx : currentSourceIndex + 1);
           setRetry(prev => prev + 1);
           return;
@@ -218,12 +214,12 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       setPhase('error');
     };
 
-    const begin = (isEmbedMode = false) => {
+    const begin = () => {
       if (dead) return;
       setPhase('ready');
       setFailoverMessage(null);
       cb.current.onReady?.();
-      if (autoPlay && !isEmbedMode) v.play().catch(() => { /* autoplay blocked → user presses play */ });
+      if (autoPlay) v.play().catch(() => { /* autoplay blocked → user presses play */ });
     };
 
     (async () => {
@@ -338,31 +334,68 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       attemptedSources.current.add(source.url);
 
       setPhase('loading');
-      const url = u(source.url) || source.url;
+      let url = u(source.url) || source.url;
 
-      // STREAMING: Embed source
-      if (source.type === 'embed') {
-        api.reportPlaybackSuccess({
-          provider: source.provider,
-          sourceUrl: source.url,
-        }).catch(() => {});
-        begin(true);
-        return;
+      // On-demand native sniffer resolution
+      if (url.includes('/api/streaming/resolve-native')) {
+        setPhase('preparing');
+        setPrep(0.4);
+        setFailoverMessage(lang === 'ar' ? `جاري الاتصال بسيرفر ${source.provider}...` : `Connecting to ${source.provider}...`);
+        try {
+          const res = await fetch('/api/streaming/resolve-native', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tmdbId: media.tmdbId,
+              kind: media.kind,
+              season: media.season,
+              episode: media.episode,
+              provider: source.provider,
+            }),
+            signal: ac.signal,
+          });
+          if (dead) return;
+          const data = await res.json();
+          if (!data.ok || !data.streamUrl) {
+            throw new Error(data.message || 'Sniffer resolution failed');
+          }
+          url = u(data.streamUrl) || data.streamUrl;
+          setPhase('loading');
+          setFailoverMessage(null);
+        } catch (err: any) {
+          if (dead) return;
+          console.warn('[Player] On-demand sniffer failed, failing over:', err.message);
+          return fail('playback_failed', true);
+        }
       }
 
       // STREAMING: HLS source
-      if (source.type === 'hls' && Hls.isSupported()) {
+      if ((source.type === 'hls' || url.includes('.m3u8')) && Hls.isSupported()) {
         hls = new Hls({
           startPosition: startRef.current,
-          maxBufferLength: 30,          // seconds ahead to buffer (was 40 — lower = faster seeks)
-          maxMaxBufferLength: 60,        // absolute max buffer
-          backBufferLength: 30,          // seconds behind to keep (was 90 — less memory)
-          maxBufferHole: 0.5,            // tolerate small gaps
           enableWorker: true,
+          lowLatencyMode: false,
+          maxBufferLength: 30,          // seconds ahead to buffer
+          maxMaxBufferLength: 60,        // absolute max buffer
+          backBufferLength: 20,          // seconds behind to keep
+          maxBufferHole: 0.8,            // tolerate gaps up to 0.8s without stalling
+          highBufferWatchdogPeriod: 2,
+          nudgeOffset: 0.15,            // jump 150ms forward when stuck in a gap
+          nudgeMaxRetry: 10,            // retry up to 10 times to jump past timestamp gaps
+          maxFragLookUpTolerance: 0.3,
+          fragLoadingTimeOut: 25000,
+          fragLoadingMaxRetry: 6,
+          fragLoadingRetryDelay: 1000,
+          fragLoadingMaxRetryTimeout: 64000,
+          levelLoadingTimeOut: 15000,
+          levelLoadingMaxRetry: 4,
+          abrEwmaDefaultEstimate: 800000,
+          abrBandWidthFactor: 0.8,
+          abrBandWidthUpFactor: 0.7,
           xhrSetup: (xhr) => { xhr.withCredentials = false; },
         });
         hlsRef.current = hls;
-        let net = 0, mediaErr = 0, fragParseFails = 0, fragLoadFails = 0;
+        let net = 0, mediaErr = 0, fragParseFails = 0, fragLoadFails = 0, stallCount = 0;
         
         const syncStreamingHlsTracks = () => {
           if (!hls) return;
@@ -435,8 +468,20 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           setDuration(effDuration());
         });
         
-        hls.on(Hls.Events.FRAG_BUFFERED, () => { fragParseFails = 0; fragLoadFails = 0; });
-        v.addEventListener('seeking', () => { fragLoadFails = 0; }, { signal: ac.signal });
+        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          fragParseFails = 0;
+          fragLoadFails = 0;
+          stallCount = 0;
+        });
+        v.addEventListener('seeking', () => {
+          fragLoadFails = 0;
+          stallCount = 0;
+        }, { signal: ac.signal });
+        v.addEventListener('timeupdate', () => {
+          if (!v.paused && v.readyState >= 3) {
+            stallCount = 0;
+          }
+        }, { signal: ac.signal });
 
         hls.on(Hls.Events.ERROR, (_e, d) => {
           console.error('[Player] HLS error:', {
@@ -449,6 +494,59 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
             fragUrl: d.frag?.url,
             reason: d.reason
           });
+
+          // Proactively handle buffer stalls (e.g. bufferStalledError / bufferSeekOverHole)
+          // instead of ignoring non-fatal stalls and letting the player sit frozen
+          if (d.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR || d.details === Hls.ErrorDetails.BUFFER_SEEK_OVER_HOLE) {
+            stallCount++;
+            console.warn(`[Player] Buffer stall detected (${stallCount}/5) at ${v.currentTime.toFixed(2)}s`);
+
+            // 1. Check for a micro buffer hole ahead and jump past it if < 1.5s
+            try {
+              if (v.buffered && v.buffered.length > 0) {
+                const cur = v.currentTime;
+                for (let i = 0; i < v.buffered.length; i++) {
+                  const start = v.buffered.start(i);
+                  if (start > cur && (start - cur) <= 1.5) {
+                    console.log(`[Player] Buffer hole detected (${(start - cur).toFixed(2)}s). Nudging currentTime from ${cur.toFixed(2)} to ${(start + 0.05).toFixed(2)}`);
+                    v.currentTime = start + 0.05;
+                    break;
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn('[Player] Buffer inspection error:', err);
+            }
+
+            // 2. Wake up fragment loading immediately
+            try {
+              hls?.startLoad();
+            } catch (e) {}
+
+            // 3. If stalled repeatedly (2+ times), downshift quality level to alleviate bandwidth pressure
+            if (stallCount >= 2 && hls) {
+              if (hls.currentLevel > 0) {
+                console.log(`[Player] Repeated stalls, downshifting quality from level ${hls.currentLevel} to ${hls.currentLevel - 1}`);
+                hls.currentLevel = hls.currentLevel - 1;
+              } else if (hls.autoLevelEnabled && hls.nextLevel > 0) {
+                hls.currentLevel = Math.max(0, hls.nextLevel - 1);
+              }
+            }
+
+            // 4. If stalled persistently (5+ times without making progress), failover to alternative provider
+            if (stallCount >= 5) {
+              console.warn('[Player] Persistent buffer stalls reached threshold (5), failing over to alternative provider');
+              api.reportPlaybackFailure({
+                provider: source.provider,
+                sourceUrl: source.url,
+                failureType: 'http_timeout',
+                responseStatus: 0,
+                errorDetails: 'persistent_buffer_stalled',
+              }).catch(() => {});
+              fail('playback_failed', true);
+            }
+            return;
+          }
 
           // fragLoadError is non-fatal by default in hls.js, but 403 Forbidden or repeated failures
           // mean the stream segments are blocked or invalid. Fail over to an alternative source.
@@ -505,15 +603,15 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
             }).catch(() => {});
           }
           
-          // Report media errors (invalid manifest/corrupted segments)
-          if (d.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            console.log('[Player] Reporting media error:', d.details);
+          // Report media errors ONLY when fatal (don't falsely report non-fatal buffer stalls as invalid_manifest)
+          if (d.type === Hls.ErrorTypes.MEDIA_ERROR && d.fatal) {
+            console.log('[Player] Reporting fatal media error:', d.details);
             api.reportPlaybackFailure({
               provider: source.provider,
               sourceUrl: source.url,
               failureType: 'invalid_manifest',
               responseStatus: 0,
-              errorDetails: `${d.details} - ${d.fatal ? 'fatal' : 'recoverable'}`,
+              errorDetails: `${d.details} - fatal`,
             }).catch(() => {});
           }
           
@@ -892,43 +990,6 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     userSeek(activeSkip.kind === 'outro' ? Math.max(0, effDuration() - 0.5) : activeSkip.end + 0.5);
   }, [activeSkip, effDuration]);
 
-  // Listen for official postMessage events from external providers (e.g. VidAPI STORAGE_SET bridge)
-  useEffect(() => {
-    if (!isEmbed || phase !== 'ready') return;
-
-    const onMessage = (event: MessageEvent) => {
-      try {
-        const d = event.data;
-        if (!d || typeof d !== 'object') return;
-
-        // VidAPI postMessage bridge: { type: 'STORAGE_SET', key: string, value: any }
-        if (d.type === 'STORAGE_SET' && typeof d.key === 'string') {
-          if (d.key.startsWith('watch_') || d.key === 'player') {
-            let val = d.value;
-            if (typeof val === 'string') {
-              try { val = JSON.parse(val); } catch { /* plain string/num */ }
-            }
-            if (val && typeof val === 'object') {
-              const pos = Number(val.time ?? val.t ?? val.currentTime);
-              const dur = Number(val.duration ?? val.d ?? val.totalDuration) || effDuration();
-              if (Number.isFinite(pos) && pos > 0) {
-                cb.current.onProgress?.(pos, dur);
-              }
-            } else if (Number.isFinite(Number(val))) {
-              const pos = Number(val);
-              if (pos > 0) cb.current.onProgress?.(pos, effDuration());
-            }
-          }
-        }
-      } catch {
-        /* Ignore third-party postMessage errors */
-      }
-    };
-
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, [isEmbed, phase, effDuration]);
-
   const triggerNextSource = useCallback(() => {
     if (!streamingConfig) return;
     const all = [streamingConfig.source, ...streamingConfig.alternatives].filter(Boolean) as PlaybackSourcePublic[];
@@ -965,18 +1026,18 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
   }, [streamingConfig, currentSource]);
 
   useImperativeHandle(ref, () => ({
-    play: async () => { if (!isEmbed && videoRef.current) await videoRef.current.play(); },
-    pause: () => { if (!isEmbed && videoRef.current) videoRef.current.pause(); },
+    play: async () => { if (videoRef.current) await videoRef.current.play(); },
+    pause: () => { if (videoRef.current) videoRef.current.pause(); },
     seek: (tt) => {
-      if (!isEmbed) seekTo(tt);
+      seekTo(tt);
     },
-    getTime: () => (isEmbed ? startAt : (videoRef.current?.currentTime ?? 0)),
-    isPlaying: () => (isEmbed ? phase === 'ready' : !videoRef.current?.paused),
+    getTime: () => (videoRef.current?.currentTime ?? 0),
+    isPlaying: () => (!videoRef.current?.paused),
     setRate: (r) => { if (videoRef.current) videoRef.current.playbackRate = r; },
     getRate: () => (videoRef.current?.playbackRate ?? 1),
     setAudioTrack: selectAudio,
     setSubtitle: (id) => void selectSubtitle(id),
-  }), [seekTo, selectAudio, selectSubtitle, isEmbed, phase]);
+  }), [seekTo, selectAudio, selectSubtitle]);
 
   const setVol = (x: number) => {
     const v = videoRef.current!;
@@ -1140,24 +1201,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
   };
 
   // ── render ─────────────────────────────────────────────────────────────────
-  const embedSrc = useMemo(() => {
-    if (!isEmbed || !currentSource) return undefined;
-    const rawUrl = startAt > 10 && !currentSource.url.includes('#t=') && !currentSource.url.includes('?t=')
-      ? `${currentSource.url}${currentSource.url.includes('?') ? '&' : '?'}t=${Math.floor(startAt)}#t=${Math.floor(startAt)}`
-      : currentSource.url;
-    return mapProviderEmbedUrl(rawUrl);
-  }, [isEmbed, currentSource?.url, startAt]);
-
-  const handleEmbedLoad = useCallback(() => {
-    if (!currentSource) return;
-    const result = remapVidApiNestedPlayerFrame(embedFrameRef.current, currentSource.url);
-    if (result.status !== 'not-applicable') {
-      console.info('[Player] VidAPI nested-frame mapping result:', result.status, result.mappedUrl ?? result.originalUrl ?? '');
-    }
-  }, [currentSource?.url]);
-
   const volLevel: 0 | 1 | 2 = muted || volume === 0 ? 0 : volume < 0.5 ? 1 : 2;
-  const showUi = isEmbed ? uiVisible : (uiVisible || !playing || phase !== 'ready');
+  const showUi = uiVisible || !playing || phase !== 'ready';
   const multiAudio = effectiveAudioTracks.length > 1;
   const iconFlip = 'rtl:-scale-x-100';
   const errorHint = errorCode === 'media_not_ready' ? 'mediaNotReady'
@@ -1183,29 +1228,12 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           }}
         />
       )}
-      {isEmbed && currentSource && (
-        <iframe
-          ref={embedFrameRef}
-          key={currentSource.url}
-          src={embedSrc}
-          title={title}
-          className="absolute inset-0 size-full border-0 bg-black z-0"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-          allowFullScreen
-          referrerPolicy="origin"
-          onLoad={handleEmbedLoad}
-          onError={() => {
-            console.error('[Player] Iframe load error, attempting failover');
-            triggerNextSource();
-          }}
-        />
-      )}
-      <video ref={videoRef} playsInline preload="auto" poster={u(media.stillUrl)} className={isEmbed ? 'hidden' : 'absolute inset-0 size-full bg-black object-contain'} />
+      <video ref={videoRef} playsInline preload="auto" poster={u(media.stillUrl)} className="absolute inset-0 size-full bg-black object-contain" />
 
       {/* gesture surface */}
-      {!isEmbed && <div className="absolute inset-0" onClick={onSurfaceClick} onDoubleClick={onSurfaceDouble} />}
+      <div className="absolute inset-0" onClick={onSurfaceClick} onDoubleClick={onSurfaceDouble} />
 
-      {!isEmbed && <SubtitleOverlay video={videoRef.current} cues={cues} offset={subOffset} raised={showUi} />}
+      <SubtitleOverlay video={videoRef.current} cues={cues} offset={subOffset} raised={showUi} />
 
       {/* top bar */}
       <div className={`pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start gap-3 bg-gradient-to-b from-black/85 to-transparent px-[max(1rem,2.5cqw)] pb-10 pt-[max(0.75rem,2cqh)] transition-opacity duration-300 ${showUi ? 'opacity-100' : 'opacity-0'}`}>
@@ -1230,7 +1258,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
               <button
                 onClick={() => setMenu(menu === 'source' ? null : 'source')}
                 className="flex items-center gap-1.5 rounded-full border border-white/20 bg-black/60 px-3 py-1 text-xs font-medium text-bone transition hover:border-white/40 hover:bg-white/10 active:scale-95"
-                title={lang === 'ar' ? 'تغيير مصدر البث' : 'Change streaming source'}
+                title={lang === 'ar' ? 'تغيير سيرفر البث المباشر' : 'Change streaming server'}
               >
                 <span>{currentSource.provider}</span>
                 {allSources.length > 1 && <span className="text-[10px] text-dust">({allSources.length})</span>}
@@ -1244,7 +1272,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
                   items={allSources.map((s, idx) => ({
                     id: String(idx),
                     label: s.provider,
-                    hint: s.type === 'hls' ? 'HLS (Local Player)' : 'Embed',
+                    hint: 'HLS (Direct Stream)',
                   }))}
                 />
               )}
@@ -1264,7 +1292,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       </div>
 
       {/* center indicators */}
-      {!isEmbed && flash && (
+      {flash && (
         <div key={flash.n} className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center" onAnimationEnd={() => setFlash(null)}>
           <div className="flex size-20 items-center justify-center rounded-full bg-black/60">
             {flash.kind === 'play' && <Play className={`size-9 ${iconFlip}`} />}
@@ -1274,12 +1302,12 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           </div>
         </div>
       )}
-      {!isEmbed && phase === 'ready' && !playing && !buffering && !flash && (
+      {phase === 'ready' && !playing && !buffering && !flash && (
         <button onClick={togglePlay} aria-label={t('play')} className="absolute left-1/2 top-1/2 z-10 flex size-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/25 bg-black/60 transition hover:bg-white/15 active:scale-95">
           <Play className={`size-9 ${iconFlip}`} />
         </button>
       )}
-      {!isEmbed && phase === 'ready' && buffering && playing && (
+      {phase === 'ready' && buffering && playing && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"><Spinner className="size-14 text-bone/90" /></div>
       )}
 
@@ -1424,7 +1452,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       )}
 
       {/* Skip recap / intro / credits — Netflix-style floating pill */}
-      {!isEmbed && activeSkip && (
+      {activeSkip && (
         <button
           type="button"
           onClick={(e) => {
@@ -1444,8 +1472,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       )}
 
       {/* bottom controls */}
-      {!isEmbed && (
-        <div className={`absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/95 via-black/60 to-transparent px-[max(0.75rem,2cqw)] pb-[max(0.75rem,1.8cqh)] pt-14 transition-opacity duration-300 ${showUi ? 'opacity-100' : 'pointer-events-none opacity-0'}`}>
+      <div className={`absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/95 via-black/60 to-transparent px-[max(0.75rem,2cqw)] pb-[max(0.75rem,1.8cqh)] pt-14 transition-opacity duration-300 ${showUi ? 'opacity-100' : 'pointer-events-none opacity-0'}`}>
           {!theatreMode && (
             <SeekBar
               time={time}
@@ -1667,7 +1694,6 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
             </div>
           </div>
         </div>
-      )}
       {overlay}
       
       {/* Toast Notifications */}

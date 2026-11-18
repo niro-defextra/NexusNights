@@ -8,6 +8,7 @@
  */
 
 import express, { type Request, type Response } from 'express';
+import { Readable } from 'node:stream';
 import { streamResolver, type ResolvedStream } from './stream-resolver';
 
 export const streamProxyRouter = express.Router();
@@ -189,7 +190,7 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
 
     const upstream = await fetch(url, {
       headers,
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(25000),
     });
 
     if (!upstream.ok && upstream.status !== 206) {
@@ -237,27 +238,20 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
       res.setHeader('Content-Range', contentRange);
     }
 
-    // Stream the binary body
+    // Stream the binary body with backpressure & socket teardown
     if (!upstream.body) {
       res.end();
       return;
     }
 
-    // Pipe ReadableStream (Web API) to Node.js writable response
-    const reader = upstream.body.getReader();
-    const pump = async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(value);
-        }
-        res.end();
-      } catch (err: any) {
-        res.destroy(err);
-      }
-    };
-    void pump();
+    const nodeStream = Readable.fromWeb(upstream.body as any);
+    nodeStream.on('error', () => {
+      if (!res.writableEnded) res.end();
+    });
+    nodeStream.pipe(res);
+    req.on('close', () => {
+      nodeStream.destroy();
+    });
   } catch (err: any) {
     if (!res.headersSent) {
       res.status(502).send(`Gateway Error: ${err.message}`);

@@ -380,14 +380,44 @@
                 }
             }
 
-            if (source.type === 'embed' || source.embedUrl) {
-                if (typeof tizen !== 'undefined' && tizen.application) {
-                    this.skippedEmbedSources += 1;
-                    this.tryNextSource(NexusConfig.t('player_err_embed'), attemptId);
-                } else {
-                    this.playEmbed(source);
-                }
-            } else if ((source.type === 'hls' || source.type === 'dash' || source.type === 'mp4') && this.useAVPlay) {
+            if (source.url && source.url.indexOf('/api/streaming/resolve-native') !== -1) {
+                var self = this;
+                var xhr = new XMLHttpRequest();
+                var endpoint = source.url.indexOf('http') === 0 ? source.url : (NexusConfig.apiBase || '') + source.url;
+                xhr.open('POST', endpoint, true);
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.onload = function () {
+                    if (self.playAttemptId !== attemptId) return;
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try {
+                            var data = JSON.parse(xhr.responseText);
+                            if (data && data.ok && data.streamUrl) {
+                                source.url = data.streamUrl;
+                                source.type = 'hls';
+                                if (self.useAVPlay) self.playWithAVPlay(source, attemptId);
+                                else self.playWithHTML5(source, attemptId);
+                                return;
+                            }
+                        } catch (e) {}
+                    }
+                    self.tryNextSource(NexusConfig.t('player_error'), attemptId);
+                };
+                xhr.onerror = function () {
+                    if (self.playAttemptId !== attemptId) return;
+                    self.tryNextSource(NexusConfig.t('player_error'), attemptId);
+                };
+                var payload = {
+                    tmdbId: (this.meta && this.meta.tmdbId) || 0,
+                    kind: (this.meta && this.meta.season) ? 'series' : 'movie',
+                    season: (this.meta && this.meta.season) || undefined,
+                    episode: (this.meta && this.meta.episode) || undefined,
+                    provider: source.provider
+                };
+                xhr.send(JSON.stringify(payload));
+                return;
+            }
+
+            if ((source.type === 'hls' || source.type === 'dash' || source.type === 'mp4') && this.useAVPlay) {
                 this.playWithAVPlay(source, attemptId);
             } else {
                 this.playWithHTML5(source, attemptId);
@@ -525,8 +555,10 @@
                 console.log('[NexusPlayer] Attaching Hls.js to video element');
                 var hls = new window.Hls({
                     enableWorker: true,
-                    lowLatencyMode: true,
-                    backBufferLength: 60
+                    lowLatencyMode: false,
+                    maxBufferLength: 30,
+                    maxBufferHole: 0.8,
+                    backBufferLength: 30
                 });
                 this.hlsInstance = hls;
                 hls.loadSource(source.url);
