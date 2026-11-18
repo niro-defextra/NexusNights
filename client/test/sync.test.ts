@@ -21,17 +21,17 @@ test('command arrives and we are off by >0.4s → hard seek (with a small lead)'
   assert.ok(Math.abs(d.seekTo! - 105.15) < 1e-9);
 });
 
-test('periodic check: 0.4–1.5s drift is fixed with playbackRate, >1.5s with a seek', () => {
-  assert.equal(decide(S(), 15_000, 104.3, 1, 'tick').rate, 1.06, 'behind → speed up');
-  assert.equal(decide(S(), 15_000, 105.8, 1, 'tick').rate, 0.94, 'ahead → slow down');
+test('periodic check: 0.6–2.5s drift is fixed with playbackRate, >2.5s with a seek', () => {
+  assert.equal(decide(S(), 15_000, 104.3, 1, 'tick').rate, 1.05, 'behind → speed up');
+  assert.equal(decide(S(), 15_000, 105.8, 1, 'tick').rate, 0.95, 'ahead → slow down');
   assert.equal(decide(S(), 15_000, 104.3, 1, 'tick').seekTo, undefined);
   assert.ok(decide(S(), 15_000, 102, 1, 'tick').seekTo !== undefined);
-  assert.equal(decide(S(), 15_000, 104.3, 1, 'event').seekTo !== undefined, true, 'event uses the stricter threshold');
+  assert.equal(decide(S(), 15_000, 103.5, 1, 'event').seekTo !== undefined, true, 'event uses the stricter threshold');
 });
 
 test('rate returns to 1 once the drift is gone; hysteresis band keeps the rate', () => {
-  assert.equal(decide(S(), 15_000, 105.05, 1.06, 'tick').rate, 1);
-  assert.equal(decide(S(), 15_000, 104.8, 1.06, 'tick').rate, 1.06);
+  assert.equal(decide(S(), 15_000, 105.05, 1.05, 'tick').rate, 1);
+  assert.equal(decide(S(), 15_000, 104.8, 1.05, 'tick').rate, 1.05);
 });
 
 test('paused / on hold → pause and snap to the frozen position', () => {
