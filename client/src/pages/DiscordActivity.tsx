@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useRoom } from '../room/RoomContext';
 import { useAuth } from '../auth/AuthContext';
 import { useI18n } from '../i18n';
@@ -19,6 +19,7 @@ import { Avatar } from '../components/Avatar';
 import { Player, type PlayerHandle } from '../player/Player';
 import { EMOJIS } from '../room/RoomContext';
 import { useDiscord } from '../discord/useDiscord';
+import { useRoomSync } from '../room/useRoomSync';
 
 export function DiscordActivity() {
   const { lang, t, toggle } = useI18n();
@@ -73,6 +74,20 @@ export function DiscordActivity() {
   const [skipTimings, setSkipTimings] = useState<AniSkipTimingsPublic | null>(null);
   const [playbackLoading, setPlaybackLoading] = useState(false);
   const playerHandle = useRef<PlayerHandle>(null);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [needsGesture, setNeedsGesture] = useState(false);
+
+  // ── Room ↔ Player sync (keeps player in step with room state) ─────────────
+  useRoomSync({
+    room,
+    mediaId: activeMediaId || '',
+    handle: playerHandle,
+    ready: playerReady && !!activeMediaId,
+    onNeedsGesture: setNeedsGesture,
+  });
+
+  // Reset player ready state when media changes
+  useEffect(() => { setPlayerReady(false); }, [activeMediaId]);
 
   // Chat message state
   const [chatInput, setChatInput] = useState('');
@@ -551,10 +566,19 @@ export function DiscordActivity() {
                     autoPlay
                     controlled={room.active}
                     canControl={room.canControl}
+                    intentPlaying={!!room.state?.playing}
+                    holdLabel={room.active && room.state?.hold && room.waitingFor.length
+                      ? t('waitingFor', { names: room.waitingFor.join(', ') })
+                      : null}
                     onDisabledControlClick={() => room.toast(t('onlyHost'))}
+                    onBuffering={(k, v) => room.setBuffering(k, v)}
+                    onReady={() => { setPlayerReady(true); room.setBuffering('load', false); }}
                     onUserPlay={(t) => room.canControl && void room.send({ type: 'play', position: t })}
                     onUserPause={(t) => room.canControl && void room.send({ type: 'pause', position: t })}
                     onUserSeek={(t) => room.canControl && void room.send({ type: 'seek', position: t })}
+                    onSubtitleChange={(subId) => room.canControl && void room.send({ type: 'subtitle', subtitleId: subId })}
+                    onAudioChange={(trackIdx) => room.canControl && void room.send({ type: 'audio', audioTrack: trackIdx })}
+                    onSpeedChange={(rate) => room.canControl && void room.send({ type: 'speed', playbackRate: rate })}
                     hasNext={false}
                     onBack={() => {
                       if (room.isHost || room.canControl) {
@@ -564,6 +588,24 @@ export function DiscordActivity() {
                     }}
                     onNext={() => {}}
                   />
+                  {/* Autoplay blocked gesture overlay */}
+                  {needsGesture && (
+                    <button
+                      onClick={() => {
+                        playerHandle.current?.play().then(() => setNeedsGesture(false)).catch(() => {});
+                      }}
+                      className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+                    >
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="size-16 rounded-full bg-gradient-to-r from-blood to-blood-hot flex items-center justify-center shadow-[0_0_30px_rgba(186,24,27,0.5)]">
+                          <Play className="size-7 fill-white text-white ms-1" />
+                        </div>
+                        <span className="text-sm font-bold text-bone">
+                          {lang === 'ar' ? 'اضغط للتشغيل' : 'Tap to Play'}
+                        </span>
+                      </div>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
