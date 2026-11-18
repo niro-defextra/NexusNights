@@ -105,15 +105,15 @@ export default function Constellation({ active }: { active: PlatformId | null })
     glow.position.z = -1.9;
     root.add(glow);
 
-    /* ── orbit lines ─────────────────────────────────────────────────────── */
+    /* ── orbit lines (refined, subtle ambient framing) ────────────────── */
 
     const orbits: THREE.Mesh[] = [];
     const orbitSpecs: Array<[number, number, number, [number, number, number]]> = [
-      [2.35, 0x8c1925, 0.4, [0.34, 0.42, -0.2]],
-      [2.95, 0xd4af6a, 0.15, [0.34, -0.3, 0.16]],
+      [3.6, 0xdc3044, 0.08, [0.36, 0.38, -0.15]],
+      [4.4, 0xd4af6a, 0.05, [-0.28, 0.35, 0.2]],
     ];
     for (const [radius, color, opacity, tilt] of orbitSpecs) {
-      const geo = new THREE.TorusGeometry(radius, 0.0042, 6, 220);
+      const geo = new THREE.TorusGeometry(radius, 0.0035, 6, 220);
       const mat = new THREE.MeshBasicMaterial({
         color,
         transparent: true,
@@ -126,9 +126,9 @@ export default function Constellation({ active }: { active: PlatformId | null })
       orbits.push(ring);
     }
 
-    /* ── ambient stardust particles ───────────────────────────────────────── */
+    /* ── ambient stardust particles (cinematic embers) ─────────────────── */
 
-    const particleCount = 220;
+    const particleCount = 120;
     const particleGeo = new THREE.BufferGeometry();
     const particlePos = new Float32Array(particleCount * 3);
     const particleColors = new Float32Array(particleCount * 3);
@@ -137,9 +137,9 @@ export default function Constellation({ active }: { active: PlatformId | null })
     const colBone = new THREE.Color(0xf2ebe3);
 
     for (let i = 0; i < particleCount; i++) {
-      particlePos[i * 3] = (Math.random() - 0.5) * 14;
-      particlePos[i * 3 + 1] = (Math.random() - 0.5) * 9;
-      particlePos[i * 3 + 2] = (Math.random() - 0.5) * 7 - 0.5;
+      particlePos[i * 3] = (Math.random() - 0.5) * 12;
+      particlePos[i * 3 + 1] = (Math.random() - 0.5) * 8;
+      particlePos[i * 3 + 2] = (Math.random() - 0.5) * 6 - 0.5;
 
       const pick = i % 3 === 0 ? colBlood : i % 3 === 1 ? colGilt : colBone;
       particleColors[i * 3] = pick.r;
@@ -150,14 +150,15 @@ export default function Constellation({ active }: { active: PlatformId | null })
     particleGeo.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
 
     const particleMat = new THREE.PointsMaterial({
-      size: 0.042,
+      size: 0.032,
       vertexColors: true,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.45,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const particles = new THREE.Points(particleGeo, particleMat);
+    root.add(particles);
     scene.add(particles);
 
     /* ── screen texture generator ─────────────────────────────────────────── */
@@ -775,12 +776,12 @@ export default function Constellation({ active }: { active: PlatformId | null })
     });
 
     const spaceGrayMat = new THREE.MeshPhysicalMaterial({
-      color: 0x181417,
-      metalness: 0.88,
-      roughness: 0.28,
-      clearcoat: 0.7,
-      clearcoatRoughness: 0.2,
-      envMapIntensity: 1.1,
+      color: 0x141014,
+      metalness: 0.45,
+      roughness: 0.45,
+      clearcoat: 0.35,
+      clearcoatRoughness: 0.25,
+      envMapIntensity: 0.7,
     });
 
     const screenGlassMat = new THREE.MeshPhysicalMaterial({
@@ -794,19 +795,105 @@ export default function Constellation({ active }: { active: PlatformId | null })
       depthWrite: false,
     });
 
-    // 1. Samsung OLED Smart TV
+    // ── Dedicated Photorealistic Chiclet Keyboard Texture ───────────────
+    function keyboardTexture(): THREE.CanvasTexture {
+      const w = 1024;
+      const h = 512;
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const g = c.getContext('2d');
+      if (!g) return new THREE.CanvasTexture(c);
+
+      // Matte dark brushed chassis
+      g.fillStyle = '#100c10';
+      g.fillRect(0, 0, w, h);
+
+      // Recessed keyboard well
+      const pad = 24;
+      const kw = w - pad * 2;
+      const kh = h - pad * 2;
+      g.fillStyle = '#080608';
+      g.beginPath();
+      g.roundRect ? g.roundRect(pad, pad, kw, kh, 14) : g.rect(pad, pad, kw, kh);
+      g.fill();
+      g.strokeStyle = 'rgba(212,175,106,0.18)';
+      g.lineWidth = 1.5;
+      g.stroke();
+
+      // Ambient keyboard backlight underglow
+      const bglow = g.createRadialGradient(w / 2, h / 2, 30, w / 2, h / 2, w * 0.48);
+      bglow.addColorStop(0, 'rgba(220,48,68,0.20)');
+      bglow.addColorStop(0.65, 'rgba(212,175,106,0.07)');
+      bglow.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = bglow;
+      g.fillRect(pad, pad, kw, kh);
+
+      // Key rows (Fn, numbers, QWERTY, ASDF, ZXCV, Space/modifiers)
+      const rows = [
+        { count: 14, h: 44, gap: 8 },
+        { count: 14, h: 56, gap: 8 },
+        { count: 14, h: 56, gap: 8 },
+        { count: 13, h: 56, gap: 8 },
+        { count: 12, h: 56, gap: 8 },
+        { count: 7, h: 62, gap: 10, isBottom: true },
+      ];
+
+      let curY = pad + 14;
+      rows.forEach((row) => {
+        const totalGaps = (row.count - 1) * row.gap;
+        const keyW = (kw - 28 - totalGaps) / (row.isBottom ? 10 : row.count);
+        let curX = pad + 14;
+
+        for (let k = 0; k < row.count; k++) {
+          let thisW = keyW;
+          if (row.isBottom) {
+            if (k === 3) thisW = keyW * 4.2; // Space bar
+            else if (k === 0 || k === 6) thisW = keyW * 1.35;
+            else thisW = keyW * 0.9;
+          }
+
+          // Individual chiclet keycap
+          const kg = g.createLinearGradient(curX, curY, curX, curY + row.h);
+          kg.addColorStop(0, '#2e232c');
+          kg.addColorStop(1, '#181218');
+          g.fillStyle = kg;
+          g.beginPath();
+          g.roundRect ? g.roundRect(curX, curY, thisW, row.h, 6) : g.rect(curX, curY, thisW, row.h);
+          g.fill();
+
+          g.strokeStyle = 'rgba(255,255,255,0.18)';
+          g.lineWidth = 1;
+          g.stroke();
+
+          // Soft backlight indicator / glyph impression
+          g.fillStyle = k === 3 && row.isBottom ? 'rgba(212,175,106,0.6)' : 'rgba(242,235,227,0.7)';
+          g.fillRect(curX + 6, curY + 6, Math.min(thisW - 12, 14), 2.5);
+
+          curX += thisW + row.gap;
+        }
+        curY += row.h + row.gap;
+      });
+
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      textures.push(tex);
+      return tex;
+    }
+
+    // 1. Samsung OLED Smart TV (Ultra-Thin Cinema Panel + Ambient Ambilight)
     function createTv(position: [number, number, number], rotation: [number, number, number]) {
       const group = new THREE.Group();
-      const w = 2.8;
-      const h = 1.58;
-      const depth = 0.032;
+      const w = 2.92;
+      const h = 1.66;
+      const depth = 0.028;
 
       // Ultra-thin OLED panel frame
-      const panelGeo = new THREE.ExtrudeGeometry(roundedRect(w, h, 0.035), {
+      const panelGeo = new THREE.ExtrudeGeometry(roundedRect(w, h, 0.025), {
         depth,
         bevelEnabled: true,
-        bevelThickness: 0.012,
-        bevelSize: 0.012,
+        bevelThickness: 0.008,
+        bevelSize: 0.008,
         bevelSegments: 2,
         curveSegments: 8,
       });
@@ -819,58 +906,73 @@ export default function Constellation({ active }: { active: PlatformId | null })
         map: screenTexture('tv'),
         toneMapped: false,
       });
-      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.965, h * 0.95), screenMat);
-      screen.position.z = depth / 2 + 0.013;
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.97, h * 0.96), screenMat);
+      screen.position.z = depth / 2 + 0.009;
       group.add(screen);
 
       // Reflective screen glass layer
-      const glass = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.965, h * 0.95), screenGlassMat);
-      glass.position.z = depth / 2 + 0.014;
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.97, h * 0.96), screenGlassMat);
+      glass.position.z = depth / 2 + 0.010;
       group.add(glass);
 
       // Bottom bezel brushed metal chin + glowing LED pip
       const chin = new THREE.Mesh(
-        new THREE.PlaneGeometry(w * 0.965, 0.018),
-        new THREE.MeshBasicMaterial({ color: 0xd4af6a, transparent: true, opacity: 0.7 }),
+        new THREE.PlaneGeometry(w * 0.97, 0.016),
+        new THREE.MeshBasicMaterial({ color: 0xd4af6a, transparent: true, opacity: 0.75 }),
       );
-      chin.position.set(0, -h * 0.475, depth / 2 + 0.014);
+      chin.position.set(0, -h * 0.482, depth / 2 + 0.011);
       group.add(chin);
 
       const led = new THREE.Mesh(
-        new THREE.CircleGeometry(0.008, 16),
+        new THREE.CircleGeometry(0.007, 16),
         new THREE.MeshBasicMaterial({ color: 0xdc3044 }),
       );
-      led.position.set(0, -h * 0.475, depth / 2 + 0.015);
+      led.position.set(0, -h * 0.482, depth / 2 + 0.012);
       group.add(led);
 
-      // Rear electronics box
-      const rearGeo = new THREE.ExtrudeGeometry(roundedRect(1.7, 0.9, 0.03), {
-        depth: 0.05,
-        bevelEnabled: true,
-        bevelThickness: 0.01,
-        bevelSize: 0.01,
-      });
-      rearGeo.center();
-      const rear = new THREE.Mesh(rearGeo, titaniumMat);
-      rear.position.set(0, -0.1, -depth / 2 - 0.025);
-      group.add(rear);
-
-      // TV Stand (Neck + Base Plate)
-      const stem = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.32, 0.035), titaniumMat);
-      stem.position.set(0, -h / 2 - 0.12, -0.01);
-      group.add(stem);
-
-      const basePlateGeo = new THREE.ExtrudeGeometry(roundedRect(1.15, 0.32, 0.04), {
-        depth: 0.018,
+      // Rear electronics housing
+      const rearGeo = new THREE.ExtrudeGeometry(roundedRect(1.7, 0.92, 0.03), {
+        depth: 0.042,
         bevelEnabled: true,
         bevelThickness: 0.008,
         bevelSize: 0.008,
       });
-      basePlateGeo.center();
-      const basePlate = new THREE.Mesh(basePlateGeo, titaniumMat);
-      basePlate.rotation.x = Math.PI / 2;
-      basePlate.position.set(0, -h / 2 - 0.28, 0.08);
-      group.add(basePlate);
+      rearGeo.center();
+      const rear = new THREE.Mesh(rearGeo, titaniumMat);
+      rear.position.set(0, -0.06, -depth / 2 - 0.021);
+      group.add(rear);
+
+      // OLED Ambient Cinema Backlight (Ambilight glow behind TV)
+      const tvGlowCanvas = document.createElement('canvas');
+      tvGlowCanvas.width = 512;
+      tvGlowCanvas.height = 256;
+      const tg = tvGlowCanvas.getContext('2d');
+      if (tg) {
+        const agrad = tg.createRadialGradient(256, 128, 10, 256, 128, 250);
+        agrad.addColorStop(0, 'rgba(220,48,68,0.45)');
+        agrad.addColorStop(0.5, 'rgba(179,32,47,0.14)');
+        agrad.addColorStop(1, 'rgba(0,0,0,0)');
+        tg.fillStyle = agrad;
+        tg.fillRect(0, 0, 512, 256);
+      }
+      const tvGlowTex = new THREE.CanvasTexture(tvGlowCanvas);
+      textures.push(tvGlowTex);
+      const tvGlow = new THREE.Mesh(
+        new THREE.PlaneGeometry(w * 1.5, h * 1.5),
+        new THREE.MeshBasicMaterial({
+          map: tvGlowTex,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      );
+      tvGlow.position.set(0, 0, -depth / 2 - 0.06);
+      group.add(tvGlow);
+
+      // Architectural floating wall mount bracket
+      const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.36, 0.024), titaniumMat);
+      bracket.position.set(0, -0.06, -depth / 2 - 0.045);
+      group.add(bracket);
 
       group.position.set(...position);
       group.rotation.set(...rotation);
@@ -886,22 +988,22 @@ export default function Constellation({ active }: { active: PlatformId | null })
       });
     }
 
-    // 2. Android Smartphone Flagship
+    // 2. Android Smartphone Flagship (Curved Titanium & Sapphire Cameras)
     function createPhone(position: [number, number, number], rotation: [number, number, number]) {
       const group = new THREE.Group();
-      const w = 1.08;
-      const h = 2.18;
-      const depth = 0.055;
+      const w = 1.06;
+      const h = 2.22;
+      const depth = 0.052;
       const radius = 0.16;
 
       // Curved Titanium Chassis
       const chassisGeo = new THREE.ExtrudeGeometry(roundedRect(w, h, radius), {
         depth,
         bevelEnabled: true,
-        bevelThickness: 0.02,
-        bevelSize: 0.02,
-        bevelSegments: 3,
-        curveSegments: 12,
+        bevelThickness: 0.016,
+        bevelSize: 0.016,
+        bevelSegments: 4,
+        curveSegments: 16,
       });
       chassisGeo.center();
       const chassis = new THREE.Mesh(chassisGeo, titaniumMat);
@@ -912,66 +1014,73 @@ export default function Constellation({ active }: { active: PlatformId | null })
         map: screenTexture('phone'),
         toneMapped: false,
       });
-      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.94, h * 0.96), screenMat);
-      screen.position.z = depth / 2 + 0.021;
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.945, h * 0.965), screenMat);
+      screen.position.z = depth / 2 + 0.017;
       group.add(screen);
 
       // Screen Glass Sheen
-      const glass = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.94, h * 0.96), screenGlassMat);
-      glass.position.z = depth / 2 + 0.022;
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.945, h * 0.965), screenGlassMat);
+      glass.position.z = depth / 2 + 0.018;
       group.add(glass);
 
       // Gilt bottom accent
       const accent = new THREE.Mesh(
-        new THREE.PlaneGeometry(w * 0.94, 0.008),
-        new THREE.MeshBasicMaterial({ color: 0xd4af6a, transparent: true, opacity: 0.6 }),
+        new THREE.PlaneGeometry(w * 0.945, 0.008),
+        new THREE.MeshBasicMaterial({ color: 0xd4af6a, transparent: true, opacity: 0.7 }),
       );
-      accent.position.set(0, -h * 0.48, depth / 2 + 0.022);
+      accent.position.set(0, -h * 0.482, depth / 2 + 0.018);
       group.add(accent);
 
       // Rear Camera Island
       const camPlateGeo = new THREE.ExtrudeGeometry(roundedRect(0.42, 0.46, 0.08), {
-        depth: 0.025,
+        depth: 0.022,
         bevelEnabled: true,
         bevelThickness: 0.006,
         bevelSize: 0.006,
+        bevelSegments: 2,
+        curveSegments: 10,
       });
       camPlateGeo.center();
       const camPlate = new THREE.Mesh(camPlateGeo, spaceGrayMat);
-      camPlate.position.set(-w * 0.23, h * 0.32, -depth / 2 - 0.015);
+      camPlate.position.set(-w * 0.22, h * 0.32, -depth / 2 - 0.012);
       group.add(camPlate);
 
-      // 3 Camera Lenses
+      // 3 Camera Lenses with sapphire rings
       const lensPos: Array<[number, number]> = [
-        [-w * 0.28, h * 0.38],
-        [-w * 0.28, h * 0.26],
-        [-w * 0.18, h * 0.32],
+        [-w * 0.27, h * 0.38],
+        [-w * 0.27, h * 0.26],
+        [-w * 0.17, h * 0.32],
       ];
       lensPos.forEach(([lx, ly]) => {
         const ring = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.05, 0.05, 0.012, 24),
+          new THREE.CylinderGeometry(0.05, 0.05, 0.012, 28),
           titaniumMat,
         );
         ring.rotation.x = Math.PI / 2;
-        ring.position.set(lx, ly, -depth / 2 - 0.032);
+        ring.position.set(lx, ly, -depth / 2 - 0.026);
         group.add(ring);
 
         const lensGlass = new THREE.Mesh(
-          new THREE.CircleGeometry(0.04, 20),
-          new THREE.MeshBasicMaterial({ color: 0x070607 }),
+          new THREE.CircleGeometry(0.04, 24),
+          new THREE.MeshPhysicalMaterial({
+            color: 0x060507,
+            metalness: 0.9,
+            roughness: 0.05,
+            clearcoat: 1.0,
+          }),
         );
         lensGlass.rotation.y = Math.PI;
-        lensGlass.position.set(lx, ly, -depth / 2 - 0.039);
+        lensGlass.position.set(lx, ly, -depth / 2 - 0.033);
         group.add(lensGlass);
       });
 
       // Side keys
-      const pwr = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.18, 0.02), titaniumMat);
-      pwr.position.set(w / 2 + 0.022, 0.2, 0);
+      const pwr = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.18, 0.02), titaniumMat);
+      pwr.position.set(w / 2 + 0.018, 0.2, 0);
       group.add(pwr);
 
-      const vol = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.32, 0.02), titaniumMat);
-      vol.position.set(-w / 2 - 0.022, 0.25, 0);
+      const vol = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.32, 0.02), titaniumMat);
+      vol.position.set(-w / 2 - 0.018, 0.25, 0);
       group.add(vol);
 
       group.position.set(...position);
@@ -988,69 +1097,106 @@ export default function Constellation({ active }: { active: PlatformId | null })
       });
     }
 
-    // 3. Discord Studio / Laptop (Lid + Keyboard Base)
+    // 3. Discord Studio / Laptop (Authentic Clamshell with Chiclet Keyboard)
     function createLaptop(position: [number, number, number], rotation: [number, number, number]) {
       const group = new THREE.Group();
-      const lw = 1.9;
-      const lh = 1.25;
-      const ldepth = 0.03;
+      const lw = 1.98;
+      const lh = 1.28;
+      const baseDepth = 1.28;
+      const baseThick = 0.034;
+      const lidThick = 0.022;
 
-      // Screen Lid
-      const lidGeo = new THREE.ExtrudeGeometry(roundedRect(lw, lh, 0.04), {
-        depth: ldepth,
+      // ── A. Base Chassis (Keyboard half, horizontal) ──
+      const baseShape = roundedRect(lw, baseDepth, 0.045);
+      const baseGeo = new THREE.ExtrudeGeometry(baseShape, {
+        depth: baseThick,
         bevelEnabled: true,
-        bevelThickness: 0.01,
-        bevelSize: 0.01,
+        bevelThickness: 0.008,
+        bevelSize: 0.008,
+        bevelSegments: 3,
+        curveSegments: 12,
+      });
+      baseGeo.center();
+      const baseMesh = new THREE.Mesh(baseGeo, spaceGrayMat);
+      // Face +Z rotated -Math.PI / 2 points UP (+Y)
+      baseMesh.rotation.x = -Math.PI / 2;
+      // Position base so rear hinge is at Z = 0, front edge extends towards +Z
+      baseMesh.position.set(0, 0, baseDepth / 2);
+      group.add(baseMesh);
+
+      const kbdTopY = baseThick / 2 + 0.018;
+
+      // ── B. Photorealistic Chiclet Keyboard Deck ──
+      const kbdTex = keyboardTexture();
+      const kbdGeo = new THREE.PlaneGeometry(lw * 0.90, baseDepth * 0.54);
+      const kbdMesh = new THREE.Mesh(
+        kbdGeo,
+        new THREE.MeshBasicMaterial({ map: kbdTex, toneMapped: false }),
+      );
+      kbdMesh.rotation.x = -Math.PI / 2;
+      kbdMesh.position.set(0, kbdTopY, baseDepth * 0.36);
+      group.add(kbdMesh);
+
+      // ── C. Frosted Glass Touchpad ──
+      const trackpadGeo = new THREE.PlaneGeometry(lw * 0.38, baseDepth * 0.32);
+      const trackpadMesh = new THREE.Mesh(
+        trackpadGeo,
+        new THREE.MeshPhysicalMaterial({
+          color: 0x141014,
+          roughness: 0.3,
+          metalness: 0.4,
+          clearcoat: 0.6,
+          clearcoatRoughness: 0.15,
+        }),
+      );
+      trackpadMesh.rotation.x = -Math.PI / 2;
+      trackpadMesh.position.set(0, kbdTopY, baseDepth * 0.77);
+      group.add(trackpadMesh);
+
+      // ── D. Cylindrical Titanium Hinge at (0, kbdTopY * 0.5, 0) ──
+      const hinge = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.018, 0.018, lw * 0.92, 24),
+        titaniumMat,
+      );
+      hinge.rotation.z = Math.PI / 2;
+      hinge.position.set(0, kbdTopY * 0.5, 0);
+      group.add(hinge);
+
+      // ── E. Display Lid (pivoting from hinge, tilted back ~112°) ──
+      const lidGroup = new THREE.Group();
+      lidGroup.position.set(0, kbdTopY * 0.5, 0);
+      // Natural ergonomic opening angle (~112° open = -22° / -0.38 rad from vertical)
+      lidGroup.rotation.x = -0.38;
+
+      const lidShape = roundedRect(lw, lh, 0.04);
+      const lidGeo = new THREE.ExtrudeGeometry(lidShape, {
+        depth: lidThick,
+        bevelEnabled: true,
+        bevelThickness: 0.008,
+        bevelSize: 0.008,
+        bevelSegments: 3,
+        curveSegments: 12,
       });
       lidGeo.center();
-      const lid = new THREE.Mesh(lidGeo, spaceGrayMat);
-      lid.position.set(0, lh * 0.45, 0);
-      group.add(lid);
+      const lidMesh = new THREE.Mesh(lidGeo, spaceGrayMat);
+      lidMesh.position.set(0, lh / 2, 0);
+      lidGroup.add(lidMesh);
 
-      // Screen
+      // Screen Texture
       const screenMat = new THREE.MeshBasicMaterial({
         map: screenTexture('tile'),
         toneMapped: false,
       });
-      const screen = new THREE.Mesh(new THREE.PlaneGeometry(lw * 0.94, lh * 0.92), screenMat);
-      screen.position.set(0, lh * 0.45, ldepth / 2 + 0.011);
-      group.add(screen);
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(lw * 0.95, lh * 0.94), screenMat);
+      screen.position.set(0, lh / 2, lidThick / 2 + 0.009);
+      lidGroup.add(screen);
 
       // Screen Glass Sheen
-      const glass = new THREE.Mesh(new THREE.PlaneGeometry(lw * 0.94, lh * 0.92), screenGlassMat);
-      glass.position.set(0, lh * 0.45, ldepth / 2 + 0.012);
-      group.add(glass);
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(lw * 0.95, lh * 0.94), screenGlassMat);
+      glass.position.set(0, lh / 2, lidThick / 2 + 0.010);
+      lidGroup.add(glass);
 
-      // Keyboard Chassis Base (tilted at ~105 deg hinge)
-      const baseGeo = new THREE.ExtrudeGeometry(roundedRect(lw, lh, 0.04), {
-        depth: ldepth + 0.008,
-        bevelEnabled: true,
-        bevelThickness: 0.01,
-        bevelSize: 0.01,
-      });
-      baseGeo.center();
-      const baseChassis = new THREE.Mesh(baseGeo, spaceGrayMat);
-      baseChassis.rotation.x = Math.PI / 2.3;
-      baseChassis.position.set(0, -0.06, lh * 0.45);
-      group.add(baseChassis);
-
-      // Keyboard deck texture/plane
-      const kbd = new THREE.Mesh(
-        new THREE.PlaneGeometry(lw * 0.88, lh * 0.52),
-        new THREE.MeshBasicMaterial({ color: 0x0c0a0c }),
-      );
-      kbd.rotation.x = -Math.PI / 2;
-      kbd.position.set(0, 0.018, -lh * 0.12);
-      baseChassis.add(kbd);
-
-      // Trackpad
-      const trackpad = new THREE.Mesh(
-        new THREE.PlaneGeometry(lw * 0.36, lh * 0.32),
-        new THREE.MeshBasicMaterial({ color: 0x1c171a }),
-      );
-      trackpad.rotation.x = -Math.PI / 2;
-      trackpad.position.set(0, 0.018, lh * 0.32);
-      baseChassis.add(trackpad);
+      group.add(lidGroup);
 
       group.position.set(...position);
       group.rotation.set(...rotation);
@@ -1066,10 +1212,10 @@ export default function Constellation({ active }: { active: PlatformId | null })
       });
     }
 
-    // Assemble the constellation
-    createTv([0.92, 0.62, -0.2], [0.03, -0.28, 0.02]);
-    createPhone([-1.72, -0.12, 0.44], [0.05, 0.32, -0.05]);
-    createLaptop([0.96, -1.18, 0.65], [0.08, -0.14, 0.03]);
+    // ── Assemble the constellation with harmonious cinematic staging ───────
+    createTv([0.38, 0.48, -0.40], [0.02, -0.15, 0.01]);
+    createPhone([-1.48, -0.12, 0.50], [0.04, 0.26, -0.04]);
+    createLaptop([0.90, -0.80, 0.55], [0.08, -0.20, 0.02]);
 
     /* ── pointer + viewport ──────────────────────────────────────────────── */
 
