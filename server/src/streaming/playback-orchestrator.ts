@@ -65,14 +65,22 @@ export class PlaybackOrchestrator {
     return this.orchestrate(req);
   }
 
+  private classificationCache = new Map<string, { data: { isTurkish: boolean; isAnime: boolean }; exp: number }>();
+
   /**
-   * Check if content is Turkish via TMDB
+   * Classify content language and genre via TMDB (cached)
    */
-  private async isTurkishContent(tmdbId: number, kind: 'movie' | 'series'): Promise<boolean> {
+  private async classifyContent(tmdbId: number, kind: 'movie' | 'series'): Promise<{ isTurkish: boolean; isAnime: boolean }> {
+    const cacheKey = `${kind}-${tmdbId}`;
+    const cached = this.classificationCache.get(cacheKey);
+    if (cached && Date.now() < cached.exp) {
+      return cached.data;
+    }
+
+    const fallback = { isTurkish: false, isAnime: false };
     const TMDB_API_KEY = process.env.TMDB_API_KEY;
     if (!TMDB_API_KEY) {
-      console.warn('[PlaybackOrchestrator] TMDB_API_KEY not set, cannot detect Turkish content');
-      return false;
+      return fallback;
     }
 
     try {
@@ -82,14 +90,36 @@ export class PlaybackOrchestrator {
       const apiParam = isBearer ? '' : `?api_key=${TMDB_API_KEY}`;
       
       const url = `https://api.themoviedb.org/3/${endpoint}/${tmdbId}${apiParam}`;
-      const response = await fetch(url, { headers: Object.keys(headers).length > 0 ? headers : undefined });
+      const response = await fetch(url, {
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
+        signal: AbortSignal.timeout(5000),
+      });
       
-      if (!response.ok) return false;
+      if (!response.ok) return fallback;
       
-      const data = await response.json() as { original_language?: string };
-      return data.original_language === 'tr';
+      const data = await response.json() as {
+        original_language?: string;
+        origin_country?: string[];
+        production_countries?: Array<{ iso_3166_1?: string }>;
+        genres?: Array<{ id: number; name: string }>;
+      };
+
+      const lang = (data.original_language || '').toLowerCase();
+      const originCountries = [
+        ...(Array.isArray(data.origin_country) ? data.origin_country : []),
+        ...(Array.isArray(data.production_countries) ? data.production_countries.map((c) => c.iso_3166_1 || '') : []),
+      ].map((c) => c.toUpperCase());
+
+      const genres = Array.isArray(data.genres) ? data.genres.map((g) => g.id) : [];
+
+      const isTurkish = lang === 'tr' || originCountries.includes('TR');
+      const isAnime = lang === 'ja' || (genres.includes(16) && (originCountries.includes('JP') || lang === 'ja'));
+
+      const result = { isTurkish, isAnime };
+      this.classificationCache.set(cacheKey, { data: result, exp: Date.now() + 2 * 3600 * 1000 });
+      return result;
     } catch {
-      return false;
+      return fallback;
     }
   }
 
@@ -103,18 +133,36 @@ export class PlaybackOrchestrator {
 
     const diagnostics: PlaybackDiagnostic[] = [];
 
-    // Turkish content optimization: use Dizibal exclusively
-    const isTurkish = await this.isTurkishContent(req.tmdbId, req.kind);
+    // Intelligent content classification: route Turkish to Dizibal, Anime to HiAnime
+    const { isTurkish, isAnime } = await this.classifyContent(req.tmdbId, req.kind);
+
     if (isTurkish) {
+      diagnostics.push({
+        code: 'TURKISH_CONTENT_DETECTED',
+        message: 'Turkish content detected - prioritizing Dizibal provider',
+        severity: 'info',
+      });
+      // Move Dizibal to index 0, filter out anime-specific providers
+      activeProviders = activeProviders.filter((p) => p.id !== 'hianime');
       const dizibal = activeProviders.find((p) => p.id === 'dizibal');
       if (dizibal) {
-        activeProviders = [dizibal];
-        diagnostics.push({
-          code: 'TURKISH_CONTENT_DETECTED',
-          message: 'Turkish content detected - using Dizibal provider exclusively for optimal streaming',
-          severity: 'info',
-        });
+        activeProviders = [dizibal, ...activeProviders.filter((p) => p.id !== 'dizibal')];
       }
+    } else if (isAnime) {
+      diagnostics.push({
+        code: 'ANIME_CONTENT_DETECTED',
+        message: 'Anime detected - prioritizing HiAnime provider for direct native HLS & soft subtitles',
+        severity: 'info',
+      });
+      // Move HiAnime to index 0, filter out Turkish-specific Dizibal
+      activeProviders = activeProviders.filter((p) => p.id !== 'dizibal');
+      const hianime = activeProviders.find((p) => p.id === 'hianime');
+      if (hianime) {
+        activeProviders = [hianime, ...activeProviders.filter((p) => p.id !== 'hianime')];
+      }
+    } else {
+      // General Hollywood / International content: filter out language-specific scrapers
+      activeProviders = activeProviders.filter((p) => p.id !== 'dizibal' && p.id !== 'hianime');
     }
 
     // Note disabled providers in diagnostics

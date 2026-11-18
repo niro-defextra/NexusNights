@@ -8,8 +8,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { Readable } from 'node:stream';
-import { getSportsFixtures } from './sports-fixtures.js';
+import { getSportsFixtures } from './sports-fixtures';
 
 interface CachedStream {
   streamUrl: string;
@@ -59,6 +58,70 @@ export const SPORTS_CHANNEL_MAP: Record<string, string> = {
   'beinar9': 'beINAR9',
   'beinarnews': 'beINARNews',
 };
+
+// Priority fallback candidates for high availability and automatic quality failover
+export const SPORTS_FALLBACK_CANDIDATES: Record<string, string[]> = {
+  'bein-1': ['beINAR', 'beINAR2', 'BEINSPORT1FR', 'beINARNews'],
+  'bein-2': ['beINAR2', 'beINAR', 'BEINSPORT2FR', 'beINAR3'],
+  'bein-3': ['beINAR3', 'beINAR2', 'BEINSPORT3FR', 'beINAR4'],
+  'bein-4': ['beINAR4', 'beINAR3', 'beINAR5', 'beINAR2'],
+  'bein-5': ['beINAR5', 'beINAR6', 'beINAR4', 'beINAR2'],
+  'bein-6': ['beINAR6', 'beINAR7', 'beINAR5', 'beINAR2'],
+  'bein-7': ['beINAR7', 'beINAR8', 'beINAR6', 'beINAR2'],
+  'bein-8': ['beINAR8', 'beINAR9', 'beINAR7', 'beINAR2'],
+  'bein-9': ['beINAR9', 'beINAR8', 'beINARNews', 'beINAR2'],
+  'bein-news': ['beINARNews', 'beINAR', 'beINAR2'],
+  'bein-fr-1': ['BEINSPORT1FR', 'beINAR', 'beINAR2'],
+  'bein-fr-2': ['BEINSPORT2FR', 'beINAR2', 'beINAR'],
+  'bein-fr-3': ['BEINSPORT3FR', 'beINAR3', 'beINAR2'],
+  'sky-pl': ['SkySportsPremierLeague', 'SkySportsMainEvent'],
+  'sky-main': ['SkySportsMainEvent', 'SkySportsPremierLeague'],
+};
+
+// DaddyLive channel ID mapping for external backup sniffing
+export const DADDY_ID_MAP: Record<string, number> = {
+  'bein-1': 91,
+  'bein-2': 92,
+  'bein-3': 93,
+  'bein-4': 94,
+  'bein-5': 95,
+  'bein-6': 96,
+  'bein-7': 97,
+  'bein-8': 98,
+  'bein-9': 99,
+  'bein-news': 100,
+  'bein-fr-1': 116,
+  'bein-fr-2': 117,
+  'bein-fr-3': 118,
+};
+
+/**
+ * Fetch with retry + timeout. Returns the Response (caller checks ok).
+ */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit & { timeoutMs?: number } = {},
+  retries = 3,
+): Promise<globalThis.Response> {
+  const { timeoutMs = 10000, ...rest } = init;
+  let lastErr: any;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(url, { ...rest, signal: AbortSignal.timeout(timeoutMs) });
+      // Retry on 5xx / 429; surface 4xx (except 429) immediately
+      if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 429)) {
+        return res;
+      }
+      lastErr = new Error(`HTTP ${res.status}`);
+    } catch (err: any) {
+      lastErr = err;
+    }
+    if (attempt < retries - 1) {
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+  throw lastErr ?? new Error('fetch failed');
+}
 
 class SportsResolver {
   private cache = new Map<string, CachedStream>();
@@ -119,12 +182,12 @@ class SportsResolver {
   private async doResolve(channelSlug: string): Promise<string> {
     console.log(`[SportsResolver] Resolving clean stream for slug: ${channelSlug}`);
     const playerUrl = `https://wideiptv.top/player/${channelSlug}`;
-    const res = await fetch(playerUrl, {
+    const res = await fetchWithRetry(playerUrl, {
       headers: {
         'Referer': `https://wideiptv.top/daddy.php?stream=${channelSlug}`,
         'User-Agent': UA,
       },
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     });
 
     if (!res.ok) {
@@ -162,6 +225,114 @@ class SportsResolver {
   invalidate(channelSlug: string) {
     this.cache.delete(channelSlug);
   }
+
+  /**
+   * Sniff backup stream from alternate providers using Chromium
+   */
+  async sniffBackupStream(channelKey: string): Promise<string | null> {
+    const key = channelKey.toLowerCase().trim();
+    const daddyId = DADDY_ID_MAP[key];
+    if (!daddyId) return null;
+
+    const cacheKey = `backup-sniff-${key}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.streamUrl;
+    }
+
+    try {
+      console.log(`[SportsSniffer] Sniffing backup provider for ${key} (daddyId: ${daddyId})...`);
+      const { chromium } = await import('playwright');
+      const browser = await chromium.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-gpu',
+          '--single-process',
+          '--disable-extensions',
+          '--mute-audio',
+          '--window-size=600,400',
+        ],
+      });
+
+      const context = await browser.newContext({
+        userAgent: UA,
+        ignoreHTTPSErrors: true,
+      });
+
+      const page = await context.newPage();
+
+      // Block heavy assets and analytics for rapid sniffing
+      await page.route('**/*', (route) => {
+        const u = route.request().url();
+        const type = route.request().resourceType();
+        if (type === 'image' || type === 'font' || u.includes('google') || u.includes('analytics') || u.includes('doubleclick') || u.includes('pop')) {
+          return route.abort();
+        }
+        return route.continue();
+      }).catch(() => {});
+
+      page.on('popup', (popup) => { void popup.close().catch(() => {}); });
+
+      let capturedStreamUrl: string | null = null;
+
+      page.on('request', (req) => {
+        const u = req.url();
+        if ((u.includes('.m3u8') || u.includes('/playlist/')) && !u.includes('ping') && !u.includes('analytics')) {
+          capturedStreamUrl = u;
+        }
+      });
+
+      page.on('response', (res) => {
+        const u = res.url();
+        const ct = (res.headers()['content-type'] || '').toLowerCase();
+        if ((ct.includes('mpegurl') || u.includes('.m3u8')) && !u.includes('ping') && !u.includes('analytics')) {
+          capturedStreamUrl = u;
+        }
+      });
+
+      const targets = [
+        `https://thedaddy.li/stream/stream-${daddyId}.php`,
+        `https://thedaddy.li/player/stream-${daddyId}.php`,
+      ];
+
+      for (const target of targets) {
+        if (capturedStreamUrl) break;
+        try {
+          await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 8000 });
+          // Synthetic play click
+          await page.waitForTimeout(1200);
+          await page.evaluate(`(() => {
+            const btn = document.querySelector('button, .play-button, video, div[class*="play"]');
+            if (btn && typeof btn.click === 'function') btn.click();
+          })()`).catch(() => {});
+          await page.waitForTimeout(2500);
+        } catch {
+          continue;
+        }
+      }
+
+      await page.close().catch(() => {});
+      await context.close().catch(() => {});
+      await browser.close().catch(() => {});
+
+      if (capturedStreamUrl) {
+        console.log(`[SportsSniffer] ✅ Sniffed backup stream for ${key}: ${capturedStreamUrl}`);
+        this.cache.set(cacheKey, {
+          streamUrl: capturedStreamUrl,
+          token: '',
+          channelSlug: key,
+          expiresAt: Date.now() + 30 * 60 * 1000,
+        });
+        return capturedStreamUrl;
+      }
+    } catch (err: any) {
+      console.warn(`[SportsSniffer] Sniffing backup failed for ${key}:`, err?.message || err);
+    }
+
+    return null;
+  }
 }
 
 export const sportsResolver = new SportsResolver();
@@ -174,80 +345,108 @@ export const sportsRouter = Router();
 
 /**
  * GET /api/sports/stream/:channelKey/manifest.m3u8
- * Serves and rewrites the master HLS manifest
+ * Serves and rewrites the master HLS manifest with multi-candidate failover & backup sniffing
  */
 sportsRouter.get('/stream/:channelKey/manifest.m3u8', async (req: Request, res: Response) => {
   const { channelKey } = req.params;
-  const slug = sportsResolver.getChannelSlug(channelKey);
+  const canonicalSlug = sportsResolver.getChannelSlug(channelKey) || channelKey;
 
-  if (!slug) {
-    return res.status(404).send(`Unknown sports channel key: ${channelKey}`);
+  const forceFresh = req.query.refresh === 'true' || req.query._r !== undefined;
+  const isBackupRequested = req.query.backup === 'true' || req.query.provider === 'backup';
+
+  // Gather ordered candidates: primary, secondary alternatives, and fallbacks
+  const configuredFallbacks = SPORTS_FALLBACK_CANDIDATES[channelKey.toLowerCase()] || [];
+  let candidateSlugs: string[];
+  if (isBackupRequested) {
+    candidateSlugs = [...configuredFallbacks.slice(1), canonicalSlug];
+  } else {
+    candidateSlugs = [canonicalSlug, ...configuredFallbacks.filter((s) => s !== canonicalSlug)];
   }
 
-  try {
-    let streamUrl = await sportsResolver.resolveStream(slug);
-    let upstreamRes = await fetch(streamUrl, {
-      headers: {
-        'Referer': 'https://wideiptv.top/',
-        'User-Agent': UA,
-      },
-      signal: AbortSignal.timeout(10000),
-    });
+  let manifestText: string | null = null;
+  let baseUrl: string | null = null;
+  let successfulSlug: string | null = null;
 
-    // If upstream token expired, retry once with force fresh resolution
-    if (upstreamRes.status === 403) {
-      console.warn(`[SportsProxy] Upstream 403 for ${slug}, re-resolving fresh token...`);
-      streamUrl = await sportsResolver.resolveStream(slug, true);
-      upstreamRes = await fetch(streamUrl, {
+  // Try direct tokenized feeds first with quality check
+  for (const slug of candidateSlugs) {
+    try {
+      if (forceFresh) sportsResolver.invalidate(slug);
+      let streamUrl = await sportsResolver.resolveStream(slug, forceFresh);
+      let upstreamRes = await fetchWithRetry(streamUrl, {
         headers: {
+          'Origin': 'https://wideiptv.top',
           'Referer': 'https://wideiptv.top/',
           'User-Agent': UA,
         },
-        signal: AbortSignal.timeout(10000),
-      });
-    }
+        timeoutMs: 8000,
+      }, 2);
 
-    if (!upstreamRes.ok) {
-      return res.status(upstreamRes.status).send(`Upstream manifest failed (HTTP ${upstreamRes.status})`);
-    }
-
-    let manifestText = await upstreamRes.text();
-    let baseUrl = streamUrl;
-
-    // Detect degraded audio-only stream upstream (missing video codecs or resolution)
-    const hasVideo =
-      manifestText.includes('RESOLUTION=') ||
-      manifestText.includes('avc1') ||
-      manifestText.includes('hvc1') ||
-      manifestText.includes('tracks-v');
-
-    if (!hasVideo && (slug === 'beINAR' || channelKey.toLowerCase().includes('bein-1'))) {
-      console.warn(`[SportsProxy] Stream ${slug} is degraded upstream (audio-only / no video). Automatically failing over to high-definition feed (BEINSPORT1FR)...`);
-      try {
-        const fallbackStreamUrl = await sportsResolver.resolveStream('BEINSPORT1FR');
-        const fallbackRes = await fetch(fallbackStreamUrl, {
+      // If token expired upstream, re-resolve once
+      if (upstreamRes.status === 403) {
+        sportsResolver.invalidate(slug);
+        streamUrl = await sportsResolver.resolveStream(slug, true);
+        upstreamRes = await fetchWithRetry(streamUrl, {
           headers: {
+            'Origin': 'https://wideiptv.top',
             'Referer': 'https://wideiptv.top/',
             'User-Agent': UA,
           },
-          signal: AbortSignal.timeout(10000),
-        });
-        if (fallbackRes.ok) {
-          const fallbackText = await fallbackRes.text();
-          if (
-            fallbackText.includes('RESOLUTION=') ||
-            fallbackText.includes('avc1') ||
-            fallbackText.includes('tracks-v')
-          ) {
-            manifestText = fallbackText;
-            baseUrl = fallbackStreamUrl;
-          }
+          timeoutMs: 8000,
+        }, 2);
+      }
+
+      if (upstreamRes.ok) {
+        const text = await upstreamRes.text();
+        const hasVideo =
+          text.includes('RESOLUTION=') ||
+          text.includes('avc1') ||
+          text.includes('hvc1') ||
+          text.includes('tracks-v');
+
+        if (hasVideo) {
+          manifestText = text;
+          baseUrl = streamUrl;
+          successfulSlug = slug;
+          break;
+        } else if (!manifestText) {
+          manifestText = text;
+          baseUrl = streamUrl;
+          successfulSlug = slug;
         }
-      } catch (fbErr: any) {
-        console.warn(`[SportsProxy] Fallback resolution failed for ${slug}:`, fbErr.message);
+      }
+    } catch (candErr: any) {
+      console.warn(`[SportsProxy] Slug ${slug} for ${channelKey} failed:`, candErr?.message);
+    }
+  }
+
+  // If direct candidates failed or were degraded, trigger backup sniffer
+  if (!manifestText || !baseUrl) {
+    console.log(`[SportsProxy] Direct stream candidates exhausted for ${channelKey}, triggering backup sniffer...`);
+    const sniffedUrl = await sportsResolver.sniffBackupStream(channelKey);
+    if (sniffedUrl) {
+      try {
+        const sniffRes = await fetchWithRetry(sniffedUrl, {
+          headers: {
+            'User-Agent': UA,
+            'Referer': 'https://thedaddy.li/',
+          },
+          timeoutMs: 10000,
+        }, 2);
+        if (sniffRes.ok) {
+          manifestText = await sniffRes.text();
+          baseUrl = sniffedUrl;
+        }
+      } catch (sniffErr: any) {
+        console.warn(`[SportsProxy] Backup stream fetch failed for ${channelKey}:`, sniffErr?.message);
       }
     }
+  }
 
+  if (!manifestText || !baseUrl) {
+    return res.status(502).send(`Failed to resolve sports stream for ${channelKey}`);
+  }
+
+  try {
     // Rewrite sub-playlist URLs to fully-qualified absolute URLs for TV and AVPlay players
     const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
     const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
@@ -277,8 +476,8 @@ sportsRouter.get('/stream/:channelKey/manifest.m3u8', async (req: Request, res: 
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.send(rewrittenLines.join('\n'));
   } catch (err: any) {
-    console.error(`[SportsProxy] Manifest error for ${slug}:`, err.message);
-    res.status(502).send(`Failed to resolve sports stream: ${err.message}`);
+    console.error(`[SportsProxy] Manifest processing error for ${channelKey}:`, err.message);
+    res.status(502).send(`Failed to process sports stream: ${err.message}`);
   }
 });
 
@@ -295,13 +494,14 @@ sportsRouter.get('/stream/:channelKey/sub-playlist.m3u8', async (req: Request, r
   }
 
   try {
-    const upstreamRes = await fetch(targetUrl, {
+    const upstreamRes = await fetchWithRetry(targetUrl, {
       headers: {
+        'Origin': 'https://wideiptv.top',
         'Referer': 'https://wideiptv.top/',
         'User-Agent': UA,
       },
-      signal: AbortSignal.timeout(12000),
-    });
+      timeoutMs: 12000,
+    }, 3);
 
     if (!upstreamRes.ok) {
       return res.status(upstreamRes.status).send(`Upstream sub-playlist returned ${upstreamRes.status}`);
@@ -356,7 +556,7 @@ sportsRouter.get('/stream/:channelKey/sub-playlist.m3u8', async (req: Request, r
 
 /**
  * GET /api/sports/stream/:channelKey/segment.ts?url=...
- * Streams binary video/audio transport stream segments directly
+ * Streams binary video/audio transport stream segments with kernel-safe buffering & 0 crash risk
  */
 sportsRouter.get('/stream/:channelKey/segment.ts', async (req: Request, res: Response) => {
   const targetUrl = req.query.url as string;
@@ -366,36 +566,31 @@ sportsRouter.get('/stream/:channelKey/segment.ts', async (req: Request, res: Res
   }
 
   try {
-    const upstreamRes = await fetch(targetUrl, {
+    const upstreamRes = await fetchWithRetry(targetUrl, {
       headers: {
+        'Origin': 'https://wideiptv.top',
         'Referer': 'https://wideiptv.top/',
         'User-Agent': UA,
       },
-      signal: AbortSignal.timeout(30000),
-    });
+      timeoutMs: 30000,
+    }, 3);
 
     if (!upstreamRes.ok) {
       return res.status(upstreamRes.status).send(`Segment error ${upstreamRes.status}`);
     }
 
     const contentType = upstreamRes.headers.get('content-type') || 'video/MP2T';
-    const contentLength = upstreamRes.headers.get('content-length');
-
     res.setHeader('Content-Type', contentType);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
-    if (contentLength) {
-      res.setHeader('Content-Length', contentLength);
-    }
 
-    if (!upstreamRes.body) {
-      return res.end();
-    }
-
-    // Direct kernel stream piping with automatic backpressure management
-    Readable.fromWeb(upstreamRes.body as any).pipe(res);
+    // Buffer fully into Buffer to avoid stream abort unhandled exceptions on Node 22/24
+    const buffer = Buffer.from(await upstreamRes.arrayBuffer());
+    res.setHeader('Content-Length', buffer.byteLength);
+    res.end(buffer);
   } catch (err: any) {
     if (!res.headersSent) {
+      console.error(`[SportsProxy] Segment fetch error:`, err.message);
       res.status(502).send('Failed to fetch segment');
     }
   }

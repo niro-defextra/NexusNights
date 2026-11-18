@@ -306,114 +306,7 @@ export const CHANNELS_CATALOG: Omit<SportsChannel, 'programs' | 'currentProgram'
   },
 ];
 
-// Curated Big Matches fallback with authentic high-resolution club crests, stadiums, and commentators
-export const TODAY_BIG_MATCHES: BigMatchFixture[] = [
-  {
-    id: 'match-1',
-    league: 'تصفيات كأس أمم إفريقيا • قمة الليلة',
-    leagueBadge: 'AFCON Qualification',
-    leagueKey: 'arab',
-    homeTeam: 'المغرب',
-    homeCrest: 'https://media.api-sports.io/football/teams/31.png',
-    awayTeam: 'النيجر',
-    awayCrest: 'https://media.api-sports.io/football/teams/1504.png',
-    status: 'live',
-    minute: "45'",
-    time: '09:30 م',
-    channelSlug: 'bein-1',
-    channelName: 'beIN SPORTS 1 HD',
-    stadium: 'المجمع الرياضي الأمير مولاي عبد الله • الرباط',
-    commentator: 'جواد بدة',
-    backdrop: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1600&auto=format&fit=crop',
-  },
-  {
-    id: 'match-2',
-    league: 'دوري الأمم الأوروبية',
-    leagueBadge: 'UEFA Nations League',
-    leagueKey: 'europe',
-    homeTeam: 'ويلز',
-    homeCrest: 'https://media.api-sports.io/football/teams/767.png',
-    awayTeam: 'البرتغال',
-    awayCrest: 'https://media.api-sports.io/football/teams/27.png',
-    status: 'live',
-    minute: "50'",
-    time: '09:00 م',
-    channelSlug: 'bein-2',
-    channelName: 'beIN SPORTS 2 HD',
-    stadium: 'ملعب كارديف سيتي',
-    commentator: 'حفيظ دراجي',
-    backdrop: 'https://images.unsplash.com/photo-1551958219-acbc608c6377?q=80&w=1600&auto=format&fit=crop',
-  },
-  {
-    id: 'match-3',
-    league: 'دوري الأمم الأوروبية',
-    leagueBadge: 'UEFA Nations League',
-    leagueKey: 'europe',
-    homeTeam: 'بولندا',
-    homeCrest: 'https://media.api-sports.io/football/teams/24.png',
-    awayTeam: 'السويد',
-    awayCrest: 'https://media.api-sports.io/football/teams/29.png',
-    status: 'upcoming',
-    time: '10:45 م',
-    channelSlug: 'bein-3',
-    channelName: 'beIN SPORTS 3 HD',
-    stadium: 'الملعب الوطني • وارسو',
-    commentator: 'خليل البلوشي',
-    backdrop: 'https://images.unsplash.com/photo-1518091043644-c1d4457512c6?q=80&w=1600&auto=format&fit=crop',
-  },
-  {
-    id: 'match-4',
-    league: 'دوري الأمم الأوروبية',
-    leagueBadge: 'UEFA Nations League',
-    leagueKey: 'europe',
-    homeTeam: 'بلجيكا',
-    homeCrest: 'https://media.api-sports.io/football/teams/1.png',
-    awayTeam: 'إيطاليا',
-    awayCrest: 'https://media.api-sports.io/football/teams/768.png',
-    status: 'upcoming',
-    time: '10:30 م',
-    channelSlug: 'bein-1',
-    channelName: 'beIN SPORTS 1 HD',
-    stadium: 'ملعب الملك بودوان • بروكسل',
-    commentator: 'عصام الشوالي',
-    backdrop: 'https://images.unsplash.com/photo-1522778119026-d647f0596c20?q=80&w=1600&auto=format&fit=crop',
-  },
-  {
-    id: 'match-5',
-    league: 'تصفيات كأس أمم إفريقيا',
-    leagueBadge: 'AFCON Qualification',
-    leagueKey: 'arab',
-    homeTeam: 'مصر',
-    homeCrest: 'https://media.api-sports.io/football/teams/32.png',
-    awayTeam: 'مالاوي',
-    awayCrest: 'https://media.api-sports.io/football/teams/1506.png',
-    status: 'upcoming',
-    time: '11:00 م',
-    channelSlug: 'bein-1',
-    channelName: 'beIN SPORTS 1 HD',
-    stadium: 'ستاد القاهرة الدولي',
-    commentator: 'علي محمد علي',
-    backdrop: 'https://images.unsplash.com/photo-1560272564-c83b66b1ad12?q=80&w=1600&auto=format&fit=crop',
-  },
-  {
-    id: 'match-6',
-    league: 'دوري الأمم الأوروبية',
-    leagueBadge: 'UEFA Nations League',
-    leagueKey: 'europe',
-    homeTeam: 'فرنسا',
-    homeCrest: 'https://media.api-sports.io/football/teams/2.png',
-    awayTeam: 'تركيا',
-    awayCrest: 'https://media.api-sports.io/football/teams/770.png',
-    status: 'upcoming',
-    time: '11:00 م',
-    channelSlug: 'bein-4',
-    channelName: 'beIN SPORTS 4 HD',
-    stadium: 'ستاد دو فرانس • باريس',
-    commentator: 'حسن العيدروس',
-    backdrop: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1600&auto=format&fit=crop',
-  },
-];
-
+// NOTE: No hardcoded/fake match data. Matches come only from the real EPG feed.
 /**
  * Fetches dynamic sports match fixtures from backend /api/sports/fixtures with graceful fallback
  */
@@ -444,9 +337,10 @@ export async function fetchSportsFixtures(): Promise<BigMatchFixture[]> {
       }
     }
   } catch (err) {
-    console.warn('[SportsService] Server fixtures fetch failed, using fallback:', err);
+    console.warn('[SportsService] Server fixtures fetch failed:', err);
   }
-  return TODAY_BIG_MATCHES;
+  // Never fabricate fake matches. Return empty so the UI shows "no matches".
+  return [];
 }
 
 const CUSTOM_STREAMS_KEY = 'nexusnight_sports_custom_streams';
@@ -689,8 +583,14 @@ export async function fetchSportsEPG(forceRefresh = false): Promise<SportsChanne
     }
   }
 
+  // Deduplicate channels: the same channel object can be registered under several
+  // keys (e.g. beIN 1 under its catalog id, the EPG id and a UUID), which
+  // previously produced duplicate entries and duplicate React keys.
+  const seenChannelIds = new Set<string>();
   const result: SportsChannel[] = [];
   for (const channel of channelsMap.values()) {
+    if (seenChannelIds.has(channel.id)) continue;
+    seenChannelIds.add(channel.id);
     channel.programs.sort((a, b) => a.start.getTime() - b.start.getTime());
     const current = channel.programs.find((p) => p.isLive);
     const next = channel.programs.find((p) => p.isUpcoming);

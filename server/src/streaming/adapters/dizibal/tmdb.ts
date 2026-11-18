@@ -4,16 +4,15 @@
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
-// Lazy load TMDB key to ensure dotenv has been loaded
+// In-memory cache for TMDB results (2 hour TTL)
+const tmdbCache = new Map<string, { data: TmdbInfo; exp: number }>();
+const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
+
 function getTmdbApiKey(): string {
-  const key = process.env.TMDB_API_KEY || '';
-  if (!key) {
-    throw new Error('TMDB_API_KEY not configured');
-  }
-  return key;
+  return process.env.TMDB_API_KEY || '';
 }
 
-interface TmdbInfo {
+export interface TmdbInfo {
   title: string;
   originalTitle: string;
   turkishTitle: string;
@@ -40,7 +39,26 @@ export async function getTmdbInfo(
   tmdbId: number,
   mediaType: 'movie' | 'tv'
 ): Promise<TmdbInfo> {
-  const TMDB_API_KEY = getTmdbApiKey(); // Lazy load
+  const cacheKey = `${mediaType}-${tmdbId}`;
+  const cached = tmdbCache.get(cacheKey);
+  if (cached && Date.now() < cached.exp) {
+    return cached.data;
+  }
+
+  const fallback: TmdbInfo = {
+    title: '',
+    originalTitle: '',
+    turkishTitle: '',
+    originalLanguage: '',
+    year: '',
+    posterPath: null,
+  };
+
+  const TMDB_API_KEY = getTmdbApiKey();
+  if (!TMDB_API_KEY) {
+    console.warn('[Dizibal] TMDB_API_KEY not configured, using fallback');
+    return fallback;
+  }
 
   const endpoint = mediaType === 'movie' ? 'movie' : 'tv';
   
@@ -54,9 +72,14 @@ export async function getTmdbInfo(
   const url = `${TMDB_BASE_URL}/${endpoint}/${tmdbId}${apiParam}${isBearer ? '?' : ''}language=en-US`;
 
   try {
-    const response = await fetch(url, { headers: Object.keys(headers).length > 0 ? headers : undefined });
+    const response = await fetch(url, {
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
+      signal: AbortSignal.timeout(6000),
+    });
+
     if (!response.ok) {
-      throw new Error(`TMDB API error: ${response.status}`);
+      console.warn(`[Dizibal] TMDB API HTTP ${response.status} for ${mediaType}/${tmdbId}`);
+      return fallback;
     }
 
     const data = (await response.json()) as TmdbResponse;
@@ -66,7 +89,10 @@ export async function getTmdbInfo(
     let turkishTitle = '';
 
     try {
-      const responseTr = await fetch(urlTr, { headers: Object.keys(headers).length > 0 ? headers : undefined });
+      const responseTr = await fetch(urlTr, {
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
+        signal: AbortSignal.timeout(4000),
+      });
       if (responseTr.ok) {
         const dataTr = (await responseTr.json()) as TmdbResponse;
         turkishTitle = dataTr.title || dataTr.name || '';
@@ -82,7 +108,7 @@ export async function getTmdbInfo(
     const year = releaseDate ? releaseDate.split('-')[0] : '';
     const posterPath = data.poster_path || null;
 
-    return {
+    const result: TmdbInfo = {
       title,
       originalTitle,
       turkishTitle,
@@ -90,8 +116,11 @@ export async function getTmdbInfo(
       year,
       posterPath,
     };
-  } catch (error) {
-    console.error('[Dizibal] TMDB API error:', error);
-    throw error;
+
+    tmdbCache.set(cacheKey, { data: result, exp: Date.now() + CACHE_TTL_MS });
+    return result;
+  } catch (error: any) {
+    console.warn('[Dizibal] TMDB fetch error:', error?.message || error);
+    return fallback;
   }
 }

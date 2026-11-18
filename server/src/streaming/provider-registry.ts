@@ -10,6 +10,7 @@ import { VidriftAdapter } from './adapters/vidrift-adapter';
 import { VidfastAdapter } from './adapters/vidfast-adapter';
 import { AetherAdapter } from './adapters/aether-adapter';
 import { VidloveAdapter } from './adapters/vidlove-adapter';
+import { HiAnimeAdapter } from './adapters/hianime-adapter';
 import { providerHealth } from './provider-health';
 
 export class ProviderRegistry {
@@ -22,6 +23,7 @@ export class ProviderRegistry {
   }
 
   private registerDefaults() {
+    this.register(new HiAnimeAdapter());  // Dedicated anime provider
     this.register(new DizibalAdapter());  // Turkish content priority
     this.register(new VidriftAdapter());   // Fast, multi-lang, clean UI
     this.register(new VidfastAdapter());   // Fast, themed, clean UI
