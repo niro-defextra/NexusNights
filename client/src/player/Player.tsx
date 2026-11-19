@@ -384,6 +384,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
               season: media.season,
               episode: media.episode,
               provider: source.provider,
+              targetUrl: source.embedUrl || undefined,
             }),
             signal: ac.signal,
           });
@@ -608,6 +609,13 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           // bytes are unusable. After a few in a row, give up on this source and fail over.
           if (d.details === Hls.ErrorDetails.FRAG_PARSING_ERROR && ++fragParseFails >= 3) {
             console.log('[Player] Repeated fragParsingError, failing over to alternative source');
+            fail('playback_failed', true);
+            return;
+          }
+
+          // If manifest cannot be parsed at all (e.g. 404/HTML returned instead of M3U8), failover immediately!
+          if (d.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR) {
+            console.warn('[Player] Fatal manifestParsingError, failing over immediately to alternative source');
             fail('playback_failed', true);
             return;
           }

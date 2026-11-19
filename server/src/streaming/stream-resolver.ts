@@ -221,6 +221,11 @@ export class StreamResolver {
         referer: referer,
       });
     } else {
+      const isArab = req.provider && /arab|moviz|seed|liiivideo|vidspeed|abyssplayer|vidmoly/i.test(req.provider);
+      if (isArab) {
+        throw new Error(`Cannot sniff Arabic provider without a targetUrl`);
+      }
+
       // General M3U8 streaming providers in strict priority order: Aether -> VixSrc -> Vidrift
       providerTargets = [
         {
@@ -355,6 +360,7 @@ export class StreamResolver {
               });
 
               page.on('response', (res) => {
+                if (res.status() >= 400) return;
                 const u = res.url();
                 const cType = (res.headers()['content-type'] || '').toLowerCase();
                 const isMpeg = cType.includes('mpegurl') || cType.includes('application/x-mpegurl');

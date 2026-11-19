@@ -109,10 +109,12 @@ function prepareProviderSources(config: PlaybackConfig): void {
 function convertToNativeSources(sources: PlaybackSourcePublic[]): PlaybackSourcePublic[] {
   return sources.map((s) => {
     if (s.type === 'embed') {
+      const origUrl = s.embedUrl || s.url;
       return {
         ...s,
         url: `/api/streaming/resolve-native`,
         type: 'hls' as const,
+        embedUrl: origUrl,
         provider: `${s.provider} (Native Sniffer)`,
       };
     }
@@ -627,11 +629,19 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         }
       }
 
-      // Tier 2: Multi-target concurrent stealth sniffer (Aether, VixSrc, Vidrift)
+      // Tier 2: Multi-target concurrent stealth sniffer (Aether, VixSrc, Vidrift, ArabMedia embeds)
       if (!nativeStream && !localMediaId && snifferEnabled && !hasDirectSource) {
         try {
+          const topEmbedUrl = (playbackConfig.source?.type === 'embed') ? (playbackConfig.source.embedUrl || playbackConfig.source.url) : undefined;
+          const topProvider = playbackConfig.source?.provider;
+
           console.log(`[Playback] Auto-resolving native direct stream for movie ${tmdbId}...`);
-          nativeStream = await streamResolver.resolve({ tmdbId, kind: 'movie' });
+          nativeStream = await streamResolver.resolve({
+            tmdbId,
+            kind: 'movie',
+            provider: topProvider,
+            targetUrl: topEmbedUrl,
+          });
         } catch (sniffErr: any) {
           console.warn(`[Playback] Native auto-resolve fallback to embed for movie ${tmdbId}:`, sniffErr.message);
         }
@@ -656,10 +666,12 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
 
       // Guarantee 100% native player playback (eliminate third-party embeds)
       if (playbackConfig.source && playbackConfig.source.type === 'embed') {
+        const origUrl = playbackConfig.source.embedUrl || playbackConfig.source.url;
         playbackConfig.source = {
           ...playbackConfig.source,
           url: `/api/streaming/resolve-native`,
           type: 'hls',
+          embedUrl: origUrl,
           provider: `${playbackConfig.source.provider} (Native Sniffer)`,
         };
       }
@@ -845,11 +857,21 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         }
       }
 
-      // Tier 2: Multi-target concurrent stealth sniffer (Aether, VixSrc, Vidrift)
+      // Tier 2: Multi-target concurrent stealth sniffer (Aether, VixSrc, Vidrift, ArabMedia embeds)
       if (!nativeStream && !localMediaId && snifferEnabled && !hasDirectSource) {
         try {
+          const topEmbedUrl = (playbackConfig.source?.type === 'embed') ? (playbackConfig.source.embedUrl || playbackConfig.source.url) : undefined;
+          const topProvider = playbackConfig.source?.provider;
+
           console.log(`[Playback] Auto-resolving native direct stream for TV ${tmdbId} S${season}E${episode}...`);
-          nativeStream = await streamResolver.resolve({ tmdbId, kind: 'series', season, episode });
+          nativeStream = await streamResolver.resolve({
+            tmdbId,
+            kind: 'series',
+            season,
+            episode,
+            provider: topProvider,
+            targetUrl: topEmbedUrl,
+          });
         } catch (sniffErr: any) {
           console.warn(`[Playback] Native auto-resolve fallback to embed for TV ${tmdbId} S${season}E${episode}:`, sniffErr.message);
         }
@@ -874,10 +896,12 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
 
       // Guarantee 100% native player playback (eliminate third-party embeds)
       if (playbackConfig.source && playbackConfig.source.type === 'embed') {
+        const origUrl = playbackConfig.source.embedUrl || playbackConfig.source.url;
         playbackConfig.source = {
           ...playbackConfig.source,
           url: `/api/streaming/resolve-native`,
           type: 'hls',
+          embedUrl: origUrl,
           provider: `${playbackConfig.source.provider} (Native Sniffer)`,
         };
       }
@@ -1980,7 +2004,20 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     const season = req.body?.season ? parseInt(req.body.season, 10) : undefined;
     const episode = req.body?.episode ? parseInt(req.body.episode, 10) : undefined;
     const provider = req.body?.provider ? String(req.body.provider).replace(/\s*\([^)]*\)/g, '').trim() : undefined;
-    const targetUrl = (req.body?.targetUrl || req.body?.embedUrl) ? String(req.body.targetUrl || req.body.embedUrl) : undefined;
+    let targetUrl = (req.body?.targetUrl || req.body?.embedUrl) ? String(req.body.targetUrl || req.body.embedUrl) : undefined;
+
+    // Fallback: If targetUrl is missing but provider is Arabic, resolve targetUrl via ArabAdapter
+    if (!targetUrl && provider && /arab|moviz|seed/i.test(provider)) {
+      const arabAdapter = providerRegistry.get('arab-media');
+      if (arabAdapter) {
+        try {
+          const arabResult = await arabAdapter.resolve({ tmdbId, kind, season, episode });
+          if (arabResult.sources && arabResult.sources.length > 0) {
+            targetUrl = arabResult.sources[0].embedUrl || arabResult.sources[0].url;
+          }
+        } catch {}
+      }
+    }
 
     try {
       const resolved = await streamResolver.resolve({ tmdbId, kind, season, episode, provider, targetUrl });

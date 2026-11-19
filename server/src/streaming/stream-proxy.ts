@@ -57,6 +57,14 @@ function rewriteManifest(manifestText: string, baseUrl: string, streamId: string
 
 /** Returns headers needed to pass hotlink / CORS protection */
 function proxyHeaders(stream: ResolvedStream): Record<string, string> {
+  const safeHeaders: Record<string, string> = {};
+  for (const [k, v] of Object.entries(stream.headers || {})) {
+    const lk = k.toLowerCase();
+    if (!['host', 'connection', 'content-length', 'accept-encoding'].includes(lk)) {
+      safeHeaders[k] = v;
+    }
+  }
+
   let referer = stream.headers['referer'];
   if (!referer && stream.playlistUrl) {
     try {
@@ -74,6 +82,7 @@ function proxyHeaders(stream: ResolvedStream): Record<string, string> {
   origin = origin || 'https://vixsrc.to';
 
   return {
+    ...safeHeaders,
     'User-Agent': stream.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     'Referer': referer,
     'Origin': origin,
