@@ -1,146 +1,223 @@
-# NexusNight
+<div align="center">
 
-A Netflix-style **watch-together Discord Activity**. Browse a catalogue (powered by TMDB), open a room inside a Discord voice channel, and watch in sync with your friends: shared playback, chat, reactions and host controls.
+<img src="banner.png" alt="NexusNights Banner" width="100%" />
 
-- **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS v4 (English / Arabic UI)
-- **Backend:** Node.js + Express + Socket.IO + TypeScript
-- **Auth:** Discord OAuth2 (server-side code exchange + JWT sessions)
-- **Playback:** local files via ffmpeg → HLS, or external embed providers with automatic failover
+# NEXUSNIGHTS
 
-## Features
+**Your Ultimate Multi-Platform Cinematic Streaming & Watch-Together Experience**
 
-- **Watch together:** the server holds the authoritative room state (`mediaId`, `position`, `playing`), and clients only request changes. Drift is corrected automatically (small drift → playback-rate nudge, large drift → seek).
-- **Rooms & permissions:** host / host + chosen / everyone modes, request-control flow, host handover, invite codes, room discovery.
-- **Late joiners** get a snapshot and jump to the current position. If someone is loading or buffering, the room waits for them.
-- **Chat & reactions** inside the player (work in fullscreen). Messages are plain text, escaped and rate-limited.
-- **Continue watching** stored per Discord user.
-- **Library:** scans a media folder, parses filenames, enriches metadata from TMDB (per language), generates thumbnails, sprites and subtitles.
-- **Multi-provider streaming** with health tracking and failover, plus a providers dashboard.
-- **External subtitles:** search and download subtitles from OpenSubtitles.com in 75+ languages directly from the player.
+[![Version](https://img.shields.io/badge/version-1.2.0-red.svg?style=flat-square)](package.json)
+[![React](https://img.shields.io/badge/React-18.3-61DAFB?style=flat-square&logo=react)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?style=flat-square&logo=typescript)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=flat-square&logo=node.js)](https://nodejs.org/)
+[![Socket.IO](https://img.shields.io/badge/Socket.IO-4.8-010101?style=flat-square&logo=socket.io)](https://socket.io/)
+[![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4-06B6D4?style=flat-square&logo=tailwindcss)](https://tailwindcss.com/)
+[![Android](https://img.shields.io/badge/Android-APK-3DDC84?style=flat-square&logo=android)](android/)
+[![Samsung Tizen](https://img.shields.io/badge/Samsung_Tizen-TV_WGT-1283EE?style=flat-square)](NexusNightsTv/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 
-## Requirements
+<p align="center">
+  <b>Watch • Stream • Enjoy</b><br>
+  Browse a limitless catalog powered by TMDB, stream Hollywood & Arabic cinema in 100% native HLS, watch live sports, or host synchronized Watch-Together rooms inside Discord or the browser.
+</p>
 
-- Node.js **20+**
-- **ffmpeg** and **ffprobe** on your `PATH` (or set `FFMPEG_PATH` / `FFPROBE_PATH`)
-- A [Discord application](https://discord.com/developers/applications)
-- A [TMDB](https://www.themoviedb.org/settings/api) API key or read-access token
+[✨ Key Features](#-key-features) •
+[📱 Cross-Platform](#-cross-platform-ecosystem) •
+[⚡ Quick Start](#-quick-start) •
+[⚙️ Configuration](#-configuration) •
+[🏗️ Architecture](#️-architecture) •
+[📺 TV & Mobile](#-mobile--smart-tv-apps)
 
-## Quick start
+---
 
+</div>
+
+## 🌟 Highlights
+
+* **🎬 100% Native Player (No Embeds / No Iframes):** Custom HTML5 + HLS.js streaming engine with full controls, dynamic resolution selector (`Auto`, `1080p`, `720p`, `360p`), custom subtitles, and seamless audio synchronization.
+* **👥 Synchronized Watch Together:** Real-time room synchronization via Socket.IO with authoritative server state, latency drift compensation, live chat, interactive emoji reactions, and host permissions.
+* **🌍 Full Bilingual Experience (Arabic & English):** Flawless RTL / LTR layout switching, Arabic subtitles from SubDL & OpenSubtitles, and localized TMDB metadata.
+* **⚽ Live Sports Streaming:** Direct HLS live channels (beIN Sports, Sky Sports) with automated server-side token management and failover.
+* **📺 Multi-Platform:** Run as a Web Application, Discord Activity, native Android App (APK), or on Samsung Tizen Smart TVs (WGT).
+
+---
+
+## ✨ Key Features
+
+### 🎥 Native Player & Advanced Streaming Engine
+* **Direct Stream Resolution:** Headless stealth sniffers extract direct `.m3u8` streams from providers (Aether, VixSrc, Vidrift, ArabMedia / Movizland, Dizibal) in seconds.
+* **Hotlink & CORS Reverse Proxy:** Proxies HLS master playlists and video segments securely while preserving upstream tokens and bypassing browser cross-origin blocks.
+* **Quality Switcher:** Switch between `1080p Full HD`, `720p HD`, `360p SD`, or `Auto` bandwidth-adaptive playback.
+* **Smart Failover:** Instant failover watchdog automatically switches to healthy alternative mirrors upon upstream stalls or network errors.
+* **Intro & Credits Skip:** Community timestamps (IntroDB) allow single-click skipping of recaps, intros, and ending credits.
+
+### 👥 Watch Together (Discord Activity & Web)
+* **Authoritative Clock:** The server controls playhead time, media state, and playback speed; client clocks automatically nudge to eliminate drift.
+* **Host Handover & Controls:** Configurable room permission modes (`Host Only`, `Host + Selected`, `Open to Everyone`).
+* **In-Player Chat & Reactions:** Transparent full-screen overlay chat and emoji bursts.
+* **Late-Joiner Synchronization:** New members automatically snap to the current playhead without interrupting the room.
+
+### 🌐 Subtitles & Metadata Enrichment
+* **Multi-Provider Subtitles:** Automatic search and download from OpenSubtitles, SubDL, and Wyzie Subs in 75+ languages.
+* **TMDB Catalog:** Infinite scrolling, trending movies & series, genres, top-rated lists, cast details, and backdrop artwork.
+* **Personalized Progress:** "Continue Watching" syncs watch time and completion percentage across devices.
+
+---
+
+## 📱 Cross-Platform Ecosystem
+
+| Platform | Technology | Status | Download / Access |
+|---|---|---|---|
+| **Web Browser** | React 18, Vite 6, Tailwind CSS v4 | ✅ Production | Available via HTTP server |
+| **Discord Activity** | Discord Embedded App SDK | ✅ Production | Runs inside Discord voice channels |
+| **Android App** | Capacitor 6, Android SDK 34 | ✅ Signed Release | [NexusNight.apk](client/public/downloads/) |
+| **Samsung Smart TV** | Tizen 5.0+ Web App (Strict ES5) | ✅ Signed WGT | [NexusNightTV.wgt](client/public/downloads/) |
+
+---
+
+## ⚡ Quick Start
+
+### Prerequisites
+* **Node.js 20+** and **npm**
+* **FFmpeg** & **FFprobe** installed and accessible in system `PATH`
+* **TMDB API Key** (Get free access from [TheMovieDb](https://www.themoviedb.org/settings/api))
+
+### 1. Clone & Install
 ```bash
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
-
+git clone https://github.com/your-username/NexusNight.git
+cd NexusNight
 npm install
-cp .env.example .env        # Windows: copy .env.example .env
-# edit .env and fill in the required values (see below)
-
-mkdir media                 # put your videos here (optional)
-npm run scan                # index the library + generate thumbnails
-npm run dev                 # API on :3001, web on :5173
 ```
 
-Test without Discord (development only): open `http://localhost:5173/?room=test&name=Alice` and `...&name=Bob` in two windows.
-
-## Discord setup
-
-1. In the Developer Portal, copy the **Application ID** (`DISCORD_CLIENT_ID`) and the **Client Secret** (`DISCORD_CLIENT_SECRET`).
-2. **Activities → Settings:** enable Activities.
-3. **Installation:** enable *User Install* and *Guild Install*, then install the app to your server.
-4. In Discord: **Settings → Advanced → Developer Mode** ON (to run an Activity that is still in development).
-5. **Activities → URL Mappings:** map `/` to your public host (host only, with no `https://` and no path).
-
-For local testing through Discord, expose the dev server with a tunnel and use that host in the mapping:
-
+### 2. Configure Environment
+Create your root `.env` from the provided example:
 ```bash
-npm run dev:tunnel
-cloudflared tunnel --url http://localhost:5173
+# Windows
+copy .env.example .env
+
+# Linux / macOS
+cp .env.example .env
+```
+Open `.env` and fill in your keys:
+```env
+PORT=3001
+TMDB_API_KEY=your_tmdb_api_key_or_v4_token
+JWT_SECRET=your_super_secret_jwt_key
+ALLOW_GUEST=true
+STREAMING_PROVIDERS_ENABLED=true
 ```
 
-> The mapping for `/` covers everything: the web app, `/api/*` and the `/socket.io` WebSocket.
+### 3. Launch Development Server
+```bash
+# Start backend (:3001) and frontend (:5173) concurrently
+npm run dev
+```
 
-## Environment variables
+* **Web UI:** `http://localhost:5173`
+* **Backend API:** `http://localhost:3001`
+* **TV App Dev Server:** `cd NexusNightsTv && npm start` (runs on `:8080`)
 
-Copy `.env.example` to `.env`. **Never commit `.env`.**
+---
 
-| Variable | Required | Description |
+## ⚙️ Configuration
+
+The application uses a **single unified `.env` file** located at the repository root:
+
+| Variable | Default | Purpose |
 |---|---|---|
-| `DISCORD_CLIENT_ID` | yes | Discord application ID |
-| `DISCORD_CLIENT_SECRET` | yes | Discord OAuth2 client secret |
-| `DISCORD_REDIRECT_URI` | yes | OAuth2 callback URL |
-| `JWT_SECRET` | yes | Long random string used to sign sessions |
-| `TMDB_API_KEY` | yes | TMDB v3 key or v4 read-access token |
-| `MEDIA_PATH` | no | Folder with your videos (default `./media`) |
-| `PORT` | no | Server port (default `3001`) |
-| `DATA_PATH` | no | Index, caches, thumbnails, HLS output (default `./data`) |
-| `TMDB_LANGUAGES` | no | Metadata languages, e.g. `en-US,ar` |
-| `TMDB_CACHE_DAYS` | no | TMDB cache lifetime |
-| `FFMPEG_PATH` / `FFPROBE_PATH` | no | Custom ffmpeg binaries |
-| `FFMPEG_CONCURRENCY` / `HLS_CONCURRENCY` | no | Parallel ffmpeg jobs |
-| `HLS_CACHE_GB` | no | LRU cap for prepared HLS streams |
-| `SCAN_ON_START` | no | Rescan the library on boot |
-| `ADMIN_TOKEN` | no | Protects `POST /api/library/rescan` |
-| `TRUST_PROXY` | no | Number of reverse-proxy hops in front of the server |
-| `ALLOW_GUEST` | no | Allow login without Discord (**never enable in production**) |
-| `CONTROL_ROLE_IDS` | no | Comma-separated Discord role IDs that can always control playback |
-| `STREAMING_PROVIDERS_ENABLED` | no | Enable external streaming providers |
-| `OPENSUBTITLES_API_KEY` | no | OpenSubtitles.com API key for higher download limits (optional) |
-| `OPENSUBTITLES_USER_AGENT` | no | User agent for OpenSubtitles API (default: NexusNight v1.0) |
+| `PORT` | `3001` | Backend HTTP & Socket.IO server port |
+| `TMDB_API_KEY` | *(Required)* | TMDB API v3 key or v4 Bearer token for metadata |
+| `ALLOW_GUEST` | `true` | Allows browser guest playback without requiring Discord OAuth |
+| `DISCORD_CLIENT_ID` | *(Optional)* | Discord Application ID for Discord Activity mode |
+| `DISCORD_CLIENT_SECRET` | *(Optional)* | Discord OAuth2 Client Secret |
+| `DISCORD_REDIRECT_URI` | `http://localhost:3001/api/auth/discord/callback` | OAuth2 callback endpoint |
+| `ADMIN_TOKEN` | *(Auto-generated)* | Token protecting admin endpoints and cache resets |
+| `MEDIA_PATH` | `./media` | Local media storage folder |
+| `DATA_PATH` | `./data` | Cache directory for subtitles, thumbnails, and state |
+| `STREAMING_PROVIDERS_ENABLED`| `true` | Enables multi-source remote streaming & sniffers |
+| `OPENSUBTITLES_API_KEY` | *(Optional)* | Higher rate limits for subtitle downloads |
 
-## Scripts
+---
 
-| Command | What it does |
-|---|---|
-| `npm run dev` | Server + client in development |
-| `npm run dev:tunnel` | Same, with HMR configured for a tunnel / Discord |
-| `npm run build` | Build client and server |
-| `npm start` | Run the production server (serves API + `client/dist` + Socket.IO) |
-| `npm run scan` | Scan the media folder and build the index |
-| `npm run list` | Print the indexed library |
-| `npm test` | Run server and client tests |
-
-## Project structure
+## 🏗️ Architecture
 
 ```
-.
-├── client/                 # React + Vite frontend
-│   └── src/
-│       ├── api/ auth/ components/ pages/
-│       ├── player/         # video player, subtitles, embed player
-│       └── i18n.tsx        # EN / AR strings
-├── server/
-│   └── src/
-│       ├── auth/           # Discord OAuth, sessions, middleware
-│       ├── http/           # REST routes
-│       ├── library/        # scanner, probe, HLS, thumbnails, subtitles
-│       ├── metadata/       # TMDB enrichment
-│       ├── realtime/       # Socket.IO rooms + sync
-│       └── streaming/      # provider registry, adapters, health
-├── .env.example
-└── package.json            # npm workspaces: server + client
+NexusNight/
+├── client/                     # Web & Discord Activity Client (React 18 + Vite)
+│   ├── src/
+│   │   ├── components/         # TopBar, BottomNav, Row, GlobalCard, etc.
+│   │   ├── pages/              # Home, Watch, Sports, Downloads, Details
+│   │   ├── player/             # NexusPlayer HTML5/HLS engine, Subtitles, Menu
+│   │   ├── room/               # Realtime Watch Together lobby & sync
+│   │   └── i18n.tsx            # Arabic / English localization
+│   └── public/downloads/       # Distribution binaries (APK & TV WGT)
+│
+├── server/                     # Backend API & Streaming Orchestrator (Node.js)
+│   ├── src/
+│   │   ├── http/               # Express REST routes & API proxies
+│   │   ├── realtime/           # Socket.IO Watch Together rooms hub
+│   │   ├── streaming/          # Stream resolver, sniffers, proxies & sports
+│   │   │   ├── adapters/       # Aether, VixSrc, Vidrift, ArabMedia adapters
+│   │   │   ├── stream-proxy.ts # HLS manifest & segment CORS reverse proxy
+│   │   │   └── stream-resolver.ts # Playwright stealth stream sniffers
+│   │   └── subtitles/          # OpenSubtitles, SubDL, and Wyzie integration
+│   └── scripts/                # Media seeding & server utilities
+│
+├── android/                    # Android Native Application (Capacitor 6)
+│   ├── app/src/main/           # Android Manifest, Java main activity, res assets
+│   └── build.gradle            # Gradle build configuration
+│
+├── NexusNightsTv/              # Samsung Tizen Smart TV Application
+│   ├── js/                     # Spatial focus manager, D-Pad nav, TV player (ES5)
+│   ├── css/                    # TV 10-foot UI styling (720p / 1080p / 4K)
+│   ├── config.xml              # Tizen packaging manifest
+│   ├── server.cjs              # TV local development & API proxy server
+│   └── build.ps1               # Automated build & signing script (Samsung CLI)
+│
+├── scripts/                    # Android APK build and icon generator scripts
+└── .env.example                # Canonical environment template
 ```
 
-## Production
+---
 
+## 📺 Mobile & Smart TV Apps
+
+### Android (APK)
+Build a production-ready signed APK using the included build tool:
 ```bash
-npm run build
-npm start
+npm run build:android
+```
+The output APK will be placed in `android/app/build/outputs/apk/release/` and copied to `client/public/downloads/NexusNight.apk`.
+
+### Samsung Smart TV (Tizen WGT)
+The TV client is built with a custom spatial navigation engine designed for remote controls (D-Pad navigation) adhering to Samsung TV 10-foot guidelines:
+```powershell
+# From project root
+cd NexusNightsTv
+powershell -ExecutionPolicy Bypass -File build.ps1 -CertificateProfile "NexusNight-TV"
+```
+To install directly to a connected Samsung TV via Tizen SDB:
+```powershell
+powershell -ExecutionPolicy Bypass -File build.ps1 -CertificateProfile "NexusNight-TV" -Install
 ```
 
-A single Node process serves the API, the built client and Socket.IO on `PORT`. Point the Discord URL Mapping at your public domain, set a strong `JWT_SECRET` and an `ADMIN_TOKEN`, and keep `ALLOW_GUEST` off.
+---
 
-## Security notes
+## 🔒 Security & Performance
 
-- Opaque IDs only (no file paths exposed)
-- All REST and socket payloads validated with zod
-- Per-event rate limits, 16 KB socket payload cap, member and room caps
-- OAuth code exchange happens server-side, so the client secret never reaches the browser
-- Strict allow-lists for HLS, subtitle and image routes
+* **Zero Leaked Credentials:** Keystores, `.p12` certificates, and `.env` secrets are strictly ignored by `.gitignore`.
+* **Safe Proxies:** Media requests are routed through strict reverse proxies with custom user agents and referer headers, preventing hotlinking restrictions while shielding clients.
+* **Zod Schema Validation:** All socket payloads, API parameters, and environment keys are strictly validated before execution.
+* **Auto Cache Eviction:** Stream tokens that expire upstream are automatically evicted from server memory to prevent playback freezes.
 
-## Disclaimer
+---
 
-NexusNight does not host, store or distribute any copyrighted content. You are responsible for the media you place in your own library and for how you use any third-party streaming providers. Make sure you comply with the laws in your country and with the terms of service of every provider and API you use.
+## 📜 Disclaimer
 
-## Credits
+NexusNights is built for personal, educational, and home-media usage. It does not host or store copyrighted videos on its servers. Users are responsible for complying with the terms of service of any third-party APIs or content sources utilized.
 
-This product uses the TMDB API but is not endorsed or certified by TMDB.
+---
+
+<div align="center">
+  <sub>Crafted with passion for cinema & seamless streaming.</sub>
+</div>

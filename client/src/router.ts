@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 export type Route =
   | { name: 'home' }
+  | { name: 'downloads' }
   | { name: 'sports' }
   | { name: 'sports-watch'; channelId: string }
   | { name: 'title'; id: string }
@@ -16,6 +17,11 @@ export type Route =
 function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
   
+  // Downloads page
+  if (parts[0] === 'downloads' || parts[0] === 'download') {
+    return { name: 'downloads' };
+  }
+
   // Sports & beIN live arena
   if (parts[0] === 'sports' || parts[0] === 'bein') {
     if (parts[1]) {
@@ -88,6 +94,7 @@ export function useRoute(): Route {
 
 export const go = {
   home: () => { location.hash = '#/'; },
+  downloads: () => { location.hash = '#/downloads'; },
   sports: () => { location.hash = '#/sports'; },
   sportsWatch: (channelId: string) => { location.hash = `#/sports/${encodeURIComponent(channelId)}`; },
   title: (id: string) => { location.hash = `#/title/${id}`; },
@@ -104,6 +111,7 @@ export const go = {
 
 export const hrefs = {
   home: '#/',
+  downloads: '#/downloads',
   sports: '#/sports',
   sportsWatch: (channelId: string) => `#/sports/${encodeURIComponent(channelId)}`,
   title: (id: string) => `#/title/${id}`,

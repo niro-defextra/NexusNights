@@ -57,6 +57,15 @@ async function loadChromium() {
 const failures = [];
 let srv = null;
 let browser = null;
+
+// The widget ships to Tizen. `$WEBAPIS` is the TV-only virtual path for the
+// Samsung product API; desktop Chromium cannot resolve it and reports both the
+// missing script and the CSP token. Those are platform artefacts, not app
+// errors, so the gate ignores only that path and keeps everything else strict.
+const isTizenVirtual = (url) => String(url).indexOf('/$WEBAPIS/') !== -1;
+const isTizenCspNotice = (text) => text.indexOf('$WEBAPIS') !== -1;
+const isResourceNotice = (text) => /^Failed to load resource:/i.test(text);
+
 try {
   srv = await startServer();
   const chromium = await loadChromium();
@@ -69,16 +78,30 @@ try {
   const badStatus = [];
   let uxRequested = false;
 
-  page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(String(msg.text()).replace(/\s+/g, ' ').slice(0, 240)); });
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error') return;
+    const text = String(msg.text()).replace(/\s+/g, ' ').slice(0, 240);
+    if (isTizenCspNotice(text)) return;
+    const loc = typeof msg.location === 'function' ? msg.location() : null;
+    const source = loc && loc.url ? loc.url : '';
+    if (source && isTizenVirtual(source)) return;
+    // Remote artwork and fonts are allowed to fail: the app renders designed
+    // fallbacks for them. This gate owns local assets and app exceptions, so a
+    // third-party resource notice is not an app failure.
+    if (source && source.indexOf(srv.origin) !== 0 && isResourceNotice(text)) return;
+    consoleErrors.push(text + (source ? ' :: ' + source : ''));
+  });
   page.on('pageerror', (err) => pageErrors.push(String((err && err.message) || err).slice(0, 240)));
   page.on('requestfailed', (req) => {
-    if (req.url().startsWith(srv.origin)) {
+    if (req.url().startsWith(srv.origin) && !isTizenVirtual(req.url())) {
       const f = req.failure();
       failedLocal.push(req.url() + ' :: ' + (f ? f.errorText : 'unknown'));
     }
   });
   page.on('response', (res) => {
-    if (res.url().startsWith(srv.origin) && res.status() >= 400) badStatus.push(res.status() + ' ' + res.url());
+    if (res.url().startsWith(srv.origin) && res.status() >= 400 && !isTizenVirtual(res.url())) {
+      badStatus.push(res.status() + ' ' + res.url());
+    }
   });
   page.on('request', (req) => { if (req.url().split('?')[0].endsWith('js/ux.js')) uxRequested = true; });
 

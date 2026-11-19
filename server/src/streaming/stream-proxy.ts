@@ -10,6 +10,7 @@
 import express, { type Request, type Response } from 'express';
 import { Readable } from 'node:stream';
 import { streamResolver, type ResolvedStream } from './stream-resolver';
+import { trailerSniffer } from './trailer-sniffer';
 
 export const streamProxyRouter = express.Router();
 
@@ -97,6 +98,12 @@ streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) =>
   const serverOrigin = `${protoHeader}://${hostHeader}`;
   let stream = streamResolver.getById(id);
 
+  if (!stream && id.startsWith('trailer-')) {
+    const key = id.replace('trailer-', '');
+    await trailerSniffer.sniffTrailer(key);
+    stream = streamResolver.getById(id);
+  }
+
   if (!stream) {
     // Stream ID unknown — maybe server restarted; nothing we can do
     res.status(404).send('Stream session expired or not found. Reload the page.');
@@ -147,6 +154,31 @@ streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) =>
     }
 
     const manifestText = await upstream.text();
+    if (!manifestText.includes('#EXTM3U')) {
+      console.warn(`[StreamProxy] Upstream response for stream ${id} is not an M3U8 manifest. Content preview: ${manifestText.slice(0, 150)}`);
+      try {
+        const freshStream = await streamResolver.reResolveById(id);
+        if (freshStream) {
+          const freshUpstream = await fetch(freshStream.playlistUrl, {
+            headers: proxyHeaders(freshStream),
+            signal: AbortSignal.timeout(10000),
+          });
+          const freshText = await freshUpstream.text();
+          if (freshText.includes('#EXTM3U')) {
+            const rewritten = rewriteManifest(freshText, freshStream.playlistUrl, freshStream.id, serverOrigin);
+            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.send(rewritten);
+            return;
+          }
+        }
+      } catch (reErr: any) {
+        console.error(`[StreamProxy] Re-resolve failed: ${reErr.message}`);
+      }
+      res.status(502).send('Upstream playlist returned invalid content or error page.');
+      return;
+    }
     const rewritten = rewriteManifest(manifestText, stream.playlistUrl, stream.id, serverOrigin);
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -172,7 +204,13 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
     return;
   }
 
-  const stream = streamResolver.getById(id);
+  let stream = streamResolver.getById(id);
+  if (!stream && id.startsWith('trailer-')) {
+    const key = id.replace('trailer-', '');
+    await trailerSniffer.sniffTrailer(key);
+    stream = streamResolver.getById(id);
+  }
+
   if (!stream) {
     res.status(404).send('Stream session expired or not found');
     return;
@@ -195,9 +233,9 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
 
     if (!upstream.ok && upstream.status !== 206) {
       if (isTokenExpired(upstream.status)) {
-        // Return 410 Gone — HLS.js will reload the master playlist
-        // which will trigger re-resolution via the master endpoint
-        console.log(`[StreamProxy] Segment token expired (${upstream.status}) for stream ${id}.`);
+        // Evict expired stream from resolver cache so next playback or reload gets a fresh token
+        console.log(`[StreamProxy] Segment token expired (${upstream.status}) for stream ${id}. Evicting from cache.`);
+        streamResolver.evict(id);
         res.status(410).send('Segment token expired');
         return;
       }
@@ -207,20 +245,41 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
 
     const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
 
-    // If upstream returned another playlist (e.g. sub-variant playlist), rewrite it too!
-    if (contentType.includes('application/vnd.apple.mpegurl') || contentType.includes('application/x-mpegurl') || url.includes('.m3u8') || url.includes('type=video') || url.includes('type=audio')) {
-      const manifestText = await upstream.text();
-      // If it has #EXTM3U, rewrite it
-      if (manifestText.includes('#EXTM3U')) {
-        const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
-        const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
-        const serverOrigin = `${protoHeader}://${hostHeader}`;
-        const rewritten = rewriteManifest(manifestText, url, stream.id, serverOrigin);
-        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.send(rewritten);
-        return;
+    // Check if upstream returned another playlist (e.g. sub-variant playlist)
+    const isSegment =
+      url.includes('.ts') ||
+      url.includes('.m4s') ||
+      url.includes('file=seg.ts') ||
+      contentType.includes('video/') ||
+      contentType.includes('audio/mp4');
+
+    const isPlaylist =
+      !isSegment &&
+      (contentType.includes('application/vnd.apple.mpegurl') ||
+        contentType.includes('application/x-mpegurl') ||
+        contentType.includes('audio/x-mpegurl') ||
+        url.includes('.m3u8') ||
+        url.includes('type=video') ||
+        url.includes('type=audio'));
+
+    if (isPlaylist) {
+      const clone = upstream.clone();
+      try {
+        const manifestText = await clone.text();
+        // If it has #EXTM3U, rewrite it
+        if (manifestText.includes('#EXTM3U')) {
+          const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
+          const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
+          const serverOrigin = `${protoHeader}://${hostHeader}`;
+          const rewritten = rewriteManifest(manifestText, url, stream.id, serverOrigin);
+          res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.send(rewritten);
+          return;
+        }
+      } catch {
+        // If clone reading fails, fall through to binary streaming
       }
     }
 

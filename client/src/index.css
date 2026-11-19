@@ -7,6 +7,10 @@
 @import "@fontsource/ibm-plex-sans-arabic/400.css";
 @import "@fontsource/ibm-plex-sans-arabic/500.css";
 @import "@fontsource/ibm-plex-sans-arabic/600.css";
+@import "@fontsource-variable/bricolage-grotesque/index.css";
+@import "@fontsource-variable/alexandria/index.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
 
 /* ── Design tokens: "NexusNight" — cinematic noir, midnight crimson, gilt accents ── */
 @theme {
@@ -20,21 +24,28 @@
   --color-blood-hot: #dc3044;
   --color-gilt: #d4af6a;
 
-  --font-display: "Cinzel", "Amiri", Georgia, serif;
+  --font-display: "Cinzel", "Alexandria Variable", "IBM Plex Sans Arabic", Georgia, serif;
   --font-sans: "Hanken Grotesk Variable", "IBM Plex Sans Arabic", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-dl-display: "Bricolage Grotesque Variable", "Alexandria Variable", "Hanken Grotesk Variable", system-ui, sans-serif;
+  --font-dl-ar-display: "Alexandria Variable", "IBM Plex Sans Arabic", system-ui, sans-serif;
+  --font-dl-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace;
 
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
-  --animate-rise: rise 0.9s var(--ease-out-expo) both;
-  --animate-fade: fade 0.6s ease-out both;
+  --animate-rise: rise 0.8s var(--ease-out-expo) both;
+  --animate-fade: fade 0.5s ease-out both;
   --animate-drift: drift 28s ease-in-out infinite alternate;
-  --animate-shimmer: shimmer 1.8s linear infinite;
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
   --animate-pop: pop 0.6s var(--ease-out-expo) both;
 
   @keyframes rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
   @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
   @keyframes drift { from { transform: scale(1.04) translate3d(0, 0, 0); } to { transform: scale(1.14) translate3d(-1.2%, -1%, 0); } }
-  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  @keyframes shimmer { 
+    0% { background-position: -200% 0; } 
+    100% { background-position: 200% 0; } 
+  }
   @keyframes pop { 0% { opacity: 0; transform: scale(0.6); } 25% { opacity: 1; } 100% { opacity: 0; transform: scale(1.5); } }
   @keyframes slideIn { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
 }
@@ -47,8 +58,8 @@ html { background: var(--color-ink); color: var(--color-bone); color-scheme: dar
   --safe-right: env(safe-area-inset-right, 0px);
 }
 html[lang="ar"] { 
-  --font-display: "Amiri", "Cinzel", serif; 
-  font-family: "IBM Plex Sans Arabic", "Hanken Grotesk Variable", system-ui, sans-serif;
+  --font-display: "Alexandria Variable", "IBM Plex Sans Arabic", sans-serif; 
+  font-family: "IBM Plex Sans Arabic", "Alexandria Variable", system-ui, sans-serif;
 }
 body { 
   margin: 0; 
@@ -63,8 +74,8 @@ body {
 }
 /* Arabic letters must stay joined: never letter-space them. */
 :lang(ar) { letter-spacing: normal; }
-html[lang="ar"] .font-display { font-family: "Amiri", serif; }
-html[lang="ar"] h1, html[lang="ar"] h2, html[lang="ar"] h3 { font-weight: 700; }
+html[lang="ar"] .font-display { font-family: "Alexandria Variable", "IBM Plex Sans Arabic", sans-serif; }
+html[lang="ar"] h1, html[lang="ar"] h2, html[lang="ar"] h3 { font-weight: 800; }
 
 /* Better Arabic spacing and readability */
 html[dir="rtl"] { text-align: start; }
@@ -101,8 +112,17 @@ button:focus-visible, a:focus-visible, select:focus-visible, [tabindex]:focus-vi
 .truncate-safe { min-width: 0; }
 
 .skeleton {
-  background: linear-gradient(100deg, var(--color-crypt) 30%, var(--color-ash) 50%, var(--color-crypt) 70%);
-  background-size: 200% 100%; animation: var(--animate-shimmer);
+  background: linear-gradient(
+    95deg,
+    rgba(26, 19, 22, 0.9) 20%,
+    rgba(43, 33, 37, 0.95) 45%,
+    rgba(212, 175, 106, 0.08) 50%,
+    rgba(43, 33, 37, 0.95) 55%,
+    rgba(26, 19, 22, 0.9) 80%
+  );
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+  border: 1px solid rgba(255, 255, 255, 0.04);
 }
 .text-balance { text-wrap: balance; }
 .mask-fade-x { mask-image: linear-gradient(to right, transparent 0, black 2.5rem, black calc(100% - 2.5rem), transparent 100%); }
@@ -145,6 +165,16 @@ button:focus-visible, a:focus-visible, select:focus-visible, [tabindex]:focus-vi
 *::-webkit-scrollbar-thumb:hover { background: var(--color-dust); }
 .scrollbar-thin::-webkit-scrollbar { width: 6px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--color-gilt); border-radius: 3px; }
+
+/* ── TV-signature cinematic row focus: when browsing rows, inactive rows settle back ── */
+.rows-container:has(.group\/row:hover) .group\/row:not(:hover),
+.rows-container:has(.group\/row:focus-within) .group\/row:not(:focus-within) {
+  opacity: 0.62;
+  transition: opacity 280ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+.group\/row {
+  transition: opacity 280ms cubic-bezier(0.2, 0, 0.2, 1);
+}
 
 /* Better Arabic text styling */
 html[lang="ar"] .font-display { font-family: "Amiri", serif; }

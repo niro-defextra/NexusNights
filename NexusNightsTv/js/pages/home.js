@@ -204,9 +204,8 @@
                 html += '<h1 class="hero-title">' + NexusConfig.escapeHtml(hero.title) + '</h1>';
             }
             
-            // Meta line: badge, rating, year, genres
+            // Meta line: rating, year, genres — all real, nothing fabricated
             html += '<div class="hero-meta">';
-            html += '<div class="hero-meta-item"><span class="hero-quality-badge" style="background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; padding: 2px 8px; font-size: 14px; font-weight: 700; margin-left: 12px; letter-spacing: 0.5px;">4K ULTRA HD</span></div>';
             if (hero.rating) {
                 html += '<div class="hero-meta-item"><span class="hero-rating text-gold">★ ' + Number(hero.rating).toFixed(1) + '</span></div>';
             }
@@ -386,7 +385,7 @@
                 })
                 .catch(function(error) {
                     console.error('[HomePage] Stream error:', error);
-                    NexusApp.showToast('فشل تحميل البث: ' + (error.message || 'خطأ غير متوقع'));
+                    NexusApp.showToast(NexusApp.describeError(error));
                 });
         },
         
@@ -419,7 +418,7 @@
                     tmdbId: tmdbId,
                     localId: localId,
                     type: kind || 'movie',
-                    title: playback.title || (self.data && self.data.hero && self.data.hero.title) || 'NEXUSNIGHT',
+                    title: playback.title || (self.data && self.data.hero && self.data.hero.title) || 'NexusNights',
                     year: playback.releaseYear || (self.data && self.data.hero && self.data.hero.year),
                     posterUrl: playback.posterUrl,
                     backdropUrl: playback.backdropUrl
@@ -428,7 +427,7 @@
                 NexusPlayer.play(playback.source, playback.alternatives, playback.subtitles, meta);
             }).catch(function(error) {
                 console.error('[HomePage] Playback error:', error);
-                NexusApp.showToast(error.message || 'فشل تحميل مصادر التشغيل');
+                NexusApp.showToast(NexusApp.describeError(error));
             });
         },
         
@@ -438,7 +437,7 @@
         onError: function(error) {
             console.error('[HomePage] Error:', error);
             NexusApp.showErrorState({
-                title: 'فشل تحميل المحتوى',
+                title: NexusConfig.getLanguage() === 'ar' ? 'تعذّر تحميل المحتوى' : 'Content unavailable',
                 message: error && error.message,
                 onAction: function() { HomePage.render(); }
             });

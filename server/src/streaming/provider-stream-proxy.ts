@@ -159,6 +159,11 @@ providerStreamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Resp
     }
 
     const manifestText = await upstream.text();
+    if (!manifestText.includes('#EXTM3U')) {
+      console.error(`[ProviderStreamProxy] Upstream did not return M3U8 for ${id}. Preview: ${manifestText.slice(0, 150)}`);
+      res.status(502).send('Upstream server returned invalid playlist');
+      return;
+    }
     console.log(`[ProviderStreamProxy] Master playlist fetched: ${manifestText.length} bytes`);
     
     const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
@@ -213,10 +218,18 @@ providerStreamProxyRouter.get('/segment', async (req: Request, res: Response) =>
     const contentType = upstream.headers.get('content-type') || '';
 
     // Detect sub-playlists: check content-type, extension, AND stream.php pattern (Dizibal)
+    const isSegment =
+      url.includes('.ts') ||
+      url.includes('.m4s') ||
+      url.includes('file=seg.ts') ||
+      contentType.includes('video/') ||
+      contentType.includes('audio/mp4');
+
     const looksLikePlaylist =
-      contentType.includes('mpegurl') ||
-      url.includes('.m3u8') ||
-      isPlaylistUrl(url);
+      !isSegment &&
+      (contentType.includes('mpegurl') ||
+        url.includes('.m3u8') ||
+        isPlaylistUrl(url));
 
     if (looksLikePlaylist) {
       const manifestText = await upstream.text();

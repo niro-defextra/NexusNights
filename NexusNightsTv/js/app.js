@@ -46,6 +46,11 @@
             
             // Initialize modules
             this.initModules();
+
+            // Artwork failure is normal on a TV: the URL may be a dead proxy or
+            // the panel may be offline. Every failed image becomes a designed
+            // surface instead of the browser's broken-image glyph.
+            this.watchArtwork();
             
             // Register pages
             this.registerPages();
@@ -176,6 +181,79 @@
         },
         
         /**
+         * A failed poster, backdrop or logo is a designed state, not a browser
+         * glyph. The capture-phase listener catches every image the app renders,
+         * including artwork injected after navigation.
+         */
+        watchArtwork: function() {
+            document.addEventListener('error', function(event) {
+                var img = event.target;
+                if (!img || img.tagName !== 'IMG') return;
+
+                img.classList.add('is-broken');
+
+                if (img.className.indexOf('hero-logo') !== -1 || img.className.indexOf('details-logo') !== -1) {
+                    var hero = img.parentElement;
+                    var title = img.getAttribute('alt') || '';
+                    var heading = document.createElement('h1');
+                    heading.className = img.className.indexOf('hero-logo') !== -1 ? 'hero-title' : 'details-title';
+                    heading.textContent = title;
+                    if (hero && title) hero.insertBefore(heading, img);
+                    img.style.display = 'none';
+                    return;
+                }
+
+                if (img.className.indexOf('team-crest') !== -1) {
+                    var frame = img.parentElement;
+                    if (frame && frame.classList) frame.classList.add('has-broken-crest');
+                    return;
+                }
+
+                var host = img.parentElement;
+                while (host && host !== document.body) {
+                    if (host.classList && (host.classList.contains('content-card') ||
+                        host.classList.contains('backdrop-card') ||
+                        host.classList.contains('live-cell') ||
+                        host.classList.contains('match-card') ||
+                        host.classList.contains('channel-card'))) {
+                        host.classList.add('has-broken-art');
+                        break;
+                    }
+                    host = host.parentElement;
+                }
+            }, true);
+        },
+
+        /**
+         * Turn transport and HTTP failures into one calm sentence a viewer can
+         * act on. The raw message never reaches the screen.
+         */
+        describeError: function(error) {
+            var isAr = NexusConfig.getLanguage() === 'ar';
+            var message = typeof error === 'string' ? error : ((error && (error.message || error.statusText)) || '');
+            var status = (error && error.status) || 0;
+            var match = /HTTP\s+(\d+)/i.exec(message);
+            if (match) status = parseInt(match[1], 10);
+
+            if (status === 404) {
+                return isAr ? 'هذا المحتوى غير متوفر حالياً' : 'This title is not available right now';
+            }
+            if (status === 401 || status === 403) {
+                return isAr ? 'لا تملك صلاحية الوصول إلى هذا المحتوى' : 'This content is not available to you';
+            }
+            if (status >= 500) {
+                return isAr ? 'الخادم لا يستجيب الآن — حاول بعد قليل' : 'The server is not responding — try again shortly';
+            }
+            if (/timeout|timed out|ETIMEDOUT/i.test(message)) {
+                return isAr ? 'انتهت مهلة الاتصال — تحقّق من الشبكة' : 'The connection timed out — check your network';
+            }
+            if (/network|failed to fetch|load failed|offline/i.test(message)) {
+                return isAr ? 'لا يوجد اتصال بالشبكة' : 'No network connection';
+            }
+            return isAr ? 'تعذّر إكمال الطلب — حاول مرة أخرى' : 'The request could not be completed — try again';
+        },
+
+        /**
          * A designed offline/empty surface. Always leaves focus on something real.
          */
         showErrorState: function(options) {
@@ -184,11 +262,15 @@
             if (!mainContent) return;
             var isAr = NexusConfig.getLanguage() === 'ar';
             var title = options.title || (isAr ? 'تعذّر تحميل المحتوى' : 'Content unavailable');
-            var message = options.message ? NexusConfig.escapeHtml(options.message) : '';
+            var message = options.message || '';
+            if (message && (typeof message !== 'string' || /^(HTTP\s|Network|Failed|TypeError|timeout|timed out|Load failed)/i.test(message))) {
+                message = this.describeError(message);
+            }
+            message = message ? NexusConfig.escapeHtml(message) : '';
             var actionLabel = options.actionLabel || (isAr ? 'إعادة المحاولة' : 'Retry');
             
             mainContent.innerHTML =
-                '<div class="page-container">' +
+                '<div class="page-container state-page">' +
                 '<div class="empty-state">' +
                 '<div class="empty-state-icon">' + NexusApp.ICON_OFFLINE + '</div>' +
                 '<div class="empty-state-text">' + NexusConfig.escapeHtml(title) + '</div>' +

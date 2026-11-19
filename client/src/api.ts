@@ -1,6 +1,7 @@
 import type {
   EpisodeDetail,
   EpisodeSummary,
+  AniSkipTimingsPublic,
   HlsStatus,
   HomeResponse,
   PlaybackResponse,
@@ -57,6 +58,13 @@ export const api = {
     get<PlaybackResponse>(`/api/playback/movie/${tmdbId}?lang=${lang}`, signal),
   playbackTV: (tmdbId: number, season: number, episode: number, lang: string, signal?: AbortSignal) =>
     get<PlaybackResponse>(`/api/playback/tv/${tmdbId}/seasons/${season}/episodes/${episode}?lang=${lang}`, signal),
+  skipSegments: (kind: 'movie' | 'tv', tmdbId: number, season?: number, episode?: number, signal?: AbortSignal) => {
+    const params = new URLSearchParams();
+    if (kind === 'tv' && season != null) params.set('season', String(season));
+    if (kind === 'tv' && episode != null) params.set('episode', String(episode));
+    const query = params.toString();
+    return get<AniSkipTimingsPublic>(`/api/streaming/skip-segments/${kind}/${tmdbId}${query ? `?${query}` : ''}`, signal);
+  },
   resolveNativeStream: async (req: {
     tmdbId: number;
     kind: 'movie' | 'series';

@@ -263,6 +263,37 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
+    // 4. API REVERSE PROXY (Forward /api/* to local backend on port 3001)
+    if (reqPath.startsWith('/api/')) {
+        const targetBackend = 'http://localhost:3001' + req.url;
+        const bodyBuffers = [];
+        req.on('data', chunk => bodyBuffers.push(chunk));
+        req.on('end', async () => {
+            const reqBody = bodyBuffers.length > 0 ? Buffer.concat(bodyBuffers) : undefined;
+            try {
+                const fetchHeaders = {};
+                for (const [k, v] of Object.entries(req.headers)) {
+                    if (k.toLowerCase() !== 'host') fetchHeaders[k] = v;
+                }
+                const proxyRes = await fetch(targetBackend, {
+                    method: req.method,
+                    headers: fetchHeaders,
+                    body: (req.method !== 'GET' && req.method !== 'HEAD') ? reqBody : undefined,
+                });
+
+                const resHeaders = {};
+                proxyRes.headers.forEach((val, key) => { resHeaders[key] = val; });
+                res.writeHead(proxyRes.status, resHeaders);
+                const buf = await proxyRes.arrayBuffer();
+                res.end(Buffer.from(buf));
+            } catch (e) {
+                res.writeHead(502, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'backend_proxy_failed', message: e.message }));
+            }
+        });
+        return;
+    }
+
     // STATIC FILE SERVING
     let servePath = reqPath;
     if (servePath === '/' || servePath === '') servePath = '/index.html';
@@ -278,7 +309,13 @@ const server = http.createServer(async (req, res) => {
         }
 
         const mime = MIME_TYPES[ext] || 'application/octet-stream';
-        res.writeHead(200, { 'Content-Type': mime, 'Content-Length': stats.size });
+        res.writeHead(200, {
+            'Content-Type': mime,
+            'Content-Length': stats.size,
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        });
         fs.createReadStream(filePath).pipe(res);
     });
 });

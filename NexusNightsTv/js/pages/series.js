@@ -155,7 +155,7 @@
                                 type: 'series',
                                 season: 1,
                                 episode: 1,
-                                title: playback.title || 'NEXUSNIGHT',
+                                title: playback.title || 'NexusNights',
                                 year: playback.releaseYear,
                                 posterUrl: playback.posterUrl,
                                 backdropUrl: playback.backdropUrl
@@ -164,7 +164,7 @@
                             NexusPlayer.play(playback.source, playback.alternatives, playback.subtitles, meta);
                         }).catch(function (err) {
                             console.error('[SeriesPage] Playback error:', err);
-                            NexusApp.showToast(err.message || 'فشل التشغيل');
+                            NexusApp.showToast(NexusApp.describeError(err));
                         });
                     }
                 };
@@ -175,7 +175,7 @@
 
         showError: function (error) {
             NexusApp.showErrorState({
-                title: 'فشل تحميل المسلسلات',
+                title: NexusConfig.getLanguage() === 'ar' ? 'تعذّر تحميل المسلسلات' : 'Series unavailable',
                 message: error && error.message,
                 onAction: function () { SeriesPage.render(); }
             });

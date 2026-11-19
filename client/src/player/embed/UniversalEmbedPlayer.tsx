@@ -22,8 +22,8 @@ const TEST_PRESETS = [
   { id: 'playerjs-reference', name: 'Verified Player.js (Local Test Receiver)', url: '/test-playerjs-embed.html' },
   { id: 'vimeo', name: 'Vimeo Reference (Player.js Compliant)', url: 'https://player.vimeo.com/video/76979871?autoplay=0' },
   { id: 'vixsrc', name: 'VixSrc (Opaque Embed)', url: 'https://vixsrc.to/movie/1368337' },
-  { id: 'vidsrc-mov', name: 'VidSrc.mov (Nested Opaque Embed)', url: 'https://vidsrc.mov/embed/movie/1368337' },
-  { id: 'vidapi', name: 'VidAPI (Custom postMessage Bridge)', url: 'https://vaplayer.ru/embed/movie/1368337' },
+  { id: 'aether', name: 'Aether (Multi-Audio Embed)', url: 'https://aether.ist/media/tmdb-movie-1368337' },
+  { id: 'vidrift', name: 'Vidrift (Themed Embed)', url: 'https://embed.vidrift.net/embed/movie/1368337' },
 ];
 
 export function UniversalEmbedPlayer({

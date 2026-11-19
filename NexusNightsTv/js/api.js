@@ -114,6 +114,7 @@
     }
 
     window.NexusAPI = {
+        backendUrl: backendUrl,
         request: function (endpoint, options) {
             options = options || {};
             var url = backendUrl(endpoint);
@@ -286,6 +287,20 @@
             return this.request(path).then(normalizePlayback);
         },
 
+        // Community intro/recap/credits timestamps (IntroDB).
+        getSkipSegments: function (kind, tmdbId, season, episode) {
+            if (!tmdbId) return Promise.resolve({ found: false });
+            var route = (kind === 'series' || kind === 'tv') ? 'tv' : 'movie';
+            var path = '/api/streaming/skip-segments/' + route + '/' + encodeURIComponent(tmdbId);
+            if (route === 'tv') {
+                path += '?season=' + encodeURIComponent(season || 1) + '&episode=' + encodeURIComponent(episode || 1);
+            }
+            return this.request(path, { timeout: 8000 }).catch(function (err) {
+                console.warn('[NexusAPI] Skip segments failed:', err && err.message);
+                return { found: false };
+            });
+        },
+
         // Local library support. IDs are library IDs, not TMDB IDs.
         getLocalTitle: function (localId, lang) {
             lang = lang || NexusConfig.getLanguage();
@@ -393,10 +408,12 @@
 
         // Sports: channels & live streams
         getSportsFixtures: function () {
-            var isLocalDev = window.location && (window.location.port === '8080' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-            var endpoint = isLocalDev ? '/api/sports/fixtures' : backendUrl('/api/sports/fixtures');
-            return this.request(endpoint).catch(function (err) {
-                console.warn('[NexusAPI] Live fixtures fetch failed:', err && err.message);
+            // Always resolve against the configured backend. A packaged TV app
+            // has no /api on its own origin; a relative path becomes a local 404.
+            return this.request('/api/sports/fixtures').catch(function (err) {
+                if (!(err && /404/.test(err.message || ''))) {
+                    console.warn('[NexusAPI] Live fixtures fetch failed:', err && err.message);
+                }
                 return null;
             });
         },
@@ -434,47 +451,34 @@
             };
             var daddyId = daddyIds[channelKey] || 91;
 
-            // Direct local or backend HLS proxy
-            var isLocalDev = window.location && (window.location.port === '8080' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-            var hlsUrl = isLocalDev
-                ? '/api/sports/stream/' + encodeURIComponent(channelKey) + '/manifest.m3u8'
-                : backendUrl('/api/sports/stream/' + encodeURIComponent(channelKey) + '/manifest.m3u8');
+            // The sports HLS proxy lives on the backend, never on the TV. Build
+            // absolute manifest URLs so a widget served from localhost/file://
+            // cannot turn them into package-local 404s.
+            var streamUrl = backendUrl('/api/sports/stream/' + encodeURIComponent(channelKey) + '/manifest.m3u8');
 
             var primary = {
-                url: hlsUrl,
+                url: streamUrl,
                 type: 'hls',
                 provider: 'beIN Sports HD (Direct HLS)',
                 isLive: true
             };
 
-            // Alternative HLS feed (failover to alternate commentary / feed)
+            // Alternative feeds: clean HLS backup and failover feeds via backend proxy.
+            // NO external iframe embeds — keeps the TV player 100% ad-free and popup-free.
+            var alternatives = [];
+            alternatives.push({
+                url: backendUrl('/api/sports/stream/' + encodeURIComponent(channelKey) + '/manifest.m3u8?backup=true'),
+                type: 'hls',
+                provider: 'سيرفر البث المباشر الموازي (HD HLS Fast)',
+                isLive: true
+            });
             var failoverKey = (channelKey === 'bein-1') ? 'bein-fr-1' : 'bein-1';
-            var failoverUrl = isLocalDev
-                ? '/api/sports/stream/' + encodeURIComponent(failoverKey) + '/manifest.m3u8'
-                : backendUrl('/api/sports/stream/' + encodeURIComponent(failoverKey) + '/manifest.m3u8');
-
-            var alternatives = [
-                {
-                    url: failoverUrl,
-                    type: 'hls',
-                    provider: 'سيرفر البث المباشر الاحتياطي (HD HLS Backup)',
-                    isLive: true
-                },
-                {
-                    url: 'https://thedaddy.li/player/stream-' + daddyId + '.php',
-                    embedUrl: 'https://thedaddy.li/player/stream-' + daddyId + '.php',
-                    type: 'embed',
-                    provider: 'Daddy Fast Stream (سيرفر البث 2)',
-                    isLive: true
-                },
-                {
-                    url: 'https://thedaddy.li/stream/stream-' + daddyId + '.php',
-                    embedUrl: 'https://thedaddy.li/stream/stream-' + daddyId + '.php',
-                    type: 'embed',
-                    provider: 'Daddy Live Stream (سيرفر البث 3)',
-                    isLive: true
-                }
-            ];
+            alternatives.push({
+                url: backendUrl('/api/sports/stream/' + encodeURIComponent(failoverKey) + '/manifest.m3u8'),
+                type: 'hls',
+                provider: 'سيرفر البث المباشر الاحتياطي (HD HLS Backup)',
+                isLive: true
+            });
 
             return Promise.resolve({
                 source: primary,

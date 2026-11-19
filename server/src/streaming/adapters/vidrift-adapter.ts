@@ -5,7 +5,7 @@ export class VidriftAdapter implements ProviderAdapter {
   readonly name = 'Vidrift';
   readonly isSupported = true;
   readonly supportedTypes = ['movie', 'series'] as const;
-  readonly basePriority = 93; // High priority due to fast response & clean UI parameters
+  readonly basePriority = 100; // Third general provider (Vidrift #3)
 
   private readonly BASE_URL = 'https://embed.vidrift.net';
 
@@ -55,10 +55,10 @@ export class VidriftAdapter implements ProviderAdapter {
     try {
       const res = await fetch(`${this.BASE_URL}/`, {
         method: 'HEAD',
-        headers: { 'User-Agent': 'NexusNight/1.0' },
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' },
         signal: AbortSignal.timeout(5000),
       });
-      return res.ok || res.status === 403 || res.status === 301 || res.status === 302;
+      return res.status > 0 && res.status < 500;
     } catch {
       return false;
     }

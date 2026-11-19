@@ -56,7 +56,7 @@ export function Home() {
   return (
     <div className="pb-4">
       {hero && <Hero hero={hero} fallbackImage={fallbackStill} resumable={!!resumeId} onPlay={play} onInfo={() => go.title(hero.id)} />}
-      <div className="relative z-10 -mt-14 space-y-1 sm:-mt-20">
+      <div className="rows-container relative z-10 -mt-14 space-y-1 sm:-mt-20">
         {contItems.length > 0 && (
           <Row title={t('continueWatching')}>
             {contItems.map((e) => {

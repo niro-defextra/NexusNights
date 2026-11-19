@@ -1,10 +1,22 @@
 /**
- * NexusNight Ultra-Clean Sports Live Stream Resolver & Proxy
- * 
- * Provides direct, 100% ad-free, popup-free HLS streaming for beIN Sports MENA
- * channels. Resolves high-bitrate tokenized streams and proxies manifests and
- * video segments with required upstream Referer/Origin headers to completely
- * eliminate CORS errors and third-party ad injection.
+ * NexusNight Sports Live Stream Resolver & Proxy
+ *
+ * Multi-provider architecture — purely server-side M3U8 extraction, zero iframes:
+ *
+ *  Provider 1 — WideIPTV  (wideiptv.top)
+ *    Pure HTTP fetch → regex extract streamUrl + token → proxy all HLS layers.
+ *    Covers: beIN AR 1-9, beIN News, beIN FR 1-3, Sky Sports.
+ *
+ *  Provider 2 — DembedST  (dembed.st / DaddyLive embed backend)
+ *    Pure HTTP fetch to dembed.st/premiumtv/daddy.php?id=N with correct Referer.
+ *    Regex extracts `const SRC = "..."` from response HTML → edge M3U8 URL.
+ *    Then fetches the M3U8 with dembed.st Referer. If the CDN allows server-side
+ *    access the manifest is proxied; otherwise falls through to Provider 3.
+ *
+ *  Provider 3 — Playwright Sniffer (DaddyLive via Chromium)
+ *    Last-resort: headless Chromium navigates dembed.st directly (faster than
+ *    thedaddy.li outer page), intercepts the m3u8 network request, returns URL.
+ *    Result cached for 30 min. Used only when Providers 1 & 2 fail.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -17,6 +29,10 @@ interface CachedStream {
   expiresAt: number;
   inflight?: Promise<string>;
 }
+
+// dembed.st SRC extraction
+// HTML contains: const SRC = "https://edge.wedd48c.top/premiumN/index.m3u8";
+const DEMBED_SRC_RE = /const\s+SRC\s*=\s*["']([^"']+\.m3u8[^"']*)["']/;
 
 const STREAM_URL_RE = /streamUrl:\s*"((?:\\\/|[^"])+)"/;
 const TOKEN_RE = /currentToken:\s*"([^"]+)"/;

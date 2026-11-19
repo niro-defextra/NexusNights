@@ -134,17 +134,42 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
     setHasError(false);
 
     let hls: Hls | null = null;
-    const url = source.url;
+    // Force a fresh upstream token resolution on recovery attempts (refreshKey > 0).
+    const url = refreshKey > 0 ? `${source.url}?_r=${refreshKey}` : source.url;
+    let destroyed = false;
+    let nativeLoadedHandler: (() => void) | null = null;
+    let nativeErrorHandler: (() => void) | null = null;
+    let retryCount = 0;
+    let watchdogTimer: any = null;
+    let stallTimer: any = null;
+    let lastTime = -1;
+    let stallCount = 0;
+
+    const clearTimers = () => {
+      if (watchdogTimer) clearTimeout(watchdogTimer);
+      if (stallTimer) clearInterval(stallTimer);
+    };
+
+    const recover = (reason: string) => {
+      if (destroyed || !hls) return;
+      console.warn('[SportsPlayer] Recovering stream:', reason);
+      try { hls.recoverMediaError(); } catch {}
+      try { hls.startLoad(); } catch {}
+    };
 
     if (Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
-        backBufferLength: 30,
+        backBufferLength: 15,
         maxBufferLength: 30,
         maxMaxBufferLength: 60,
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 6,
+        liveSyncDurationCount: 4,
+        liveMaxLatencyDurationCount: 10,
+        liveDurationInfinity: true,
+        highBufferWatchdogPeriod: 2,
+        nudgeOffset: 0.1,
+        nudgeMaxRetry: 10,
         xhrSetup: (xhr) => {
           xhr.withCredentials = false;
         },
@@ -154,19 +179,11 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
       hls.loadSource(url);
       hls.attachMedia(video);
 
-      let watchdogTimer: any = null;
-      const startWatchdog = () => {
-        if (watchdogTimer) clearTimeout(watchdogTimer);
-        watchdogTimer = setTimeout(() => {
-          if (video && (video.videoWidth === 0 || video.readyState < 2)) {
-            console.warn('[SportsPlayer] Stream watchdog triggered recovery');
-            hls?.recoverMediaError();
-          }
-        }, 4500);
-      };
-
       hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+        if (destroyed) return;
         setIsBuffering(false);
+        setHasError(false);
+        retryCount = 0;
         if (data.levels && data.levels.length > 0) {
           const parsed = data.levels.map((lvl, idx) => ({
             id: idx,
@@ -177,52 +194,106 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
           setLevels(parsed);
         }
         video.play().catch(() => {});
-        startWatchdog();
+
+        // Initial watchdog: ensure video actually renders
+        if (watchdogTimer) clearTimeout(watchdogTimer);
+        watchdogTimer = setTimeout(() => {
+          if (destroyed) return;
+          if (video.videoWidth === 0 || video.readyState < 2) {
+            recover('initial watchdog (no video)');
+          }
+        }, 6000);
       });
 
-      let retryCount = 0;
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              if (retryCount < 2) {
-                retryCount++;
-                hls?.startLoad();
-              } else {
-                setHasError(true);
-                setIsBuffering(false);
-                hls?.destroy();
-              }
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls?.recoverMediaError();
-              break;
-            default:
+        if (destroyed) return;
+        // Non-fatal buffer stalls: try to recover without surfacing an error
+        if (!data.fatal) {
+          if (data.details === 'bufferStalledError' || String(data.details).toLowerCase().includes('stall')) {
+            recover('buffer stalled');
+          }
+          return;
+        }
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            if (retryCount < 6) {
+              retryCount++;
+              const delay = Math.min(1000 * retryCount, 5000);
+              setTimeout(() => {
+                if (destroyed || !hls) return;
+                hls.startLoad();
+              }, delay);
+            } else {
+              // Re-resolve upstream by bumping refreshKey (server re-resolves token)
+              setHasError(false);
+              setIsBuffering(true);
+              setRefreshKey((k) => k + 1);
+            }
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            recover('media error');
+            break;
+          default:
+            if (retryCount < 3) {
+              retryCount++;
+              setTimeout(() => {
+                if (destroyed) return;
+                setRefreshKey((k) => k + 1);
+              }, 1500);
+            } else {
               setHasError(true);
               setIsBuffering(false);
-              hls?.destroy();
-              break;
-          }
+            }
+            break;
         }
       });
+
+      // Playback stall watchdog: detect frozen currentTime
+      stallTimer = setInterval(() => {
+        if (destroyed || !video) return;
+        if (video.paused) {
+          lastTime = video.currentTime;
+          stallCount = 0;
+          return;
+        }
+        if (video.currentTime === lastTime && video.readyState < 3) {
+          stallCount++;
+          if (stallCount >= 2) {
+            recover('playback frozen');
+            stallCount = 0;
+          }
+        } else {
+          stallCount = 0;
+        }
+        lastTime = video.currentTime;
+      }, 3000);
+
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url;
-      video.addEventListener('loadedmetadata', () => {
+      nativeLoadedHandler = () => {
+        if (destroyed) return;
         setIsBuffering(false);
         video.play().catch(() => {});
-      });
-      video.addEventListener('error', () => {
+      };
+      nativeErrorHandler = () => {
+        if (destroyed) return;
         setHasError(true);
         setIsBuffering(false);
-      });
+      };
+      video.addEventListener('loadedmetadata', nativeLoadedHandler);
+      video.addEventListener('error', nativeErrorHandler);
     }
 
     return () => {
+      destroyed = true;
+      clearTimers();
       if (hls) {
         hls.destroy();
         hlsRef.current = null;
       }
       if (video) {
+        if (nativeLoadedHandler) video.removeEventListener('loadedmetadata', nativeLoadedHandler);
+        if (nativeErrorHandler) video.removeEventListener('error', nativeErrorHandler);
         video.removeAttribute('src');
         video.load();
       }
@@ -323,7 +394,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
             aria-label="Back to channels"
           >
             <ArrowLeft className={`size-4 ${lang === 'ar' ? 'rotate-180' : ''}`} />
-            <span>{lang === 'ar' ? 'العودة للدليل الرياضي' : 'Back to Sports'}</span>
+            <span>{lang === 'ar' ? 'العودة' : 'Back'}</span><span className="hidden sm:inline">{lang === 'ar' ? ' للدليل' : ' to Sports'}</span>
           </button>
 
           <div className="h-4 w-px bg-white/15 hidden sm:block" />
@@ -340,11 +411,11 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
             />
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
-                <span className="font-display font-bold text-sm sm:text-base text-white tracking-wide">
+                <span className="font-display font-bold text-sm sm:text-base text-white tracking-wide truncate max-w-[130px] sm:max-w-none">
                   {lang === 'ar' ? channel.nameAr : channel.name}
                 </span>
-                <span className="flex items-center gap-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
-                  <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="flex items-center gap-1 rounded-full bg-blood/20 border border-blood/40 px-2 py-0.5 text-[10px] font-bold text-blood-hot uppercase tracking-wider">
+                  <span className="size-1.5 rounded-full bg-blood-hot animate-pulse" />
                   <span>LIVE</span>
                 </span>
               </div>
@@ -363,14 +434,14 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
               }}
               className="flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-bone hover:bg-white/10 active:scale-95 transition-all"
             >
-              <Sliders className="size-3.5 text-emerald-400" />
+              <Sliders className="size-3.5 text-blood-hot" />
               <span className="max-w-[120px] sm:max-w-[180px] truncate">
                 {source?.label || (lang === 'ar' ? 'السيرفر' : 'Server')}
               </span>
             </button>
 
             {showSourceMenu && (
-              <div className="absolute end-0 top-full mt-2 w-72 rounded-2xl border border-white/15 bg-[#0f1118]/95 backdrop-blur-2xl p-2.5 shadow-2xl z-40 animate-fade">
+              <div className="absolute end-0 top-full mt-2 w-72 rounded-2xl border border-white/15 bg-crypt/95 backdrop-blur-2xl p-2.5 shadow-2xl z-40 animate-fade">
                 <div className="px-3 py-1 text-[11px] font-bold text-dust uppercase tracking-wider">
                   {lang === 'ar' ? 'اختر سيرفر البث المباشر' : 'Select Stream Server'}
                 </div>
@@ -383,11 +454,11 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                         setShowSourceMenu(false);
                       }}
                       className={`flex items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-start transition-colors ${
-                        idx === currentSourceIdx ? 'bg-emerald-500/20 text-emerald-300' : 'text-bone hover:bg-white/5'
+                        idx === currentSourceIdx ? 'bg-blood/20 text-blood-hot font-bold' : 'text-bone hover:bg-white/5'
                       }`}
                     >
                       <span className="truncate max-w-[210px]">{s.label}</span>
-                      {idx === currentSourceIdx && <Check className="size-3.5 text-emerald-400 shrink-0" />}
+                      {idx === currentSourceIdx && <Check className="size-3.5 text-blood-hot shrink-0" />}
                     </button>
                   ))}
                   <div className="my-1 h-px bg-white/10" />
@@ -416,7 +487,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
             className="flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-bone hover:bg-white/10 active:scale-95 transition-all"
             title={lang === 'ar' ? 'فتح البث في نافذة مستقلة' : 'Popout Window'}
           >
-            <ExternalLink className="size-3.5 text-emerald-400" />
+            <ExternalLink className="size-3.5 text-blood-hot" />
             <span className="hidden sm:inline">{lang === 'ar' ? 'نافذة مستقلة' : 'Popout'}</span>
           </button>
 
@@ -426,7 +497,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
             className="flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-bone hover:bg-white/10 active:scale-95 transition-all"
             title={lang === 'ar' ? 'إعادة تحميل البث' : 'Reload Stream'}
           >
-            <Spinner className="size-3.5 text-emerald-400" />
+            <Spinner className="size-3.5 text-blood-hot" />
             <span className="hidden sm:inline">{lang === 'ar' ? 'تحديث' : 'Reload'}</span>
           </button>
         </div>
@@ -463,7 +534,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                 {/* Buffering Overlay */}
                 {isBuffering && !hasError && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm gap-3 pointer-events-none z-20">
-                    <Spinner className="size-10 text-emerald-400" />
+                    <Spinner className="size-10 text-blood-hot" />
                     <p className="text-xs sm:text-sm font-semibold text-bone">
                       {lang === 'ar' ? 'جاري الاتصال بالبث المباشر...' : 'Connecting to Live Stream...'}
                     </p>
@@ -496,7 +567,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                           const next = (currentSourceIdx + 1) % channel.streamSources.length;
                           setCurrentSourceIdx(next);
                         }}
-                        className="rounded-full bg-emerald-500 px-4 py-2 text-xs font-bold text-black hover:bg-emerald-400 active:scale-95 transition-all"
+                        className="rounded-full bg-blood px-4 py-2 text-xs font-bold text-white hover:bg-blood-hot active:scale-95 transition-all shadow-md"
                       >
                         {lang === 'ar' ? 'التبديل إلى سيرفر بديل' : 'Switch Server'}
                       </button>
@@ -519,7 +590,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                     className="absolute inset-0 flex items-center justify-center bg-black/40 z-20 group-hover:scale-105 transition-transform"
                     aria-label="Play Stream"
                   >
-                    <div className="size-16 sm:size-20 rounded-full bg-emerald-500/90 text-black flex items-center justify-center shadow-[0_0_30px_rgba(16,185,129,0.5)]">
+                    <div className="size-16 sm:size-20 rounded-full bg-blood text-white flex items-center justify-center shadow-[0_0_30px_rgba(220,48,68,0.6)]">
                       <Play className="size-8 sm:size-10 translate-x-0.5" />
                     </div>
                   </button>
@@ -535,7 +606,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                   <div className="flex items-center gap-3">
                     <button
                       onClick={togglePlay}
-                      className="p-1 text-bone hover:text-emerald-400 transition-colors"
+                      className="p-1 text-bone hover:text-blood-hot transition-colors"
                       aria-label={isPlaying ? 'Pause' : 'Play'}
                     >
                       {isPlaying ? <Pause className="size-5" /> : <Play className="size-5" />}
@@ -545,7 +616,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                     <div className="flex items-center gap-2 group/vol">
                       <button
                         onClick={toggleMute}
-                        className="p-1 text-bone hover:text-emerald-400 transition-colors"
+                        className="p-1 text-bone hover:text-blood-hot transition-colors"
                         aria-label="Mute Toggle"
                       >
                         <Volume level={isMuted || volume === 0 ? 0 : volume < 0.5 ? 1 : 2} className="size-4" />
@@ -557,14 +628,14 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                         step="0.05"
                         value={isMuted ? 0 : volume}
                         onChange={handleVolumeChange}
-                        className="w-16 sm:w-20 accent-emerald-400 h-1 bg-white/20 rounded-lg cursor-pointer"
+                        className="w-16 sm:w-20 accent-blood-hot h-1 bg-white/20 rounded-lg cursor-pointer"
                         aria-label="Volume"
                       />
                     </div>
 
                     {/* Live Broadcast Badge (NO SEEK SCRUBBER) */}
-                    <div className="flex items-center gap-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 px-2.5 py-0.5 text-[10px] font-bold text-emerald-400 uppercase tracking-wider ms-2">
-                      <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <div className="flex items-center gap-1.5 rounded-full bg-blood/20 border border-blood/40 px-2.5 py-0.5 text-[10px] font-bold text-blood-hot uppercase tracking-wider ms-2">
+                      <span className="size-1.5 rounded-full bg-blood-hot animate-pulse" />
                       <span>{lang === 'ar' ? 'مباشر' : 'LIVE'}</span>
                     </div>
                   </div>
@@ -582,26 +653,26 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                         </button>
 
                         {showQualityMenu && (
-                          <div className="absolute end-0 bottom-full mb-2 w-32 rounded-xl border border-white/15 bg-[#0f1118]/95 backdrop-blur-2xl p-1.5 shadow-2xl z-40 animate-fade">
+                          <div className="absolute end-0 bottom-full mb-2 w-32 rounded-xl border border-white/15 bg-crypt/95 backdrop-blur-2xl p-1.5 shadow-2xl z-40 animate-fade">
                             <button
                               onClick={() => handleQualitySelect(-1)}
                               className={`w-full flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${
-                                currentLevel === -1 ? 'bg-emerald-500/20 text-emerald-400 font-bold' : 'text-bone hover:bg-white/5'
+                                currentLevel === -1 ? 'bg-blood/20 text-blood-hot font-bold' : 'text-bone hover:bg-white/5'
                               }`}
                             >
                               <span>{lang === 'ar' ? 'تلقائي (Auto)' : 'Auto'}</span>
-                              {currentLevel === -1 && <Check className="size-3 text-emerald-400" />}
+                              {currentLevel === -1 && <Check className="size-3 text-blood-hot" />}
                             </button>
                             {levels.map((lvl) => (
                               <button
                                 key={lvl.id}
                                 onClick={() => handleQualitySelect(lvl.id)}
                                 className={`w-full flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${
-                                  currentLevel === lvl.id ? 'bg-emerald-500/20 text-emerald-400 font-bold' : 'text-bone hover:bg-white/5'
+                                  currentLevel === lvl.id ? 'bg-blood/20 text-blood-hot font-bold' : 'text-bone hover:bg-white/5'
                                 }`}
                               >
                                 <span>{lvl.name}</span>
-                                {currentLevel === lvl.id && <Check className="size-3 text-emerald-400" />}
+                                {currentLevel === lvl.id && <Check className="size-3 text-blood-hot" />}
                               </button>
                             ))}
                           </div>
@@ -612,7 +683,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                     {/* Fullscreen Button */}
                     <button
                       onClick={toggleFullscreen}
-                      className="p-1 text-bone hover:text-emerald-400 transition-colors"
+                      className="p-1 text-bone hover:text-blood-hot transition-colors"
                       aria-label="Fullscreen"
                     >
                       {isFullscreen ? <ExitFullscreen className="size-4" /> : <Fullscreen className="size-4" />}
@@ -620,15 +691,6 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                   </div>
                 </div>
               </div>
-            ) : source?.type === 'embed' ? (
-              <iframe
-                key={`${source.url}-${refreshKey}`}
-                src={source.url}
-                title={channel.name}
-                className="size-full border-0"
-                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-                referrerPolicy="no-referrer"
-              />
             ) : (
               <div className="size-full flex items-center justify-center p-6 text-center">
                 <p className="text-sm text-dust">
@@ -660,7 +722,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
 
               {/* Server Quality Indicator */}
               <div className="flex items-center gap-2 rounded-xl bg-white/[0.04] border border-white/10 px-3 py-1.5 text-xs text-dust">
-                <Zap className="size-3.5 text-emerald-400" />
+                <Zap className="size-3.5 text-gilt" />
                 <span>
                   {source?.type === 'hls'
                     ? (lang === 'ar' ? 'مشغل أصلي فائق النقاء • 1080p' : 'Native Nexus Stream • 1080p')
@@ -674,7 +736,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
               <div className="flex flex-col gap-2 pt-2 border-t border-white/[0.06]">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-bone flex items-center gap-1.5">
-                    <Sliders className="size-3.5 text-emerald-400" />
+                    <Sliders className="size-3.5 text-blood-hot" />
                     <span>{lang === 'ar' ? 'سيرفرات البث المتوفرة للقناة (اضغط للتبديل الفوري):' : 'Available Stream Servers:'}</span>
                   </span>
                   <span className="text-[11px] text-dust hidden sm:inline">
@@ -688,7 +750,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                       onClick={() => setCurrentSourceIdx(idx)}
                       className={`rounded-xl px-3.5 py-1.5 text-xs font-semibold shrink-0 transition-all ${
                         idx === currentSourceIdx
-                          ? 'bg-emerald-500 text-black shadow-md font-bold'
+                          ? 'bg-blood text-white shadow-md font-bold'
                           : 'border border-white/10 bg-white/[0.04] text-dust hover:text-bone hover:border-white/25 hover:bg-white/[0.08]'
                       }`}
                     >
@@ -704,7 +766,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
               <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 flex flex-col gap-2">
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-emerald-400 uppercase tracking-wider">
+                    <span className="font-bold text-gilt uppercase tracking-wider">
                       {lang === 'ar' ? 'يُعرض الآن:' : 'Now Airing:'}
                     </span>
                     <span className="font-display font-bold text-sm text-white">
@@ -719,7 +781,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                 {/* Real Show Duration Progress Bar */}
                 <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden my-1">
                   <div
-                    className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                    className="bg-blood h-full rounded-full transition-all duration-500"
                     style={{ width: `${Math.max(5, channel.currentProgram.progressPercent)}%` }}
                   />
                 </div>
@@ -753,14 +815,14 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
 
         {/* Sidebar Stage (Channel Surfer & Live EPG Schedule) */}
         <div className="lg:col-span-4 xl:col-span-3 flex flex-col gap-4">
-          <div className="rounded-2xl border border-white/[0.08] bg-[#0c0e14] p-4 flex flex-col h-[650px] shadow-lg">
+          <div className="rounded-2xl border border-white/[0.08] bg-crypt/90 p-4 flex flex-col h-[650px] shadow-lg">
             {/* Sidebar Tabs */}
             <div className="flex items-center gap-1 p-1 bg-white/[0.04] border border-white/[0.08] rounded-xl mb-3">
               <button
                 onClick={() => setSidebarTab('channels')}
                 className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
                   sidebarTab === 'channels'
-                    ? 'bg-emerald-500 text-black shadow-md'
+                    ? 'bg-blood text-white shadow-md font-bold'
                     : 'text-dust hover:text-bone hover:bg-white/[0.04]'
                 }`}
               >
@@ -772,7 +834,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                 onClick={() => setSidebarTab('epg')}
                 className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
                   sidebarTab === 'epg'
-                    ? 'bg-emerald-500 text-black shadow-md'
+                    ? 'bg-blood text-white shadow-md font-bold'
                     : 'text-dust hover:text-bone hover:bg-white/[0.04]'
                 }`}
               >
@@ -798,7 +860,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                       onClick={() => setChannelFilter(cat.id)}
                       className={`px-2.5 py-1 rounded-lg font-semibold shrink-0 transition-colors ${
                         channelFilter === cat.id
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          ? 'bg-blood/20 text-blood-hot border border-blood/40'
                           : 'bg-white/[0.03] text-dust hover:bg-white/[0.08] border border-white/5'
                       }`}
                     >
@@ -815,7 +877,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder={lang === 'ar' ? 'ابحث عن قناة أو برنامج...' : 'Search channels...'}
-                    className="w-full rounded-xl border border-white/10 bg-white/[0.03] ps-9 pe-3 py-1.5 text-xs text-bone placeholder:text-dust/50 focus:border-emerald-500 focus:outline-none"
+                    className="w-full rounded-xl border border-white/10 bg-white/[0.03] ps-9 pe-3 py-1.5 text-xs text-bone placeholder:text-dust/50 focus:border-blood/60 focus:outline-none"
                   />
                 </div>
 
@@ -829,7 +891,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                         onClick={() => onSelectChannel(ch)}
                         className={`w-full flex items-center justify-between p-2.5 rounded-xl border text-start transition-all ${
                           active
-                            ? 'border-emerald-500/80 bg-emerald-500/15 shadow-[0_0_15px_rgba(16,185,129,0.2)]'
+                            ? 'border-blood/80 bg-blood/15 shadow-[0_0_15px_rgba(179,32,47,0.25)]'
                             : 'border-white/[0.06] bg-white/[0.02] hover:border-white/15 hover:bg-white/[0.05]'
                         }`}
                       >
@@ -859,7 +921,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                         </div>
 
                         {active && (
-                          <span className="size-2 rounded-full bg-emerald-400 animate-pulse shrink-0 ms-2" />
+                          <span className="size-2 rounded-full bg-blood-hot animate-pulse shrink-0 ms-2" />
                         )}
                       </button>
                     );
@@ -885,7 +947,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                           key={prog.id}
                           className={`p-2.5 rounded-xl border text-xs transition-colors ${
                             prog.isLive
-                              ? 'border-emerald-500/60 bg-emerald-500/10'
+                              ? 'border-blood/60 bg-blood/10'
                               : 'border-white/[0.05] bg-white/[0.02]'
                           }`}
                         >
@@ -894,7 +956,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                               {prog.timeFormatted}
                             </span>
                             {prog.isLive && (
-                              <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[9px] font-bold text-emerald-400 uppercase">
+                              <span className="rounded-full bg-blood/20 px-2 py-0.5 text-[9px] font-bold text-blood-hot uppercase">
                                 {lang === 'ar' ? 'مباشر الآن' : 'LIVE'}
                               </span>
                             )}
@@ -955,7 +1017,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                 placeholder="https://.../stream.m3u8 أو https://..."
                 value={customInputUrl}
                 onChange={(e) => setCustomInputUrl(e.target.value)}
-                className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-bone placeholder:text-dust/50 focus:border-emerald-500 focus:outline-none"
+                className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-bone placeholder:text-dust/50 focus:border-blood/60 focus:outline-none"
               />
 
               <div className="flex items-center justify-end gap-3 pt-2">
@@ -968,7 +1030,7 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
                 </button>
                 <button
                   type="submit"
-                  className="rounded-full bg-emerald-500 px-5 py-2.5 text-xs font-bold text-black hover:bg-emerald-400 active:scale-95 transition-all"
+                  className="rounded-full bg-blood px-5 py-2.5 text-xs font-bold text-white hover:bg-blood-hot active:scale-95 transition-all"
                 >
                   {lang === 'ar' ? 'حفظ وتشغيل' : 'Save & Play'}
                 </button>

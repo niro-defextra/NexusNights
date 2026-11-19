@@ -9,6 +9,7 @@
         query: '',
         results: null,
         debounceTimer: null,
+        focusResultsOnRender: false,
         keyboards: {
             ar: [
                 ['ا', 'ب', 'ت', 'ث', 'ج', 'ح', 'خ', 'د', 'ذ', 'ر'],
@@ -29,18 +30,27 @@
             this.currentLang = NexusConfig.getLanguage();
             var isAr = this.currentLang === 'ar';
             var html = '<div class="search-page">';
-            
-            // Header
+
             html += '<div class="search-header">';
-            html += '<h1 class="search-title" style="font-size: 36px; margin-bottom: 20px;">' + (isAr ? 'البحث عن فيلم أو مسلسل' : 'Search Movies & TV Shows') + '</h1>';
-            html += '<div class="search-input-wrapper">';
-            html += '<input type="text" id="search-input" class="search-input focusable" readonly aria-label="' + (isAr ? 'حقل البحث' : 'Search field') + '" value="' + NexusConfig.escapeHtml(this.query) + '" placeholder="' + (isAr ? 'اكتب اسم الفيلم أو المسلسل...' : 'Type title to search...') + '">';
-            html += '</div>';
+            html += '<h1 class="search-title">' + (isAr ? 'البحث' : 'Search') + '</h1>';
             html += '</div>';
 
-            // Split Layout Container: Keyboard on top, Live Results below
+            html += '<div class="search-layout">';
+
+            // Keyboard column — input and keys share one measure
+            html += '<div class="search-keyboard-column">';
+            html += '<div class="search-input-wrapper">';
+            html += '<input type="text" id="search-input" class="search-input" readonly aria-label="' + (isAr ? 'حقل البحث' : 'Search field') + '" value="' + NexusConfig.escapeHtml(this.query) + '" placeholder="' + (isAr ? 'اسم الفيلم أو المسلسل' : 'Movie or series title') + '">';
+            html += '</div>';
             html += '<div class="keyboard-container">' + this.renderKeyboard() + '</div>';
-            html += '<div class="search-results" id="search-results"></div>';
+            html += '</div>';
+
+            // Results column — the live answer beside the keys
+            html += '<div class="search-results-panel" id="search-results-panel">';
+            html += this.renderHint();
+            html += '</div>';
+
+            html += '</div>';
             html += '</div>';
 
             document.getElementById('main-content').innerHTML = html;
@@ -49,6 +59,16 @@
             if (this.query && this.query.trim().length > 1) {
                 this.performSearch();
             }
+        },
+
+        renderHint: function () {
+            var isAr = this.currentLang === 'ar';
+            return '<div class="search-hint">' +
+                '<div class="search-hint-icon" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2"><circle cx="21" cy="21" r="13"/><line x1="31" y1="31" x2="41" y2="41" stroke-linecap="round"/></svg></div>' +
+                '<div class="search-hint-title">' + (isAr ? 'ستظهر النتائج هنا' : 'Results appear here') + '</div>' +
+                '<div class="search-hint-text">' + (isAr ? 'اكتب حرفين على لوحة المفاتيح، وسيبدأ البحث تلقائياً.' : 'Type two letters on the keyboard and search starts on its own.') + '</div>' +
+                '<div class="search-hint-keys">' + (isAr ? 'للوصول إلى النتائج استخدم سهم اليسار' : 'Use the left arrow to reach results') + '</div>' +
+                '</div>';
         },
 
         renderKeyboard: function () {
@@ -72,7 +92,7 @@
             html += '<button class="keyboard-key special focusable" data-key="backspace">' + backspaceSvg + (isAr ? 'حذف' : 'Delete') + '</button>';
             html += '<button class="keyboard-key special focusable" data-key="clear">' + (isAr ? 'مسح' : 'Clear') + '</button>';
             html += '<button class="keyboard-key special focusable" data-key="switch-lang">' + langSwitchText + '</button>';
-            html += '<button class="keyboard-key special focusable" data-key="search" style="background: var(--color-brand-red); font-weight: 700;">' + (isAr ? 'بحث' : 'Search') + '</button>';
+            html += '<button class="keyboard-key special primary focusable" data-key="search">' + (isAr ? 'بحث' : 'Search') + '</button>';
             html += '</div>';
 
             return html;
@@ -110,7 +130,10 @@
                     this.render();
                     return;
                 case 'search':
-                    if (this.query.trim().length > 0) this.performSearch();
+                    if (this.query.trim().length > 0) {
+                        this.focusResultsOnRender = true;
+                        this.performSearch();
+                    }
                     return;
                 default:
                     this.query += key;
@@ -133,39 +156,46 @@
 
         performSearch: function () {
             var self = this;
-            var resultsContainer = document.getElementById('search-results');
+            var resultsContainer = document.getElementById('search-results-panel');
             if (!resultsContainer) return;
-            resultsContainer.innerHTML = '<div class="loading-spinner" style="margin:48px auto"></div>';
+            var isAr = this.currentLang === 'ar';
+            resultsContainer.innerHTML = '<div class="search-loading"><div class="loading-spinner"></div><div class="loading-text">' + (isAr ? 'جاري البحث…' : 'Searching…') + '</div></div>';
 
             NexusAPI.search(this.query).then(function (data) {
                 self.results = data;
                 self.renderResults();
             }).catch(function (error) {
                 console.error('[SearchPage] Error:', error);
-                resultsContainer.innerHTML = '<div class="error-message">تعذر إتمام البحث: ' + NexusConfig.escapeHtml(error.message) + '</div>';
+                self.focusResultsOnRender = false;
+                resultsContainer.innerHTML = '<div class="search-hint is-error"><div class="search-hint-title">' + (isAr ? 'تعذّر البحث' : 'Search unavailable') + '</div><div class="search-hint-text">' + NexusConfig.escapeHtml(NexusApp.describeError(error)) + '</div></div>';
             });
         },
 
         renderResults: function () {
-            var container = document.getElementById('search-results');
+            var container = document.getElementById('search-results-panel');
             var items = this.results && Array.isArray(this.results.results) ? this.results.results : [];
+            var isAr = this.currentLang === 'ar';
             if (!container) return;
             if (!items.length) {
-                container.innerHTML = '<div class="empty-state" style="min-height: 250px;"><div class="empty-state-text">لا توجد نتائج مطابقة لـ "' + NexusConfig.escapeHtml(this.query) + '"</div><div class="empty-state-subtext">تأكد من كتابة الاسم بدقة أو جرب البحث بلغة أخرى</div></div>';
+                this.focusResultsOnRender = false;
+                container.innerHTML = '<div class="search-hint"><div class="search-hint-title">' + (isAr ? 'لا نتائج لـ «' + NexusConfig.escapeHtml(this.query) + '»' : 'No results for “' + NexusConfig.escapeHtml(this.query) + '”') + '</div><div class="search-hint-text">' + (isAr ? 'جرّب اسماً أقصر أو بدّل اللغة.' : 'Try a shorter title or switch the keyboard language.') + '</div></div>';
                 return;
             }
 
-            var html = '<h2 class="section-title" style="padding:0 var(--spacing-xl);margin-top:36px;margin-bottom:24px;">نتائج البحث (' + items.length + ')</h2>';
-            html += '<div class="search-results-grid" style="padding: 0 var(--spacing-xl);">';
+            var html = '<div class="search-results-head">';
+            html += '<h2 class="section-title">' + (isAr ? 'النتائج' : 'Results') + '</h2>';
+            html += '<span class="search-results-count">' + items.length + '</span>';
+            html += '</div>';
+            html += '<div class="search-results-list">';
             for (var i = 0; i < items.length; i++) {
-                html += this.renderCard(items[i]);
+                html += this.renderResultRow(items[i]);
             }
             html += '</div>';
             container.innerHTML = html;
 
-            var cards = container.querySelectorAll('.content-card');
-            for (var j = 0; j < cards.length; j++) {
-                cards[j].onclick = function () {
+            var rows = container.querySelectorAll('.search-result');
+            for (var j = 0; j < rows.length; j++) {
+                rows[j].onclick = function () {
                     Navigator.navigateTo('details', {
                         kind: this.getAttribute('data-kind'),
                         tmdbId: this.getAttribute('data-tmdb-id'),
@@ -174,27 +204,45 @@
                 };
             }
             FocusManager.register(document.querySelectorAll('.focusable'));
+
+            if (this.focusResultsOnRender && rows.length) {
+                this.focusResultsOnRender = false;
+                FocusManager.focus(rows[0]);
+            }
         },
 
-        renderCard: function (item) {
+        renderResultRow: function (item) {
             var posterUrl = item.posterUrl ? NexusConfig.getImageUrl(item.posterUrl, 'poster') : null;
             var backdropUrl = item.backdropUrl ? NexusConfig.getImageUrl(item.backdropUrl, 'backdrop') : null;
             var image = posterUrl || backdropUrl;
             var title = item.title || item.name || '';
             var kind = item.kind || (item.media_type === 'tv' ? 'series' : 'movie');
             var targetId = item.tmdbId > 0 ? item.tmdbId : (item.localId || item.id || '');
+            var isAr = this.currentLang === 'ar';
+            var meta = [];
+            if (item.year) meta.push(NexusConfig.escapeHtml(item.year));
+            meta.push(kind === 'series' ? (isAr ? 'مسلسل' : 'Series') : (isAr ? 'فيلم' : 'Movie'));
+            if (item.rating) meta.push('<span class="text-gold">★ ' + Number(item.rating).toFixed(1) + '</span>');
 
-            var html = '<div class="content-card focusable" data-kind="' + NexusConfig.escapeHtml(kind) + '" data-id="' + NexusConfig.escapeHtml(targetId) + '" data-tmdb-id="' + (item.tmdbId || 0) + '" data-local-id="' + NexusConfig.escapeHtml(item.localId || '') + '">';
-            html += image ? '<img class="card-poster" loading="lazy" src="' + NexusConfig.escapeHtml(image) + '" alt="' + NexusConfig.escapeHtml(title) + '">' : '<div class="card-poster loading"></div>';
-            html += '<div class="card-info"><div class="card-title text-ellipsis">' + NexusConfig.escapeHtml(title) + '</div><div class="card-meta">';
-            if (item.rating) html += '<span class="card-rating text-gold">★ ' + Number(item.rating).toFixed(1) + '</span> ';
-            if (item.year) html += '<span>' + NexusConfig.escapeHtml(item.year) + '</span>';
-            return html + '</div></div></div>';
+            var html = '<div class="search-result focusable" data-kind="' + NexusConfig.escapeHtml(kind) + '" data-id="' + NexusConfig.escapeHtml(targetId) + '" data-tmdb-id="' + (item.tmdbId || 0) + '" data-local-id="' + NexusConfig.escapeHtml(item.localId || '') + '">';
+            html += '<div class="search-result-art">';
+            if (image) {
+                html += '<img class="search-result-poster" loading="lazy" src="' + NexusConfig.escapeHtml(image) + '" alt="">';
+            }
+            html += '<span class="search-result-initial" aria-hidden="true">' + NexusConfig.escapeHtml(title.charAt(0)) + '</span>';
+            html += '</div>';
+            html += '<div class="search-result-body">';
+            html += '<div class="search-result-title text-ellipsis">' + NexusConfig.escapeHtml(title) + '</div>';
+            html += '<div class="search-result-meta">' + meta.join(' · ') + '</div>';
+            html += '</div>';
+            html += '<span class="search-result-action" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span>';
+            html += '</div>';
+            return html;
         },
 
         clearResults: function () {
-            var container = document.getElementById('search-results');
-            if (container) container.innerHTML = '';
+            var container = document.getElementById('search-results-panel');
+            if (container) container.innerHTML = this.renderHint();
             this.results = null;
         },
 

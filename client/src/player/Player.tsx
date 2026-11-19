@@ -2,7 +2,7 @@ import Hls from 'hls.js';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, u } from '../api';
 import type { EpisodeDetail, PlaybackErrorCode, PlaybackConfigPublic, PlaybackSourcePublic, AniSkipTimingsPublic } from '../api-types';
-import { ArrowLeft, AudioTracks, ExitFullscreen, Fullscreen, Gauge, Lock, Next, Pause, Play, Skip, Sliders, Spinner, Subtitles, Volume } from '../components/Icons';
+import { ArrowLeft, AudioTracks, ExitFullscreen, Fullscreen, Gauge, Lock, Next, Pause, Pip, Play, Skip, Sliders, Spinner, Subtitles, Volume } from '../components/Icons';
 import { clamp, fmtTime } from '../format';
 import { useI18n } from '../i18n';
 import { ControlButton, Menu } from './Menu';
@@ -138,6 +138,39 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
   const [showExternalSubModal, setShowExternalSubModal] = useState(false);
   const [externalSubtitles, setExternalSubtitles] = useState<Array<{ id: string; label: string; url: string }>>([]);
   const { toasts, showToast, removeToast } = useToast();
+
+  // ── Picture-in-Picture State & Handlers ────────────────────────────────────
+  const [isPip, setIsPip] = useState(false);
+  const pipSupported = typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && !!document.pictureInPictureEnabled;
+
+  const togglePip = useCallback(async () => {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        setIsPip(false);
+      } else if (v.requestPictureInPicture) {
+        await v.requestPictureInPicture();
+        setIsPip(true);
+      }
+    } catch (err) {
+      console.warn('[Player] PiP toggle error:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const onEnterPip = () => setIsPip(true);
+    const onLeavePip = () => setIsPip(false);
+    v.addEventListener('enterpictureinpicture', onEnterPip);
+    v.addEventListener('leavepictureinpicture', onLeavePip);
+    return () => {
+      v.removeEventListener('enterpictureinpicture', onEnterPip);
+      v.removeEventListener('leavepictureinpicture', onLeavePip);
+    };
+  }, []);
 
   const hideTimer = useRef<number>();
   const clickTimer = useRef<number>();
@@ -1141,6 +1174,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       else if (k === 'arrowdown') act.current.setVol(v.volume - 0.1);
       else if (k === 'm') act.current.toggleMute();
       else if (k === 'f') toggleFs();
+      else if (k === 'p') void togglePip();
       else if (k === 'n' && hasNext) cb.current.onNext();
       else if (k === 'c' && allSubtitles.length) void selectSubtitle(subId ? null : allSubtitles[0].id);
       else if (k === '[' || k === 'z') {
@@ -1688,6 +1722,11 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
                   />
                 )}
               </div>
+              {pipSupported && (
+                <ControlButton label={t('pip')} onClick={togglePip} active={isPip}>
+                  <Pip className="size-5 sm:size-6" />
+                </ControlButton>
+              )}
               <ControlButton label={fs ? t('exitFullscreen') : t('fullscreen')} onClick={toggleFs}>
                 {fs ? <ExitFullscreen className="size-5 sm:size-6" /> : <Fullscreen className="size-5 sm:size-6" />}
               </ControlButton>

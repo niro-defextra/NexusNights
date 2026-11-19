@@ -34,7 +34,7 @@ export function ControlButton({
       aria-label={label}
       title={label}
       onClick={(e) => { e.stopPropagation(); handleClick(); }}
-      className={`inline-flex size-9 sm:size-10 items-center justify-center rounded-full transition-all duration-200 hover:bg-white/15 hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gilt ${active ? 'bg-white/15 text-gilt shadow-[0_0_12px_rgba(212,175,106,0.35)]' : 'text-bone/90 hover:text-white'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''} ${className}`}
+      className={`inline-flex size-9 sm:size-10 items-center justify-center rounded-full transition-colors duration-150 hover:bg-white/15 active:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bone/70 ${active ? 'bg-white/15 text-bone' : 'text-bone/90 hover:text-white'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''} ${className}`}
     >
       {children}
     </button>
@@ -65,9 +65,9 @@ export function Menu({
     <div
       role="menu"
       onClick={(e) => e.stopPropagation()}
-      className={`absolute ${positionClass} z-30 max-h-[min(22rem,58cqh)] min-w-[13.5rem] max-w-[min(22rem,85cqw)] animate-fade overflow-y-auto scrollbar-thin rounded-2xl border border-white/15 bg-coal/95 p-1.5 shadow-[0_24px_60px_rgba(0,0,0,0.95)] backdrop-blur-2xl`}
+      className={`absolute ${positionClass} z-30 max-h-[min(22rem,58cqh)] min-w-[13.5rem] max-w-[min(22rem,85cqw)] overflow-y-auto scrollbar-thin rounded-lg border border-white/15 bg-coal p-1.5`}
     >
-      <p className="px-3 pb-2 pt-2.5 text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-gilt border-b border-white/[0.06] mb-1">{title}</p>
+      <p className="px-3 pb-2 pt-2.5 text-[0.72rem] font-medium text-dust border-b border-white/10 mb-1">{title}</p>
       <div className="flex flex-col gap-0.5">
         {items.map((it) => (
           <button
@@ -75,7 +75,7 @@ export function Menu({
             role="menuitemradio"
             aria-checked={it.id === selected}
             onClick={() => onSelect(it.id)}
-            className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-start text-xs sm:text-sm transition-all duration-150 active:scale-[0.98] ${
+            className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-start text-xs sm:text-sm transition-colors duration-150 ${
               it.id === selected 
                 ? 'bg-white/10 text-bone font-medium' 
                 : 'text-dust hover:bg-white/[0.07] hover:text-bone'

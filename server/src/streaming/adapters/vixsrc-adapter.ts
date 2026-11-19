@@ -5,7 +5,7 @@ export class VixSrcAdapter implements ProviderAdapter {
   readonly name = 'VixSrc';
   readonly isSupported = true;
   readonly supportedTypes = ['movie', 'series'] as const;
-  readonly basePriority = 90;
+  readonly basePriority = 110; // Second general provider (VixSrc #2)
 
   private readonly BASE_URL = 'https://vixsrc.to';
 

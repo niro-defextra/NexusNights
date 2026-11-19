@@ -421,37 +421,13 @@ function recomputeFixtureStatus(data: SportsFixturesResponse, now: Date): Sports
 }
 
 function buildFallbackFixtures(now: Date): SportsFixturesResponse {
-  const h = (now.getHours() % 12) || 12;
-  const ampm = now.getHours() >= 12 ? 'م' : 'ص';
-
-  const sampleMatch: SportFixture = {
-    id: 'fallback-1',
-    title: 'المغرب vs النيجر',
-    homeTeam: 'المغرب',
-    homeTeamEn: 'Morocco',
-    homeCrest: 'https://media.api-sports.io/football/teams/31.png',
-    awayTeam: 'النيجر',
-    awayTeamEn: 'Niger',
-    awayCrest: 'https://media.api-sports.io/football/teams/1504.png',
-    league: 'تصفيات كأس أمم إفريقيا',
-    rawLeague: 'Africa Cup of Nations Qualification',
-    channelSlug: 'bein-1',
-    channelName: 'beIN SPORTS 1 HD',
-    start: now.toISOString(),
-    stop: new Date(now.getTime() + 7200000).toISOString(),
-    time: `${h}:00 ${ampm}`,
-    status: 'live',
-    minute: "45'",
-    desc: 'بث مباشر عالي الجودة عبر شبكة beIN SPORTS',
-    stadium: 'المجمع الرياضي الأمير مولاي عبد الله',
-    commentator: 'جواد بدة',
-  };
-
+  // Do NOT fabricate fake matches. If we could not fetch real EPG data,
+  // return an empty result so the UI honestly shows "no matches".
   return {
-    featured: sampleMatch,
-    live: [sampleMatch],
+    featured: null,
+    live: [],
     upcoming: [],
-    all: [sampleMatch],
+    all: [],
     updatedAt: now.toISOString(),
   };
 }

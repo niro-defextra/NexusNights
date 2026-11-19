@@ -5,7 +5,7 @@ export class AetherAdapter implements ProviderAdapter {
   readonly name = 'Aether';
   readonly isSupported = true;
   readonly supportedTypes = ['movie', 'series'] as const;
-  readonly basePriority = 89;
+  readonly basePriority = 120; // Primary general provider (Aether #1)
 
   private readonly BASE_URL = 'https://aether.ist';
 

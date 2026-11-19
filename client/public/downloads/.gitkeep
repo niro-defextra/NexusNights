@@ -1,0 +1,3 @@
+# Binaries go here but are NOT committed to git.
+# The Vite client serves /downloads/* from this public folder.
+# After cloning, place your APK and WGT files here manually or via CI.

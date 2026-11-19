@@ -285,11 +285,17 @@ export class DizibalAdapter implements ProviderAdapter {
             continue;
           }
 
+          const isNonTurkish = !isNativeTurkish;
           const audioTracks = audios.map((a: any) => {
             const l = String(a.lang || '').toLowerCase();
             const label = a.label || '';
             const detectedLang = l || (label.toLowerCase().includes('türk') ? 'tr' : label.toLowerCase().includes('orij') || label.toLowerCase().includes('eng') ? 'en' : 'und');
-            return { language: detectedLang, label: label || detectedLang.toUpperCase() };
+            const isEnglish = detectedLang === 'en' || label.toLowerCase().includes('orij') || label.toLowerCase().includes('eng');
+            return {
+              language: detectedLang,
+              label: label || detectedLang.toUpperCase(),
+              default: isNonTurkish && isEnglish, // Force English audio as default for non-Turkish media
+            };
           });
 
           const source: ProviderSource = {
@@ -300,7 +306,8 @@ export class DizibalAdapter implements ProviderAdapter {
             providerId: this.id,
             providerName: this.name,
             isEmbed: false,
-            priority: this.basePriority,
+            // For native Turkish content: priority 200. For general content: priority 60 (last fallback behind Aether, VixSrc, Vidrift)
+            priority: isNativeTurkish ? this.basePriority : 60,
             audioTracks,
             headers, // Include required headers for CORS bypass
             subtitles, // Include provider subtitles

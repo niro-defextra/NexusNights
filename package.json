@@ -21,9 +21,7 @@
     "cap:open": "npx cap open android",
     "start": "npm run start -w server",
     "scan": "npm run scan -w server",
-    "list": "npm run list -w server",
-    "test": "npm test -w server && npm test -w client",
-    "sample-media": "npm run sample-media -w server"
+    "list": "npm run list -w server"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.3",

@@ -274,7 +274,7 @@ export function WaitingRoom({ media, streamingConfig, onStart, onStartServerStre
         <div className="flex items-center gap-3">
           <a href="#/" className="group flex items-center gap-2" aria-label="Home">
             <Sigil className="size-7 text-blood-hot transition-transform duration-500 group-hover:rotate-180" />
-            <span lang="en" dir="ltr" className="font-[Cinzel] text-[1.45rem] font-extrabold tracking-[0.02em] text-bone">
+            <span lang="en" dir="ltr" className="font-display text-[1.45rem] font-extrabold tracking-[0.02em] text-bone">
               <span className="text-blood-hot">NEXUS</span>
               <span className="text-gilt">NIGHT</span>
             </span>

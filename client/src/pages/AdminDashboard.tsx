@@ -344,8 +344,9 @@ export function AdminDashboard() {
             <div className="space-y-2.5">
               <p className="text-xs font-semibold uppercase tracking-widest text-dust/60 mb-3">{ar ? 'المزودات' : 'Providers'}</p>
               {[
-                { name: 'VixSrc', desc: ar ? 'بث HLS المباشر (الرئيسي)' : 'Native HLS Engine', ok: true },
-                { name: 'VidSrc', desc: ar ? 'مشاهدة جماعية (تضمين)' : 'Watch Party Embed', ok: true },
+                { name: 'Aether', desc: ar ? 'محرك HLS متعدد الصوتيات (الأساسي)' : 'Primary Multi-Audio HLS', ok: true },
+                { name: 'VixSrc', desc: ar ? 'بث HLS المباشر (السريع)' : 'Fast HLS Engine', ok: true },
+                { name: 'Vidrift', desc: ar ? 'بث M3U8 متعدد اللغات' : 'Multi-Language M3U8 Proxy', ok: true },
               ].map((p) => (
                 <div key={p.name} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-4 py-2.5">
                   <div className="flex items-center gap-2.5">

@@ -18,7 +18,7 @@ export class StreamManager {
   /**
    * Start a new server-side stream for a room
    * @param roomId - Room identifier
-   * @param embedUrl - Embed URL to stream (VidSrc, etc.)
+   * @param embedUrl - Embed URL to stream (Aether, etc.)
    * @param hostId - User ID of the host
    * @returns HLS playlist URL
    */

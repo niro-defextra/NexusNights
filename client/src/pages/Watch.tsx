@@ -29,6 +29,7 @@ export function Watch({ id }: { id: string }) {
   const [panel, setPanel] = useState<Panel>(null);
   const [streamingConfig, setStreamingConfig] = useState<PlaybackConfigPublic | null>(null);
   const [skipTimings, setSkipTimings] = useState<AniSkipTimingsPublic | null>(null);
+  const [introDbTimings, setIntroDbTimings] = useState<AniSkipTimingsPublic | null>(null);
   const [streamingLoading, setStreamingLoading] = useState(false);
   const [streamingError, setStreamingError] = useState<string | null>(null);
   const [serverStreamHlsUrl, setServerStreamHlsUrl] = useState<string | null>(null);
@@ -109,6 +110,29 @@ export function Watch({ id }: { id: string }) {
     void fetchStreaming();
     return () => ac.abort();
   }, [media?.id, media?.tmdbId, media?.playback, media?.kind, media?.season, media?.episode, media?.tmdbType, lang]);
+
+  // Local playback and streaming responses without anime markers still get
+  // community timestamps from the dedicated endpoint.
+  useEffect(() => {
+    setIntroDbTimings(null);
+    if (!media?.tmdbId) return;
+
+    const kind = media.tmdbType === 'movie' || media.kind === 'movie' ? 'movie' : 'tv';
+    const season = kind === 'tv' ? media.season ?? undefined : undefined;
+    const episode = kind === 'tv' ? media.episode ?? undefined : undefined;
+    if (kind === 'tv' && (season == null || episode == null)) return;
+
+    const ac = new AbortController();
+    api.skipSegments(kind, media.tmdbId, season, episode, ac.signal)
+      .then((result) => {
+        if (!ac.signal.aborted) setIntroDbTimings(result.found ? result : null);
+      })
+      .catch(() => { /* markers are optional */ });
+
+    return () => ac.abort();
+  }, [media?.id, media?.tmdbId, media?.kind, media?.tmdbType, media?.season, media?.episode]);
+
+  const activeSkipTimings = skipTimings?.found ? skipTimings : introDbTimings;
   // Watching together = the room is configured and its connection did not fail.
   const roomMode = room.active && room.connection !== 'error';
   const connected = room.connection === 'connected' && !!room.me && !!room.state;
@@ -296,7 +320,7 @@ export function Watch({ id }: { id: string }) {
       streamingConfig={streamingConfig}
       streamingLoading={streamingLoading}
       streamingError={streamingError}
-      skipTimings={skipTimings}
+      skipTimings={activeSkipTimings}
       title={isSeries ? media.titleName : media.title}
       subtitle={sub}
       startAt={startAt}

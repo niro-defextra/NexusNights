@@ -167,6 +167,11 @@
         ];
     }
 
+    // The fixture feed ships placeholder strings when a venue or commentator
+    // is not published. They are feed metadata, not facts, so they never reach
+    // the hero as if they were.
+    var PLACEHOLDER_META = ['البث المباشر المعتمد', 'قنوات beIN SPORTS الرسمية'];
+
     window.SportsPage = {
         CHANNEL_METADATA: CHANNEL_METADATA,
         channels: null,
@@ -244,70 +249,115 @@
             });
         },
         
+        /**
+         * Fixture feeds already punctuate the minute ("9'"). Strip the source
+         * mark so the display owns the typography and never prints "9'′".
+         */
+        formatMinute: function(value) {
+            return String(value == null ? '' : value).replace(/['′\s]+$/, '');
+        },
+
+        /**
+         * One team mark: crest when the artwork resolves, initial when it does
+         * not. The initial is authored markup, not a broken-image glyph.
+         */
+        renderTeam: function(name, crest, small) {
+            var safeName = NexusConfig.escapeHtml(name || '');
+            var initial = (name || '?').replace(/^\s+|\s+$/g, '').charAt(0) || '?';
+            var html = '<div class="sports-team' + (small ? ' sports-team-sm' : '') + '">';
+            html += '<span class="crest-frame">';
+            if (crest) {
+                html += '<img class="team-crest" src="' + NexusConfig.escapeHtml(crest) + '" alt="">';
+            }
+            html += '<span class="crest-fallback" aria-hidden="true">' + NexusConfig.escapeHtml(initial) + '</span>';
+            html += '</span>';
+            html += '<span class="sports-team-name">' + safeName + '</span>';
+            html += '</div>';
+            return html;
+        },
+
         renderContent: function() {
             var hasChannels = this.channels && this.channels.length > 0;
             var fixturesList = (this.fixtures && Array.isArray(this.fixtures.all) && this.fixtures.all.length > 0)
                 ? this.fixtures.all
-                : getDefaultFallbackMatches();
+                : [];
             
             var marquee = (this.fixtures && this.fixtures.featured)
                 ? this.fixtures.featured
-                : fixturesList[0];
+                : (fixturesList.length > 0 ? fixturesList[0] : null);
             
             var html = '<div class="sports-page">';
             
-            // ── 1. Cinematic Marquee Hero Clash ────────
-            html += '<div class="hero-section" style="height: 520px; margin-bottom: var(--spacing-2xl);">';
+            if (!marquee) {
+                var isArEmpty = NexusConfig.getLanguage() === 'ar';
+                html += '<div class="empty-state sports-empty">';
+                html += '<div class="empty-state-icon"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2"><circle cx="24" cy="24" r="18"/><path d="M24 6c8 8 8 28 0 36"/><path d="M24 6c-8 8-8 28 0 36"/><line x1="6" y1="24" x2="42" y2="24"/></svg></div>';
+                html += '<div class="empty-state-text">' + (isArEmpty ? 'لا مباريات في الجدول الآن' : 'No matches on the schedule') + '</div>';
+                html += '<div class="empty-state-subtext">' + (isArEmpty ? 'عد بعد قليل، أو تابع القنوات المتاحة أدناه.' : 'Check back shortly, or browse the channels below.') + '</div>';
+                html += '</div>';
+
+                // Still show channels if available
+                if (hasChannels) {
+                    html += '<div class="content-section">';
+                    html += '<div class="section-header"><h2 class="section-title">' + (isArEmpty ? 'قنوات البث المتاحة' : 'Available channels') + ' (' + this.channels.length + ')</h2></div>';
+                    html += '<div class="content-row">';
+                    for (var i = 0; i < this.channels.length; i++) {
+                        html += this.renderChannel(this.channels[i]);
+                    }
+                    html += '</div></div>';
+                }
+                html += '</div>';
+                document.getElementById('main-content').innerHTML = html;
+                this.registerFocusables();
+                return;
+            }
+            
+            // ── 1. Full-bleed marquee clash ────────
+            var isLive = marquee.status === 'live';
+            html += '<div class="hero-section sports-hero">';
             html += '<div class="hero-backdrop" style="background-image: url(\'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1600&auto=format&fit=crop\');"></div>';
-            html += '<div class="hero-content" style="max-width: 1000px;">';
-            
-            // Top Badge
-            html += '<div style="display: flex; align-items: center; margin-bottom: 20px;">';
-            html += '<div style="margin-left: 20px;">';
-            html += '<span class="live-indicator" style="background: var(--color-bg-elevated); border: 1px solid rgba(255, 255, 255, 0.18); color: var(--color-text-primary); padding: 6px 18px; border-radius: 20px; font-weight: 700; display: inline-flex; align-items: center;">';
-            html += '<span class="live-dot" style="background: var(--color-brand-red); margin-left: 8px;"></span>';
-            html += NexusConfig.escapeHtml(marquee.league);
-            html += '</span>';
+            html += '<div class="hero-content">';
+
+            html += '<div class="sports-kickoff">';
+            if (isLive) {
+                html += '<span class="sports-live-mark"><span class="live-dot" aria-hidden="true"></span> مباشر الآن</span>';
+            }
+            html += '<span class="sports-league-name">' + NexusConfig.escapeHtml(marquee.league) + '</span>';
             html += '</div>';
-            html += '<div><span style="display: inline-flex; align-items: center; color: var(--color-text-secondary); font-size: 18px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left: 8px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>' + NexusConfig.escapeHtml(marquee.stadium || 'البث المباشر المعتمد') + '</span></div>';
-            html += '</div>';
-            
-            // Marquee Teams Score Display
-            html += '<div style="display: flex; align-items: center; margin-bottom: 24px;">';
-            // Home Team
-            html += '<div style="display: flex; align-items: center; margin-left: 24px;">';
-            html += '<img src="' + NexusConfig.escapeHtml(marquee.homeCrest) + '" alt="" style="width: 56px; height: 56px; object-fit: contain; margin-left: 12px; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.8));">';
-            html += '<span style="font-size: 32px; font-weight: 800; color: #fff;">' + NexusConfig.escapeHtml(marquee.homeTeam) + '</span>';
-            html += '</div>';
-            // Score / Status
-            html += '<div style="background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; padding: 8px 24px; text-align: center; margin-left: 24px;">';
-            if (marquee.status === 'live') {
-                html += '<div style="font-size: 26px; font-weight: 900; color: var(--color-brand-red); letter-spacing: 2px;">مباشر الآن</div>';
-                html += '<div style="font-size: 16px; color: var(--color-brand-gold); font-weight: 700;">' + (marquee.minute ? (marquee.minute + ' دقيقة') : 'جارية الآن') + '</div>';
+
+            html += '<div class="sports-teams">';
+            html += this.renderTeam(marquee.homeTeam, marquee.homeCrest, false);
+            html += '<div class="sports-score">';
+            if (isLive) {
+                var liveMinute = this.formatMinute(marquee.minute);
+                html += '<span class="sports-score-value">' + (liveMinute ? NexusConfig.escapeHtml(liveMinute) + '′' : 'الآن') + '</span>';
+                html += '<span class="sports-score-label">دقيقة</span>';
             } else {
-                html += '<div style="font-size: 28px; font-weight: 800; color: var(--color-brand-gold);">' + NexusConfig.escapeHtml(marquee.time) + '</div>';
-                html += '<div style="font-size: 14px; color: var(--color-text-secondary); font-weight: 600;">موعد المباراة</div>';
+                html += '<span class="sports-score-value">' + NexusConfig.escapeHtml(marquee.time) + '</span>';
+                html += '<span class="sports-score-label">موعد المباراة</span>';
             }
             html += '</div>';
-            // Away Team
-            html += '<div style="display: flex; align-items: center;">';
-            html += '<img src="' + NexusConfig.escapeHtml(marquee.awayCrest) + '" alt="" style="width: 56px; height: 56px; object-fit: contain; margin-left: 12px; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.8));">';
-            html += '<span style="font-size: 32px; font-weight: 800; color: #fff;">' + NexusConfig.escapeHtml(marquee.awayTeam) + '</span>';
+            html += this.renderTeam(marquee.awayTeam, marquee.awayCrest, false);
             html += '</div>';
+
+            html += '<div class="hero-meta sports-meta">';
+            var stadium = (marquee.stadium || '').replace(/^\s+|\s+$/g, '');
+            var commentator = (marquee.commentator || '').replace(/^\s+|\s+$/g, '');
+            if (stadium && PLACEHOLDER_META.indexOf(stadium) === -1) {
+                html += '<div class="hero-meta-item"><span class="hero-genres">' + NexusConfig.escapeHtml(stadium) + '</span></div>';
+            }
+            if (commentator && PLACEHOLDER_META.indexOf(commentator) === -1) {
+                html += '<div class="hero-meta-item"><span class="hero-year">تعليق ' + NexusConfig.escapeHtml(commentator) + '</span></div>';
+            }
+            html += '<div class="hero-meta-item"><span class="hero-year">' + NexusConfig.escapeHtml(marquee.channelName) + '</span></div>';
             html += '</div>';
-            
-            // Commentator & Channel Info
-            html += '<p style="color: var(--color-text-secondary); font-size: 20px; margin-bottom: 24px;">';
-            html += 'التعليق: <strong style="color: #fff;">' + NexusConfig.escapeHtml(marquee.commentator || 'أبرز معلقي beIN') + '</strong> • القناة: <strong style="color: var(--color-brand-gold);">' + NexusConfig.escapeHtml(marquee.channelName) + '</strong>';
-            html += '</p>';
-            
-            // Watch Button
+
             html += '<div class="hero-actions">';
-            html += '<button class="btn btn-primary focusable" data-action="play-channel" data-channel-id="' + NexusConfig.escapeHtml(marquee.channelSlug) + '" style="font-size: 22px; padding: 14px 36px; background: var(--color-brand-red); box-shadow: 0 6px 24px rgba(179,32,47,0.5);">';
-            html += '<span class="btn-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></span> مشاهدة البث الآن (' + NexusConfig.escapeHtml(marquee.channelName) + ')';
+            html += '<button class="btn btn-primary focusable" data-action="play-channel" data-channel-id="' + NexusConfig.escapeHtml(marquee.channelSlug) + '">';
+            html += '<span class="btn-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg></span> مشاهدة البث';
             html += '</button>';
             html += '</div>';
-            
+
             html += '</div>'; // hero-content
             html += '</div>'; // hero-section
             
@@ -331,7 +381,7 @@
                 html += '<div class="content-section">';
                 html += '<div class="section-header">';
                 html += '<h2 class="section-title">قنوات البث الرياضي المتاحة (' + this.channels.length + ' قناة)</h2>';
-                html += '<span class="section-link">سيرفرات فائقة السرعة 1080p</span>';
+                html += '<span class="section-link">' + (NexusConfig.getLanguage() === 'ar' ? 'بث مباشر' : 'Live now') + '</span>';
                 html += '</div>';
                 html += '<div class="content-row">';
                 
@@ -354,49 +404,34 @@
         },
         
         renderMatchCard: function(match) {
-            var html = '<div class="backdrop-card focusable" data-action="play-channel" data-channel-id="' + NexusConfig.escapeHtml(match.channelSlug) + '" style="width: 380px;">';
-            html += '<div class="card-backdrop" style="background: linear-gradient(180deg, #181216 0%, #0d090b 100%); padding: 20px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid rgba(255,255,255,0.08);">';
-            
-            // Header
-            html += '<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px;">';
-            html += '<span style="font-size: 15px; color: var(--color-brand-gold); font-weight: 700; max-width: 240px;" class="text-ellipsis">' + NexusConfig.escapeHtml(match.league) + '</span>';
-            if (match.status === 'live') {
-                html += '<span style="background: var(--color-brand-red); color: #fff; font-size: 13px; font-weight: 800; padding: 2px 10px; border-radius: 10px;">مباشر ' + (match.minute ? match.minute : '') + '</span>';
+            var isLive = match.status === 'live';
+            var html = '<div class="backdrop-card focusable sports-match-card" data-action="play-channel" data-channel-id="' + NexusConfig.escapeHtml(match.channelSlug) + '">';
+            html += '<div class="card-backdrop sports-match-body">';
+
+            html += '<div class="sports-match-head">';
+            html += '<span class="sports-match-league text-ellipsis">' + NexusConfig.escapeHtml(match.league) + '</span>';
+            if (isLive) {
+                var matchMinute = this.formatMinute(match.minute);
+                html += '<span class="sports-match-badge is-live"><span class="live-dot" aria-hidden="true"></span>مباشر' + (matchMinute ? ' ' + NexusConfig.escapeHtml(matchMinute) + '′' : '') + '</span>';
             } else {
-                html += '<span style="background: var(--color-bg-elevated); color: var(--color-text-secondary); font-size: 13px; font-weight: 600; padding: 2px 10px; border-radius: 10px;">' + NexusConfig.escapeHtml(match.time) + '</span>';
+                html += '<span class="sports-match-badge">' + NexusConfig.escapeHtml(match.time) + '</span>';
             }
             html += '</div>';
-            
-            // Teams
-            html += '<div style="display: flex; justify-content: space-around; align-items: center; margin: 16px 0;">';
-            // Home
-            html += '<div style="display: flex; flex-direction: column; align-items: center; text-align: center; width: 110px;">';
-            html += '<img src="' + NexusConfig.escapeHtml(match.homeCrest) + '" alt="" style="width: 44px; height: 44px; object-fit: contain; margin-bottom: 8px;">';
-            html += '<span style="font-size: 17px; font-weight: 700; color: #fff;" class="text-ellipsis">' + NexusConfig.escapeHtml(match.homeTeam) + '</span>';
+
+            html += '<div class="sports-match-teams">';
+            html += this.renderTeam(match.homeTeam, match.homeCrest, true);
+            html += '<div class="sports-score sports-score-sm">';
+            html += '<span class="sports-score-value">' + (isLive ? 'LIVE' : 'VS') + '</span>';
+            html += '<span class="sports-score-label">' + (isLive ? 'جارية الآن' : NexusConfig.escapeHtml(match.time)) + '</span>';
             html += '</div>';
-            // Center Badge
-            html += '<div style="text-align: center;">';
-            if (match.status === 'live') {
-                html += '<div style="font-size: 20px; font-weight: 900; color: var(--color-brand-red);">LIVE</div>';
-                html += '<div style="font-size: 13px; color: var(--color-brand-gold); font-weight: 700;">جارية الآن</div>';
-            } else {
-                html += '<div style="font-size: 20px; font-weight: 900; color: var(--color-brand-gold);">VS</div>';
-                html += '<div style="font-size: 13px; color: var(--color-text-muted);">' + NexusConfig.escapeHtml(match.time) + '</div>';
-            }
+            html += this.renderTeam(match.awayTeam, match.awayCrest, true);
             html += '</div>';
-            // Away
-            html += '<div style="display: flex; flex-direction: column; align-items: center; text-align: center; width: 110px;">';
-            html += '<img src="' + NexusConfig.escapeHtml(match.awayCrest) + '" alt="" style="width: 44px; height: 44px; object-fit: contain; margin-bottom: 8px;">';
-            html += '<span style="font-size: 17px; font-weight: 700; color: #fff;" class="text-ellipsis">' + NexusConfig.escapeHtml(match.awayTeam) + '</span>';
-            html += '</div>';
-            html += '</div>';
-            
-            // Footer
-            html += '<div style="display: flex; justify-content: space-between; font-size: 14px; color: var(--color-text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">';
+
+            html += '<div class="sports-match-foot">';
             html += '<span>' + NexusConfig.escapeHtml(match.channelName) + '</span>';
-            html += '<span style="color: var(--color-brand-gold); font-weight: 600;">مشاهدة القناة <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false" style="vertical-align: -3px;"><polygon points="5 3 19 12 5 21 5 3"/></svg></span>';
+            html += '<span class="sports-match-cta">مشاهدة القناة <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="vertical-align: -3px;"><polygon points="5 3 19 12 5 21 5 3"/></svg></span>';
             html += '</div>';
-            
+
             html += '</div>'; // card-backdrop
             html += '</div>'; // backdrop-card
             return html;
@@ -466,7 +501,7 @@
                 })
                 .catch(function(error) {
                     console.error('[SportsPage] Stream error:', error);
-                    NexusApp.showToast('فشل تحميل البث: ' + (error.message || 'خطأ غير متوقع'));
+                    NexusApp.showToast(NexusApp.describeError(error));
                 });
         },
         
@@ -481,7 +516,7 @@
         
         showError: function(error) {
             NexusApp.showErrorState({
-                title: 'فشل تحميل القنوات',
+                title: NexusConfig.getLanguage() === 'ar' ? 'تعذّر تحميل الرياضة' : 'Sports unavailable',
                 message: error && error.message,
                 onAction: function() { window.SportsPage.render(); }
             });

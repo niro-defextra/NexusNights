@@ -1,16 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ProviderAdapter, ProviderMediaRequest, ProviderStatusInfo, ProviderTestResult } from './types';
-import { VixSrcAdapter } from './adapters/vixsrc-adapter';
-import { VidSrcMovAdapter } from './adapters/vidsrc-mov-adapter';
-import { VidApiAdapter } from './adapters/vidapi-adapter';
-import { VidRockAdapter } from './adapters/vidrock-adapter';
-import { DizibalAdapter } from './adapters/dizibal-adapter';
-import { VidriftAdapter } from './adapters/vidrift-adapter';
-import { VidfastAdapter } from './adapters/vidfast-adapter';
 import { AetherAdapter } from './adapters/aether-adapter';
-import { VidloveAdapter } from './adapters/vidlove-adapter';
+import { VixSrcAdapter } from './adapters/vixsrc-adapter';
+import { VidriftAdapter } from './adapters/vidrift-adapter';
+import { DizibalAdapter } from './adapters/dizibal-adapter';
+import { ArabAdapter } from './adapters/arab-adapter';
 import { HiAnimeAdapter } from './adapters/hianime-adapter';
+import { VidRockAdapter } from './adapters/vidrock-adapter';
 import { providerHealth } from './provider-health';
 
 export class ProviderRegistry {
@@ -23,16 +20,13 @@ export class ProviderRegistry {
   }
 
   private registerDefaults() {
+    this.register(new ArabAdapter());     // Dedicated Arabic movies & series provider
     this.register(new HiAnimeAdapter());  // Dedicated anime provider
-    this.register(new DizibalAdapter());  // Turkish content priority
-    this.register(new VidriftAdapter());   // Fast, multi-lang, clean UI
-    this.register(new VidfastAdapter());   // Fast, themed, clean UI
-    this.register(new VidSrcMovAdapter()); // Multi-mirror fallback
-    this.register(new VixSrcAdapter());    // Fallback 1080p
-    this.register(new AetherAdapter());    // Multi-audio
-    this.register(new VidloveAdapter());   // Embed with hidden next/tour
-    this.register(new VidApiAdapter());
-    this.register(new VidRockAdapter());
+    this.register(new AetherAdapter());   // Primary general provider (#1): multi-audio & direct M3U8/MP4
+    this.register(new VixSrcAdapter());   // Second general provider (#2): fast direct HLS
+    this.register(new VidriftAdapter());  // Third general provider (#3): fast clean M3U8 proxy
+    this.register(new DizibalAdapter());  // Turkish priority & English-audio fallback (#4) for general
+    this.register(new VidRockAdapter());  // Unsupported placeholder
   }
 
   initPersistence(filePath: string): void {
@@ -119,22 +113,18 @@ export class ProviderRegistry {
       let description = '';
       let unsupportedReason: string | undefined = undefined;
 
-      if (adapter.id === 'dizibal') {
-        description = 'Turkish streaming provider with direct M3U8 sources for Turkish movies, series & anime';
-      } else if (adapter.id === 'vidrift') {
-        description = 'Fast multi-language provider with clean player UI, Arabic subtitles and anime support';
-      } else if (adapter.id === 'vidfast') {
-        description = 'High-speed cloud provider with themed player interface and Arabic subtitles';
+      if (adapter.id === 'arab-media') {
+        description = 'Dedicated Arabic cinema and television provider offering high-speed 1080p multi-server playback';
       } else if (adapter.id === 'aether') {
-        description = 'Multi-audio provider supporting multiple languages for movies and TV series';
-      } else if (adapter.id === 'vidlove') {
-        description = 'Direct embed provider with automated UI stripping and clean controls';
-      } else if (adapter.id === 'vidsrc-mov') {
-        description = 'Fast embed provider with automatic multi-mirror fallback';
+        description = 'Primary general provider (#1): multi-audio and high-speed native M3U8/MP4 playback';
       } else if (adapter.id === 'vixsrc') {
-        description = 'Fallback 1080p stream embed with comprehensive catalog & direct resolution';
-      } else if (adapter.id === 'vidapi') {
-        description = 'Tertiary clean embed provider with smooth playback stability';
+        description = 'Second general provider (#2): fast direct HLS playlist extraction with valid token';
+      } else if (adapter.id === 'vidrift') {
+        description = 'Third general provider (#3): fast multi-language M3U8 stream proxy';
+      } else if (adapter.id === 'dizibal') {
+        description = 'Turkish streaming provider with direct M3U8 sources & English-audio fallback (#4)';
+      } else if (adapter.id === 'hianime') {
+        description = 'Dedicated anime provider with direct native HLS & soft subtitles';
       } else if (adapter.id === 'vidrock') {
         description = 'Protected provider without authorized public API or open embed';
         unsupportedReason = 'No authorized open developer API or embed available';

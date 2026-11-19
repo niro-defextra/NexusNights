@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="45%" r="70%">
+      <stop offset="0%" stop-color="#1a1a22"/>
+      <stop offset="100%" stop-color="#0B0B0D"/>
+    </radialGradient>
+    <linearGradient id="streak" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#B3202F" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#B3202F" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#B3202F" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <rect x="0" y="520" width="1920" height="2" fill="url(#streak)"/>
+  <!-- hexagon crest -->
+  <g transform="translate(960,420)">
+    <path d="M0,-150 L130,-75 L130,75 L0,150 L-130,75 L-130,-75 Z" fill="rgba(179,32,47,0.14)" stroke="#B3202F" stroke-width="6"/>
+    <path d="M-48,-55 V55 L48,-55 V55" fill="none" stroke="#F5F6F8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="0" cy="0" r="10" fill="#D4AF6A"/>
+  </g>
+  <text x="960" y="720" text-anchor="middle" font-family="Georgia, serif" font-size="96" font-weight="700" fill="#F5F6F8" letter-spacing="12">NEXUSNIGHT</text>
+  <text x="960" y="790" text-anchor="middle" font-family="Georgia, serif" font-size="32" fill="#D4AF6A" letter-spacing="6">PREMIUM STREAMING</text>
+  <rect x="0" y="1070" width="1920" height="10" fill="#B3202F"/>
+</svg>

@@ -96,6 +96,20 @@ export function createApp(svc: LibraryService) {
     res.status(404).type('text/plain').send('HLS resource not ready or not found');
   });
 
+  // Direct downloads serving (APK, WGT) from directed folder
+  const directedDir = path.resolve(ROOT, 'directed');
+  if (fs.existsSync(directedDir)) {
+    const serveDownloads = express.static(directedDir, {
+      setHeaders: (res, filePath) => {
+        const basename = path.basename(filePath);
+        res.set('Content-Disposition', `attachment; filename="${basename}"`);
+        res.set('Access-Control-Allow-Origin', '*');
+      },
+    });
+    app.use('/downloads', serveDownloads);
+    app.use('/directed', serveDownloads);
+  }
+
   // Main API routes
   const { router, adminToken } = createRoutes(svc, { sessions, progress });
   app.use('/api', router);

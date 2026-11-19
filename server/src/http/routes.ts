@@ -28,6 +28,7 @@ import { subdlAPI } from '../subtitles/subdl-api';
 import { hianimeResolver } from '../streaming/hianime-resolver';
 import { aniSkipService } from '../streaming/aniskip-service';
 import { skipSegmentsService, mergeSkipSegments } from '../streaming/skip-segments-service';
+import { trailerSniffer } from '../streaming/trailer-sniffer';
 
 const wrap = (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler => (req, res, next) => {
   fn(req, res, next).catch(next);
@@ -626,7 +627,7 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         }
       }
 
-      // Tier 2: Multi-target concurrent stealth sniffer (Vidrift, VixSrc, Vidfast, Aether, Vidlove)
+      // Tier 2: Multi-target concurrent stealth sniffer (Aether, VixSrc, Vidrift)
       if (!nativeStream && !localMediaId && snifferEnabled && !hasDirectSource) {
         try {
           console.log(`[Playback] Auto-resolving native direct stream for movie ${tmdbId}...`);
@@ -844,7 +845,7 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
         }
       }
 
-      // Tier 2: Multi-target concurrent stealth sniffer (Vidrift, VixSrc, Vidfast, Aether, Vidlove)
+      // Tier 2: Multi-target concurrent stealth sniffer (Aether, VixSrc, Vidrift)
       if (!nativeStream && !localMediaId && snifferEnabled && !hasDirectSource) {
         try {
           console.log(`[Playback] Auto-resolving native direct stream for TV ${tmdbId} S${season}E${episode}...`);
@@ -1592,6 +1593,19 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     res.json({ results: videos });
   }));
 
+  // Native Trailer Sniffer (direct HLS stream without YouTube player/UI)
+  router.get('/trailer/stream/:key', apiLimiter, wrap(async (req, res) => {
+    const key = req.params.key;
+    if (!key || !/^[\w-]{6,15}$/.test(key)) {
+      return res.status(400).json({ error: 'invalid_key' });
+    }
+    const streamUrl = await trailerSniffer.sniffTrailer(key);
+    if (!streamUrl) {
+      return res.status(404).json({ error: 'trailer_stream_unavailable' });
+    }
+    res.json({ ok: true, streamUrl });
+  }));
+
   // TMDB Recommendations
   router.get('/tmdb/recommendations/:kind(movie|tv)/:id', apiLimiter, wrap(async (req, res) => {
     const id = parseInt(req.params.id, 10);
@@ -1608,6 +1622,15 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     if (isNaN(id)) return res.status(400).json({ error: 'invalid_id' });
     const data = await svc.tmdb.getSimilar(kind, id);
     res.json(data || { results: [], page: 1, total_pages: 0, total_results: 0 });
+  }));
+
+  // TMDB Credits (cast & crew)
+  router.get('/tmdb/credits/:kind(movie|tv)/:id', apiLimiter, wrap(async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const kind = req.params.kind as 'movie' | 'tv';
+    if (isNaN(id)) return res.status(400).json({ error: 'invalid_id' });
+    const data = await svc.tmdb.getCredits(kind, id);
+    res.json(data || { id, cast: [], crew: [] });
   }));
 
   router.get('/library', apiLimiter, (req, res) => {
@@ -1957,15 +1980,17 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     const season = req.body?.season ? parseInt(req.body.season, 10) : undefined;
     const episode = req.body?.episode ? parseInt(req.body.episode, 10) : undefined;
     const provider = req.body?.provider ? String(req.body.provider).replace(/\s*\([^)]*\)/g, '').trim() : undefined;
+    const targetUrl = (req.body?.targetUrl || req.body?.embedUrl) ? String(req.body.targetUrl || req.body.embedUrl) : undefined;
 
     try {
-      const resolved = await streamResolver.resolve({ tmdbId, kind, season, episode, provider });
+      const resolved = await streamResolver.resolve({ tmdbId, kind, season, episode, provider, targetUrl });
+      const isMp4 = resolved.playlistUrl.includes('.mp4') && !resolved.playlistUrl.includes('.m3u8');
       res.json({
         ok: true,
         streamId: resolved.id,
-        streamUrl: `/api/stream-proxy/master/${resolved.id}.m3u8`,
+        streamUrl: isMp4 ? resolved.playlistUrl : `/api/stream-proxy/master/${resolved.id}.m3u8`,
         provider: resolved.provider,
-        type: 'hls',
+        type: isMp4 ? 'mp4' : 'hls',
       });
     } catch (err: any) {
       console.error('[Streaming] resolve-native failed:', err.message);

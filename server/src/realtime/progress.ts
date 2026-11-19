@@ -5,7 +5,7 @@ export interface Progress {
   t: number;                  // Playback position in seconds
   d: number;                  // Total duration in seconds
   at: number;                 // Timestamp when progress was recorded
-  provider?: string;          // Last provider used ('local', 'VixSrc', 'VidAPI', etc.)
+  provider?: string;          // Last provider used ('local', 'Aether', 'VixSrc', etc.)
   contentKey?: string;        // Canonical key (e.g. 'movie-1368337', 'tv-76479-s1e1')
   tmdbId?: number | null;
   kind?: 'movie' | 'tv' | null;

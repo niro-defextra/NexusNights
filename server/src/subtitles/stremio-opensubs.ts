@@ -4,9 +4,8 @@
  * Provides direct download links with zero rate-limits.
  */
 
+import { resolveImdbId } from '../metadata/imdb-id';
 import type { SubtitleResult } from './types';
-
-const IMDB_CACHE = new Map<string, string>();
 
 const LANG_MAP: Record<string, { code: string; name: string }> = {
   ara: { code: 'ar', name: 'العربية (Arabic)' },
@@ -31,42 +30,6 @@ const LANG_MAP: Record<string, { code: string; name: string }> = {
 
 export class StremioOpenSubtitlesAPI {
   /**
-   * Resolve IMDB ID from TMDB ID
-   */
-  async resolveImdbId(tmdbId: number, kind: 'movie' | 'series'): Promise<string | null> {
-    const cacheKey = `${kind}:${tmdbId}`;
-    if (IMDB_CACHE.has(cacheKey)) {
-      return IMDB_CACHE.get(cacheKey)!;
-    }
-
-    const apiKey = process.env.TMDB_API_KEY;
-    if (!apiKey) return null;
-
-    try {
-      const endpoint = kind === 'series' ? 'tv' : 'movie';
-      const isBearer = apiKey.startsWith('eyJ');
-      const headers: Record<string, string> = isBearer ? { Authorization: `Bearer ${apiKey}` } : {};
-      const queryParam = isBearer ? '' : `?api_key=${apiKey}`;
-
-      const res = await fetch(`https://api.themoviedb.org/3/${endpoint}/${tmdbId}/external_ids${queryParam}`, {
-        headers: Object.keys(headers).length > 0 ? headers : undefined,
-        signal: AbortSignal.timeout(6000),
-      });
-
-      if (!res.ok) return null;
-      const data = await res.json() as { imdb_id?: string | null };
-      if (data.imdb_id) {
-        IMDB_CACHE.set(cacheKey, data.imdb_id);
-        return data.imdb_id;
-      }
-    } catch (err) {
-      console.warn(`[StremioOpenSubs] Failed to resolve IMDB ID for TMDB ${tmdbId}:`, err);
-    }
-
-    return null;
-  }
-
-  /**
    * Search subtitles directly from Stremio OpenSubtitles v3 service
    */
   async search(params: {
@@ -77,7 +40,7 @@ export class StremioOpenSubtitlesAPI {
     languages?: string[];
   }): Promise<SubtitleResult[]> {
     try {
-      const imdbId = await this.resolveImdbId(params.tmdbId, params.kind);
+      const imdbId = await resolveImdbId(params.tmdbId, params.kind);
       if (!imdbId) {
         console.log(`[StremioOpenSubs] No IMDB ID available for TMDB ${params.tmdbId}`);
         return [];

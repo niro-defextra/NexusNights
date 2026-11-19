@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Login } from './auth/Login';
 import { I18nProvider } from './i18n';
 import { TopBar } from './components/TopBar';
+import { BottomNav } from './components/BottomNav';
 import { GlobalHome } from './pages/GlobalHome';
 import { UnifiedTitlePage } from './pages/UnifiedTitlePage';
 import { GlobalTitle } from './pages/GlobalTitle';
@@ -17,6 +18,7 @@ import { DiscoverRooms } from './pages/DiscoverRooms';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { DiscordActivity } from './pages/DiscordActivity';
 import { SportsPage } from './pages/SportsPage';
+import { Downloads } from './pages/Downloads';
 import { go, useRoute } from './router';
 
 /** Shown when a non-admin tries to access an admin-only page */
@@ -66,13 +68,15 @@ function Routes() {
       <TopBar />
       <RoomBanner />
       <Toasts />
-      <main key={route.name === 'title' ? route.id : route.name === 'global-title' ? `${route.kind}-${route.tmdbId}` : route.name} className="animate-fade">
+      <main key={route.name === 'title' ? route.id : route.name === 'global-title' ? `${route.kind}-${route.tmdbId}` : route.name} className="animate-fade pb-20 sm:pb-0">
         {route.name === 'title' ? (
           <UnifiedTitlePage id={route.id} />
         ) : route.name === 'global-title' ? (
           <GlobalTitle kind={route.kind} tmdbId={route.tmdbId} />
         ) : route.name === 'sports' || route.name === 'sports-watch' ? (
           <SportsPage />
+        ) : route.name === 'downloads' ? (
+          <Downloads />
         ) : route.name === 'providers' ? (
           <AdminGate><ProvidersDashboard /></AdminGate>
         ) : route.name === 'discover-rooms' ? (
@@ -83,6 +87,7 @@ function Routes() {
           <GlobalHome />
         )}
       </main>
+      <BottomNav />
     </>
   );
 }

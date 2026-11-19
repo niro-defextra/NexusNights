@@ -1,4 +1,4 @@
-/**
+﻿/**
  * NEXUSNIGHT TV - Configuration & i18n
  * Settings for Samsung Tizen 5.0 compatibility (Strict ES5)
  */
@@ -9,7 +9,7 @@
     // Translation dictionary for Arabic (Default) and English
     var TRANSLATIONS = {
         ar: {
-            app_name: 'NEXUSNIGHT',
+            app_name: 'NexusNights',
             loading: 'جاري التحميل...',
             loading_stream: 'جاري تحميل البث...',
             nav_home: 'الرئيسية',
@@ -33,12 +33,22 @@
             player_forward: '10 ثوانٍ للأمام',
             player_subtitles: 'الترجمة',
             player_audio: 'الصوت',
+            player_quality: 'الجودة',
+            player_quality_title: 'اختيار جودة الفيديو',
+            player_quality_hint: 'اختر الجودة المناسبة لسرعة الإنترنت لديك لمنع التقطيع',
+            player_quality_auto: 'تلقائي (Auto)',
+            player_quality_auto_note: 'أفضل جودة حسب سرعة النت تلقائياً',
+            player_quality_changed: 'تم تغيير الجودة إلى',
+            player_quality_none: 'الجودة الحالية ثابتة من المصدر',
             player_subtitles_off: 'إيقاف الترجمة',
             player_subtitles_ar: 'العربية (Arabic)',
             player_subtitles_en: 'الإنجليزية (English)',
             player_sources: 'المصادر',
             player_close: 'إغلاق المشغّل',
-            player_live_badge: 'بث مباشر • 1080p',
+            player_skip_recap: 'تخطي الملخص',
+            player_skip_intro: 'تخطي المقدمة',
+            player_skip_credits: 'تخطي النهاية',
+            player_live_badge: 'بث مباشر',
             player_error: 'تعذّر تشغيل مصدر الفيديو',
             player_retry: 'إعادة المحاولة',
             player_exit: 'خروج',
@@ -80,25 +90,25 @@
             player_err_decoder: 'تعذّر تشغيل الملف باستخدام المشغّل',
             player_err_hls: 'تعذّر فك تشفير بث HLS',
             settings_title: 'الإعدادات',
-            settings_lang_section: 'اللغة (Language)',
-            settings_lang_ar: 'العربية (RTL)',
+            settings_lang_section: 'اللغة',
+            settings_lang_ar: 'العربية',
             settings_lang_en: 'English (LTR)',
             settings_active: 'مفعّل',
             settings_activate: 'تفعيل',
-            settings_server_section: 'الاتصال بالسيرفر (Server Connection)',
+            settings_server_section: 'الاتصال بالخادم',
             settings_current_server: 'عنوان الخادم الحالي',
-            settings_edit_server: 'تغيير عنوان الخادم (IP / URL)',
+            settings_edit_server: 'عنوان الخادم',
             settings_edit_server_hint: 'اضغط للتعديل',
             settings_test_server: 'اختبار الاتصال بالخادم',
             settings_test_server_hint: 'اضغط للاختبار',
-            settings_about_section: 'حول التطبيق (About)',
+            settings_about_section: 'حول التطبيق',
             settings_app_name: 'اسم التطبيق',
             settings_version: 'الإصدار',
             settings_engine: 'حالة محرك العرض',
             network_error: 'تعذّر الاتصال بالخادم'
         },
         en: {
-            app_name: 'NEXUSNIGHT',
+            app_name: 'NexusNights',
             loading: 'Loading...',
             loading_stream: 'Loading Stream...',
             nav_home: 'Home',
@@ -122,12 +132,22 @@
             player_forward: '10s Forward',
             player_subtitles: 'Subtitles',
             player_audio: 'Audio',
+            player_quality: 'Quality',
+            player_quality_title: 'Video Quality',
+            player_quality_hint: 'Select the best quality for your connection to avoid buffering',
+            player_quality_auto: 'Auto',
+            player_quality_auto_note: 'Automatically adapts to network speed',
+            player_quality_changed: 'Quality switched to',
+            player_quality_none: 'Source quality is fixed',
             player_subtitles_off: 'Subtitles Off',
             player_subtitles_ar: 'Arabic (العربية)',
             player_subtitles_en: 'English',
             player_sources: 'Sources',
             player_close: 'Close Player',
-            player_live_badge: 'LIVE STREAM • 1080p',
+            player_skip_recap: 'Skip Recap',
+            player_skip_intro: 'Skip Intro',
+            player_skip_credits: 'Skip Credits',
+            player_live_badge: 'LIVE STREAM',
             player_error: 'Unable to play video source',
             player_retry: 'Retry',
             player_exit: 'Exit',
@@ -170,7 +190,7 @@
             player_err_hls: 'Could not decode the HLS stream',
             settings_title: 'Settings',
             settings_lang_section: 'Language',
-            settings_lang_ar: 'Arabic (العربية RTL)',
+            settings_lang_ar: 'العربية',
             settings_lang_en: 'English (LTR)',
             settings_active: 'Active',
             settings_activate: 'Activate',
@@ -209,7 +229,7 @@
         
         // Application Settings
         app: {
-            name: 'NEXUSNIGHT',
+            name: 'NexusNights',
             version: '1.2.0',
             defaultLanguage: 'ar',
             supportedLanguages: ['ar', 'en'],
@@ -264,12 +284,11 @@
      */
     NexusConfig.getBackendUrl = function() {
         try {
-            var stored = window.localStorage.getItem(this.storage.backend);
-            // Upgrade legacy localhost:3001 to production
-            if (stored && (stored.indexOf('localhost:3001') !== -1 || stored.indexOf('127.0.0.1:3001') !== -1)) {
-                stored = 'https://nexusunights.tech';
-                window.localStorage.setItem(this.storage.backend, stored);
+            // If running locally in browser (localhost / 127.0.0.1), use the active local backend (port 3001)
+            if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+                return 'http://localhost:3001';
             }
+            var stored = window.localStorage.getItem(this.storage.backend);
             return stored || this.apiBaseUrl;
         } catch (e) {
             return this.apiBaseUrl;

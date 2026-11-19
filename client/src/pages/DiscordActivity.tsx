@@ -383,7 +383,7 @@ export function DiscordActivity() {
         <div className="flex flex-col items-center gap-4 p-8">
           <div className="group flex items-center gap-2 mb-2" aria-label="NexusNight">
             <Sigil className="size-10 text-blood-hot animate-pulse" />
-            <span lang="en" dir="ltr" className="font-[Cinzel] text-[2rem] font-extrabold tracking-[0.02em] text-bone">
+            <span lang="en" dir="ltr" className="font-display text-[2rem] font-extrabold tracking-[0.02em] text-bone">
               <span className="text-blood-hot">NEXUS</span>
               <span className="text-gilt">NIGHT</span>
             </span>
@@ -437,7 +437,7 @@ export function DiscordActivity() {
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <div className="group flex items-center gap-2" aria-label="NexusNight">
             <Sigil className="size-6 sm:size-7 text-blood-hot transition-transform duration-500 group-hover:rotate-180 shrink-0" />
-            <span lang="en" dir="ltr" className="font-[Cinzel] text-[1.25rem] sm:text-[1.4rem] font-extrabold tracking-[0.02em] text-bone">
+            <span lang="en" dir="ltr" className="font-display text-[1.25rem] sm:text-[1.4rem] font-extrabold tracking-[0.02em] text-bone">
               <span className="text-blood-hot">NEXUS</span>
               <span className="text-gilt">NIGHT</span>
             </span>
@@ -453,13 +453,13 @@ export function DiscordActivity() {
           </div>
         </div>
 
-        {/* Navigation Tabs (Compact, NexusNight Themed) */}
+        {/* Navigation Tabs (Compact, NexusNight Themed - Crimson Active Ground) */}
         <nav className="flex items-center gap-1 rounded-xl bg-crypt/90 p-1 border border-white/10 shadow-inner">
           <button
             onClick={() => setActiveTab('watch')}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all duration-200 ${
               activeTab === 'watch'
-                ? 'bg-gilt text-ink shadow-[0_0_12px_rgba(212,175,55,0.25)]'
+                ? 'bg-blood text-white shadow-[0_0_14px_rgba(179,32,47,0.45)]'
                 : 'text-dust hover:bg-white/5 hover:text-bone'
             }`}
             title={t('discordNowPlaying')}
@@ -471,9 +471,9 @@ export function DiscordActivity() {
 
           <button
             onClick={() => setActiveTab('browse')}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all duration-200 ${
               activeTab === 'browse'
-                ? 'bg-gilt text-ink shadow-[0_0_12px_rgba(212,175,55,0.25)]'
+                ? 'bg-blood text-white shadow-[0_0_14px_rgba(179,32,47,0.45)]'
                 : 'text-dust hover:bg-white/5 hover:text-bone'
             }`}
             title={t('discordBrowseMedia')}
@@ -484,9 +484,9 @@ export function DiscordActivity() {
 
           <button
             onClick={() => setActiveTab('members')}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all duration-200 ${
               activeTab === 'members'
-                ? 'bg-gilt text-ink shadow-[0_0_12px_rgba(212,175,55,0.25)]'
+                ? 'bg-blood text-white shadow-[0_0_14px_rgba(179,32,47,0.45)]'
                 : 'text-dust hover:bg-white/5 hover:text-bone'
             }`}
             title={t('discordRoomMembers')}
@@ -767,15 +767,15 @@ export function DiscordActivity() {
                 )}
               </div>
 
-              {/* Filter Chips */}
+              {/* Filter Chips (Unified Crimson Ground) */}
               <div className="flex items-center gap-1 rounded-xl bg-crypt/90 p-1 border border-white/10 self-stretch sm:self-auto justify-center">
                 {(['all', 'movie', 'series'] as const).map((k) => (
                   <button
                     key={k}
                     onClick={() => setFilterKind(k)}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                    className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all duration-200 ${
                       filterKind === k
-                        ? 'bg-gilt text-ink shadow-[0_0_12px_rgba(212,175,55,0.25)]'
+                        ? 'bg-blood text-white shadow-[0_0_12px_rgba(179,32,47,0.4)]'
                         : 'text-dust hover:bg-white/5 hover:text-bone'
                     }`}
                   >
@@ -785,7 +785,7 @@ export function DiscordActivity() {
               </div>
             </div>
 
-            {/* Catalog Grid */}
+            {/* Catalog Grid with TV-grade Card Lift & Ambient Specular Rim */}
             {catalogLoading ? (
               <div className="flex flex-1 items-center justify-center p-12">
                 <Spinner className="size-8 text-gilt animate-spin" />
@@ -801,7 +801,7 @@ export function DiscordActivity() {
                 {filteredTitles.map((title) => (
                   <div
                     key={title.id}
-                    className="group relative flex flex-col rounded-2xl bg-crypt/80 p-2 sm:p-2.5 border border-white/10 transition-all duration-200 hover:border-gilt/40 hover:bg-crypt hover:shadow-[0_4px_20px_rgba(0,0,0,0.5)]"
+                    className="group relative flex flex-col rounded-2xl bg-crypt/80 p-2 sm:p-2.5 border border-white/10 transition-all duration-300 ease-[var(--ease-out-expo)] hover:border-gilt/50 hover:bg-crypt hover:shadow-[0_16px_36px_-6px_rgba(0,0,0,0.95),0_0_24px_rgba(179,32,47,0.28)] hover:-translate-y-2 hover:scale-[1.02]"
                   >
                     {/* Poster */}
                     <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-ash mb-2 border border-white/5">

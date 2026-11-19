@@ -96,6 +96,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *  - retry/backoff on 429 / 5xx and a hard timeout per request
  */
 export class TmdbClient {
+  private memCache = new Map<string, { fetchedAt: number; data: any }>();
+
   constructor(private cfg: Config) {}
 
   get enabled(): boolean {
@@ -106,17 +108,33 @@ export class TmdbClient {
     const entries = Object.entries(params)
       .filter(([, v]) => v !== undefined)
       .sort(([a], [b]) => a.localeCompare(b));
-    const file = path.join(this.cfg.cacheDir, 'tmdb', `${shortId(endpoint + JSON.stringify(entries), 24)}.json`);
-    const cached = await readJson<{ fetchedAt: number; data: T | null }>(file);
+    const cacheKey = endpoint + ':' + JSON.stringify(entries);
     const ttl = this.cfg.tmdb.cacheDays * 86_400_000;
-    if (cached && Date.now() - cached.fetchedAt < ttl) return cached.data;
+
+    // L1: In-memory cache (< 1ms lookup)
+    const mem = this.memCache.get(cacheKey);
+    if (mem && Date.now() - mem.fetchedAt < ttl) {
+      return mem.data as T;
+    }
+
+    // L2: On-disk cache
+    const file = path.join(this.cfg.cacheDir, 'tmdb', `${shortId(cacheKey, 24)}.json`);
+    const cached = await readJson<{ fetchedAt: number; data: T | null }>(file);
+    if (cached && Date.now() - cached.fetchedAt < ttl) {
+      this.memCache.set(cacheKey, { fetchedAt: cached.fetchedAt, data: cached.data });
+      return cached.data;
+    }
 
     try {
       const data = await this.fetchJson<T>(endpoint, entries);
+      this.memCache.set(cacheKey, { fetchedAt: Date.now(), data });
       await writeJsonAtomic(file, { fetchedAt: Date.now(), data });
       return data;
     } catch (e) {
-      if (cached) return cached.data; // stale-if-error
+      if (cached) {
+        this.memCache.set(cacheKey, { fetchedAt: cached.fetchedAt, data: cached.data });
+        return cached.data; // stale-if-error
+      }
       throw e;
     }
   }
@@ -289,6 +307,28 @@ export class TmdbClient {
     if (all?.results && all.results.length > 0) return all;
 
     return this.request<{ id: number; results: TmdbVideo[] }>(`/${kind}/${id}/videos`, { language: 'en-US' });
+  }
+
+  async getCredits(kind: 'movie' | 'tv', id: number, language?: string) {
+    const lang = language ?? this.cfg.tmdb.languages[0] ?? 'en-US';
+    return this.request<{
+      id: number;
+      cast: Array<{
+        id: number;
+        name: string;
+        character: string;
+        profile_path: string | null;
+        order: number;
+        known_for_department: string;
+      }>;
+      crew: Array<{
+        id: number;
+        name: string;
+        job: string;
+        department: string;
+        profile_path: string | null;
+      }>;
+    }>(`/${kind}/${id}/credits`, { language: lang });
   }
 
   async getRecommendations(kind: 'movie' | 'tv', id: number, page = 1, language?: string) {

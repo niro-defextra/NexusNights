@@ -21,6 +21,8 @@ export interface TitleSummary {
   /** First episode (series) or the movie itself — what the hero "Play" button starts. */
   firstMediaId: string | null;
   runtimeSec: number | null;
+  /** Present when the library item was matched to TMDB. */
+  tmdbId?: number;
 }
 
 export interface EpisodeSummary {
@@ -166,8 +168,10 @@ export interface AniSkipTimingPublic {
 
 export interface AniSkipTimingsPublic {
   found: boolean;
+  recap?: AniSkipTimingPublic;
   intro?: AniSkipTimingPublic;
   outro?: AniSkipTimingPublic;
+  preview?: AniSkipTimingPublic;
 }
 
 export interface PlaybackResponse {

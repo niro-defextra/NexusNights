@@ -65,6 +65,19 @@ async function focusN(page, n) {
   for (let i = 0; i < n; i++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(140); }
 }
 
+// Wait for a page's own loading screen to be replaced by content, an empty
+// state, or a designed error. Fixed delays race the streaming API and produced
+// review shots of spinners.
+async function waitForSettled(page, timeout) {
+  const limit = timeout || 12000;
+  await page.waitForFunction(() => {
+    const main = document.getElementById('main-content');
+    if (!main || !main.children.length) return false;
+    return !main.querySelector('.loading-screen');
+  }, null, { timeout: limit }).catch(() => {});
+  await page.waitForTimeout(700);
+}
+
 const written = [];
 async function shot(page, name) {
   const file = path.join(OUT, name + '.png');
@@ -84,20 +97,20 @@ try {
   const page = await ctx.newPage();
   await page.goto(srv.origin + '/index.html', { waitUntil: 'load', timeout: 15000 }).catch(() => {});
   await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-  await page.waitForTimeout(2500);
+  await waitForSettled(page, 15000);
 
   await shot(page, 'desktop');            // home, full viewport, first-viewport contract
 
   for (const name of PAGES) {
     if (name === 'home') { await shot(page, 'home'); continue; }
     await activate(page, name);
-    await page.waitForTimeout(1600);
+    await waitForSettled(page, 12000);
     await shot(page, name);
   }
 
   // focused-card state on home (dim-and-lift): go home, press down into the first row
   await activate(page, 'home');
-  await page.waitForTimeout(1600);
+  await waitForSettled(page, 8000);
   await focusN(page, 3);
   await shot(page, 'home-focused');
 
@@ -105,7 +118,7 @@ try {
   await page.evaluate(() => {
     try { Navigator.navigateTo('details', { mediaId: '550', kind: 'movie' }); } catch (e) { /* noop */ }
   }).catch(() => {});
-  await page.waitForTimeout(2000);
+  await waitForSettled(page, 12000);
   await shot(page, 'details');
 
   // ---- panel scaling: 720p and 4K ----
@@ -127,11 +140,11 @@ try {
   });
   const page2 = await ctx2.newPage();
   await page2.goto(srv.origin + '/index.html', { waitUntil: 'load', timeout: 15000 }).catch(() => {});
-  await page2.waitForTimeout(4000);
+  await waitForSettled(page2, 8000);
   await shot(page2, 'state-offline-home');
   for (const name of ['sports', 'search', 'settings']) {
     await activate(page2, name);
-    await page2.waitForTimeout(1800);
+    await waitForSettled(page2, 8000);
     await shot(page2, 'state-offline-' + name);
   }
   await ctx2.close();

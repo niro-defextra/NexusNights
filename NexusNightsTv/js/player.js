@@ -63,6 +63,10 @@
         nextCountdownSec: 5,
         nextEpisodeActive: false,
         nextEpisodeDismissed: false,
+        qualityLevels: [],
+        selectedQualityIndex: -1,
+        consecutiveStalls: 0,
+        lastStallTime: 0,
 
         init: function () {
             this.useAVPlay = typeof webapis !== 'undefined' && !!webapis.avplay;
@@ -84,6 +88,7 @@
             this.currentSource = source;
             // Sports streams have no TMDB metadata and no subtitle/audio tracks.
             this.isSports = !(meta && meta.tmdbId);
+            this.isLive = !!(meta && meta.isLive) || !!(source && source.isLive) || this.isSports;
             this.sourceIndex = 0;
             this.currentTime = 0;
             this.duration = 0;
@@ -91,6 +96,10 @@
             this.skippedEmbedSources = 0;
             this.activeSubtitleIndex = -1;
             this.subtitleCues = [];
+            this.qualityLevels = [];
+            this.selectedQualityIndex = -1;
+            this.consecutiveStalls = 0;
+            this.lastStallTime = 0;
             this.skipTimings = (meta && meta.skipTimings) || null;
             this.activeSkipSegment = null;
             this.skipRequestId += 1;
@@ -102,19 +111,23 @@
 
             var playerPage = document.getElementById('player-page');
             if (playerPage) {
-                playerPage.classList.toggle('is-live', !!(source.isLive || (meta && meta.isLive)));
+                var isLiveStream = !!(source.isLive || (meta && meta.isLive) || this.isSports);
+                playerPage.classList.toggle('is-live', isLiveStream);
+                playerPage.classList.toggle('is-sports', !!this.isSports);
             }
 
-            // Fetch extra unified subtitles (Arabic & English) if TMDB metadata is available
-            this.fetchExternalSubtitles();
-            this.fetchSkipSegments(this.skipRequestId);
+            // Fetch extra unified subtitles (Arabic & English) if TMDB metadata is available (VOD only)
+            if (!this.isSports && !this.isLive) {
+                this.fetchExternalSubtitles();
+                this.fetchSkipSegments(this.skipRequestId);
+            }
 
             this.trySource(source);
         },
 
         fetchSkipSegments: function (requestId) {
             var self = this;
-            if (!this.meta || !this.meta.tmdbId || !window.NexusAPI || !NexusAPI.getSkipSegments) {
+            if (this.isSports || this.isLive || !this.meta || !this.meta.tmdbId || !window.NexusAPI || !NexusAPI.getSkipSegments) {
                 this.updateSkipSegment();
                 return;
             }
@@ -134,7 +147,7 @@
 
         fetchExternalSubtitles: function () {
             var self = this;
-            if (!this.meta || !this.meta.tmdbId || !window.NexusAPI || !NexusAPI.getSubtitles) return;
+            if (this.isSports || this.isLive || !this.meta || !this.meta.tmdbId || !window.NexusAPI || !NexusAPI.getSubtitles) return;
 
             console.log('[NexusPlayer] Fetching subtitles for TMDB ID:', this.meta.tmdbId);
 
@@ -380,30 +393,46 @@
                 }
             }
 
-            if (source.url && source.url.indexOf('/api/streaming/resolve-native') !== -1) {
+            // Native Player Enforcement: NEVER use third-party iframes/embeds.
+            // If the source is an embed or needs sniffing, resolve it to direct HLS via /api/streaming/resolve-native.
+            var isResolvable = (source.url && source.url.indexOf('/api/streaming/resolve-native') !== -1) ||
+                               source.type === 'embed' || source.isEmbed || (!source.url && source.embedUrl);
+
+            if (isResolvable) {
                 var self = this;
+                this.showLoading();
                 var xhr = new XMLHttpRequest();
-                var endpoint = source.url.indexOf('http') === 0 ? source.url : (NexusConfig.apiBase || '') + source.url;
+                var endpoint = (window.NexusAPI && NexusAPI.backendUrl) ? NexusAPI.backendUrl('/api/streaming/resolve-native') : (NexusConfig.getBackendUrl() + '/api/streaming/resolve-native');
                 xhr.open('POST', endpoint, true);
                 xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.timeout = 25000;
                 xhr.onload = function () {
                     if (self.playAttemptId !== attemptId) return;
                     if (xhr.status >= 200 && xhr.status < 300) {
                         try {
                             var data = JSON.parse(xhr.responseText);
                             if (data && data.ok && data.streamUrl) {
-                                source.url = data.streamUrl;
-                                source.type = 'hls';
+                                source.url = (window.NexusAPI && NexusAPI.backendUrl) ? NexusAPI.backendUrl(data.streamUrl) : data.streamUrl;
+                                source.type = data.type || 'hls';
+                                source.isEmbed = false;
+                                console.log('[NexusPlayer] Sniffed direct ' + source.type.toUpperCase() + ' stream:', source.url);
                                 if (self.useAVPlay) self.playWithAVPlay(source, attemptId);
                                 else self.playWithHTML5(source, attemptId);
                                 return;
                             }
                         } catch (e) {}
                     }
+                    console.warn('[NexusPlayer] Failed to sniff direct stream for', source.provider, ', trying next mirror...');
                     self.tryNextSource(NexusConfig.t('player_error'), attemptId);
                 };
                 xhr.onerror = function () {
                     if (self.playAttemptId !== attemptId) return;
+                    console.warn('[NexusPlayer] Network error sniffing stream for', source.provider);
+                    self.tryNextSource(NexusConfig.t('player_error'), attemptId);
+                };
+                xhr.ontimeout = function () {
+                    if (self.playAttemptId !== attemptId) return;
+                    console.warn('[NexusPlayer] Timeout sniffing stream for', source.provider);
                     self.tryNextSource(NexusConfig.t('player_error'), attemptId);
                 };
                 var payload = {
@@ -411,7 +440,8 @@
                     kind: (this.meta && this.meta.season) ? 'series' : 'movie',
                     season: (this.meta && this.meta.season) || undefined,
                     episode: (this.meta && this.meta.episode) || undefined,
-                    provider: source.provider
+                    provider: source.provider || undefined,
+                    targetUrl: source.embedUrl || (source.url && source.url.indexOf('http') === 0 ? source.url : undefined)
                 };
                 xhr.send(JSON.stringify(payload));
                 return;
@@ -517,9 +547,22 @@
             video.setAttribute('playsinline', 'playsinline');
             video.preload = 'auto';
 
+            var startupTimer = window.setTimeout(function () {
+                if (attemptId !== self.playAttemptId) return;
+                if (!self.isPlaying) {
+                    console.warn('[NexusPlayer] Startup watchdog timeout (10s). Stream stuck loading, trying next mirror...');
+                    if (self.hlsInstance) {
+                        try { self.hlsInstance.destroy(); } catch (e) {}
+                        self.hlsInstance = null;
+                    }
+                    self.tryNextSource(NexusConfig.t('player_err_hls'), attemptId);
+                }
+            }, 10000);
+
             video.addEventListener('loadstart', function () { self.showLoading(); });
             video.addEventListener('canplay', function () { self.hideLoading(); });
             video.addEventListener('playing', function () {
+                clearTimeout(startupTimer);
                 self.isPlaying = true;
                 self.hideLoading();
                 self.showControls();
@@ -540,9 +583,29 @@
             });
             video.addEventListener('ended', function () { self.handleStreamCompleted(); });
             video.addEventListener('error', function () {
+                clearTimeout(startupTimer);
                 if (attemptId !== self.playAttemptId) return;
                 console.error('[HTML5] Video error:', video.error);
                 self.tryNextSource(NexusConfig.t('player_err_decoder'), attemptId);
+            });
+            video.addEventListener('waiting', function () {
+                self.showLoading();
+                var now = Date.now();
+                // Auto downshift on repeated stalls
+                if (self.selectedQualityIndex === -1 && self.hlsInstance && self.hlsInstance.currentLevel > 0) {
+                    if (now - self.lastStallTime < 10000) {
+                        self.consecutiveStalls++;
+                        if (self.consecutiveStalls >= 2) {
+                            var newLevel = self.hlsInstance.currentLevel - 1;
+                            console.warn('[NexusPlayer] Repeated stalls, downshifting to level ' + newLevel);
+                            self.hlsInstance.nextLevel = newLevel;
+                            self.consecutiveStalls = 0;
+                        }
+                    } else {
+                        self.consecutiveStalls = 1;
+                    }
+                    self.lastStallTime = now;
+                }
             });
 
             container.appendChild(video);
@@ -556,36 +619,72 @@
                 var hls = new window.Hls({
                     enableWorker: true,
                     lowLatencyMode: false,
-                    maxBufferLength: 30,
-                    maxBufferHole: 0.8,
-                    backBufferLength: 30
+                    maxBufferLength: 60,
+                    maxBufferHole: 1.5,
+                    backBufferLength: 10,
+                    startLevel: -1,
+                    abrEwmaDefaultEstimate: 2000000,
+                    abrBandWidthFactor: 0.85,
+                    abrBandWidthUpFactor: 0.65
                 });
                 this.hlsInstance = hls;
                 hls.loadSource(source.url);
                 hls.attachMedia(video);
 
                 hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
+                    // Populate quality levels for manual selection
+                    self.qualityLevels = [];
+                    if (hls.levels && hls.levels.length > 1) {
+                        for (var qi = 0; qi < hls.levels.length; qi++) {
+                            var lvl = hls.levels[qi];
+                            self.qualityLevels.push({
+                                id: qi,
+                                label: lvl.height ? lvl.height + 'p' : Math.round((lvl.bitrate || 0) / 1000) + 'k',
+                                height: lvl.height || 0,
+                                bitrate: lvl.bitrate || 0
+                            });
+                        }
+                        self.qualityLevels.sort(function (a, b) { return b.height - a.height || b.bitrate - a.bitrate; });
+                    }
+                    self.updateQualityButton();
                     video.play().catch(function (e) { console.warn('Autoplay prevented:', e); });
                 });
 
+                var networkErrorAttempts = 0;
                 hls.on(window.Hls.Events.ERROR, function (event, data) {
                     if (data.fatal) {
                         switch (data.type) {
                             case window.Hls.ErrorTypes.NETWORK_ERROR:
-                                console.warn('[HLS] Network error encountered, trying recover...');
-                                hls.startLoad();
+                                networkErrorAttempts++;
+                                console.warn('[HLS] Network error encountered (attempt ' + networkErrorAttempts + '):', data.details);
+                                if (networkErrorAttempts === 1 && data.details !== 'manifestParsingError' && data.details !== 'manifestLoadError') {
+                                    hls.startLoad();
+                                } else {
+                                    console.error('[HLS] Unrecoverable network error on source, failing over to next mirror');
+                                    clearTimeout(startupTimer);
+                                    try { hls.destroy(); } catch (e) {}
+                                    self.hlsInstance = null;
+                                    self.tryNextSource(NexusConfig.t('player_err_hls'), attemptId);
+                                }
                                 break;
                             case window.Hls.ErrorTypes.MEDIA_ERROR:
                                 console.warn('[HLS] Media error encountered, recovering...');
                                 hls.recoverMediaError();
                                 break;
                             default:
-                                console.error('[HLS] Fatal unrecoverable error:', data);
-                                hls.destroy();
+                                console.error('[HLS] Fatal unrecoverable error:', data.details || data);
+                                clearTimeout(startupTimer);
+                                try { hls.destroy(); } catch (e) {}
                                 self.hlsInstance = null;
                                 self.tryNextSource(NexusConfig.t('player_err_hls'), attemptId);
                                 break;
                         }
+                    } else if (data.details === 'manifestParsingError') {
+                        console.error('[HLS] Manifest parsing error on source, failing over to next mirror');
+                        clearTimeout(startupTimer);
+                        try { hls.destroy(); } catch (e) {}
+                        self.hlsInstance = null;
+                        self.tryNextSource(NexusConfig.t('player_err_hls'), attemptId);
                     }
                 });
             } else {
@@ -597,26 +696,8 @@
         },
 
         playEmbed: function (source) {
-            var container = document.getElementById('player-video');
-            if (!container) return;
-            container.innerHTML = '';
-            var frame = document.createElement('iframe');
-            frame.id = 'provider-embed';
-            frame.src = source.embedUrl || source.url;
-            frame.title = 'NexusNights playback';
-            frame.setAttribute('allowfullscreen', 'true');
-            frame.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture');
-            frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-            frame.style.width = '100%';
-            frame.style.height = '100%';
-            frame.style.border = '0';
-            frame.addEventListener('load', this.hideLoading.bind(this));
-            container.appendChild(frame);
-            this.iframeElement = frame;
-            this.activeEngine = 'embed';
-            this.isPlaying = true;
-            this.showControls();
-            this.hideLoading();
+            console.warn('[NexusPlayer] Embed source blocked: 100% native player enforced. Trying next source.');
+            this.tryNextSource(NexusConfig.t('player_error'));
         },
 
         tryNextSource: function (message, attemptId) {
@@ -700,6 +781,10 @@
             this.subtitles = [];
             this.subtitleCues = [];
             this.activeSubtitleIndex = -1;
+            this.qualityLevels = [];
+            this.selectedQualityIndex = -1;
+            this.consecutiveStalls = 0;
+            this.lastStallTime = 0;
             this.meta = null;
             this.isLive = false;
             this.skipTimings = null;
@@ -744,13 +829,18 @@
         },
 
         canPlayNextEpisode: function () {
-            if (this.isSports || !this.meta) return false;
+            if (this.isSports || this.isLive || !this.meta) return false;
             if (typeof this.nextEpisodeHandler === 'function') return true;
             if (this.meta.type === 'series' && this.meta.episode) return true;
             return false;
         },
 
         handleStreamCompleted: function () {
+            if (this.isSports || this.isLive) {
+                console.warn('[NexusPlayer] Live stream interrupted or ended, reconnecting...');
+                this.tryNextSource(NexusConfig.t('player_err_hls'));
+                return;
+            }
             this.saveWatchProgress();
             if (this.canPlayNextEpisode() && !this.nextEpisodeDismissed) {
                 this.showNextEpisodeCountdown();
@@ -760,6 +850,7 @@
         },
 
         showNextEpisodeCountdown: function () {
+            if (this.isSports || this.isLive) return;
             var self = this;
             if (this.nextEpisodeActive) return;
             this.nextEpisodeActive = true;
@@ -846,7 +937,7 @@
         },
 
         seekBy: function (deltaMs) {
-            if (this.isLive || this.activeEngine === 'embed' || !this.duration) return false;
+            if (this.isSports || this.isLive || this.activeEngine === 'embed' || !this.duration) return false;
             var next = this.currentTime + deltaMs;
             if (next < 0) next = 0;
             if (next > this.duration) next = this.duration;
@@ -856,6 +947,7 @@
         },
 
         showSeekHud: function (deltaMs) {
+            if (this.isSports || this.isLive) return;
             var hud = document.getElementById('player-seek-hud');
             if (!hud) return;
 
@@ -889,6 +981,7 @@
         },
 
         getActiveSkipSegment: function () {
+            if (this.isSports || this.isLive) return null;
             var timings = this.skipTimings;
             if (!timings || !timings.found) return null;
             var seconds = this.currentTime / 1000;
@@ -915,7 +1008,7 @@
             var nextKey = segment ? segment.key : null;
             this.activeSkipSegment = segment;
 
-            if (!segment || this.isLive || this.activeEngine === 'embed') {
+            if (!segment || this.isSports || this.isLive || this.activeEngine === 'embed') {
                 if (prevKey !== null) {
                     button.classList.add('hidden');
                     if (window.FocusManager && FocusManager.currentFocused === button) {
@@ -944,7 +1037,7 @@
 
         skipActiveSegment: function () {
             var segment = this.getActiveSkipSegment();
-            if (!segment || this.isLive) return false;
+            if (!segment || this.isSports || this.isLive) return false;
             var target = segment.key === 'outro'
                 ? Math.max(0, this.duration - 500)
                 : (segment.endTime + 0.4) * 1000;
@@ -955,7 +1048,7 @@
         },
 
         skip: function (seconds) {
-            if (this.isLive || this.activeEngine === 'embed' || !this.duration) return;
+            if (this.isSports || this.isLive || this.activeEngine === 'embed' || !this.duration) return;
             var next = this.currentTime + seconds * 1000;
             if (next < 0) next = 0;
             if (next > this.duration) next = this.duration;
@@ -978,6 +1071,8 @@
             document.documentElement.classList.add('player-open');
             document.body.classList.add('player-open');
 
+            var isLiveStream = !!(this.isSports || this.isLive || (this.meta && this.meta.isLive) || (this.currentSource && this.currentSource.isLive));
+
             // Build player title with metadata
             var titleText = 'NexusNights';
             var badgeText = '';
@@ -990,14 +1085,16 @@
                         titleText += ' • S' + this.meta.season + 'E' + this.meta.episode;
                     }
                 }
-                if (this.meta.isLive) {
+                if (isLiveStream) {
                     badgeText = NexusConfig.t('player_live_badge');
                 } else if (this.meta.quality) {
                     badgeText = this.meta.quality;
                 }
+            } else if (isLiveStream) {
+                badgeText = NexusConfig.t('player_live_badge');
             }
             
-            if (this.currentSource && this.currentSource.provider) {
+            if (this.currentSource && this.currentSource.provider && !isLiveStream) {
                 badgeText += (badgeText ? ' • ' : '') + this.currentSource.provider;
             }
 
@@ -1007,6 +1104,7 @@
             var pauseSvg = '<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
             var rewindSvg = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/><text x="12" y="15" font-size="8" font-family="sans-serif" font-weight="bold" fill="currentColor" text-anchor="middle">10</text></svg>';
             var forwardSvg = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/><text x="12" y="15" font-size="8" font-family="sans-serif" font-weight="bold" fill="currentColor" text-anchor="middle">10</text></svg>';
+            var reloadSvg = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
             var ccSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left:6px;"><rect x="2" y="4" width="20" height="16" rx="3"/><text x="7" y="15" font-size="7" font-weight="bold" fill="currentColor">CC</text></svg>';
             var audioSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left:6px;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
             var closeSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
@@ -1023,26 +1121,29 @@
                 '<button class="player-button player-button-icon-only focusable" id="btn-player-back" title="' + NexusConfig.t('player_back') + '">' + backSvg + '</button>' +
                 '<div class="player-title-artwork">' +
                 '<span class="player-title" id="player-title">' + NexusConfig.escapeHtml(titleText) + '</span>' +
-                (badgeText ? '<span class="player-badge" id="player-badge">' + NexusConfig.escapeHtml(badgeText) + '</span>' : '') +
+                (badgeText ? '<span class="player-badge' + (isLiveStream ? ' live-badge' : '') + '" id="player-badge">' + NexusConfig.escapeHtml(badgeText) + '</span>' : '') +
                 '</div>' +
                 '</div>' +
                 '</div>' +
                 '</div>' +
 
-                // Cinema Style Subtitle Overlay (Bottom Center)
+                // Cinema Style Subtitle Overlay (Bottom Center - VOD only)
+                (isLiveStream ? '' :
                 '<div class="player-subtitle-overlay" id="player-subtitle-overlay">' +
                 '<div class="player-subtitle-container">' +
                 '<div class="player-subtitle-text" id="player-subtitle-text"></div>' +
                 '</div>' +
-                '</div>' +
+                '</div>') +
 
-                // One community skip action: recap, intro, or credits
+                // One community skip action: recap, intro, or credits (VOD only)
+                (isLiveStream ? '' :
                 '<button type="button" class="player-skip-button hidden focusable" id="btn-skip-segment">' +
                 SKIP_ICON +
                 '<span id="btn-skip-label">' + NexusConfig.t('player_skip_intro') + '</span>' +
-                '</button>' +
+                '</button>') +
 
-                // Next Episode Card (Netflix Style with 5s countdown)
+                // Next Episode Card (Netflix Style with 5s countdown - VOD series only)
+                (isLiveStream ? '' :
                 '<div class="player-next-card hidden" id="player-next-episode-card">' +
                 '<div class="player-next-card-inner">' +
                 '<div class="player-next-header">' +
@@ -1059,14 +1160,15 @@
                 '</button>' +
                 '</div>' +
                 '</div>' +
-                '</div>' +
+                '</div>') +
 
-                // Quiet seek feedback while the controls are hidden
+                // Quiet seek feedback while the controls are hidden (VOD only)
+                (isLiveStream ? '' :
                 '<div class="player-seek-hud hidden" id="player-seek-hud">' +
                 '<span class="player-seek-hud-direction" id="player-seek-hud-direction">+10s</span>' +
                 '<div class="player-seek-hud-time"><span id="player-seek-hud-current">00:00</span><span class="player-seek-hud-sep">/</span><span id="player-seek-hud-total">00:00</span></div>' +
                 '<div class="player-seek-hud-track"><div class="player-seek-hud-fill" id="player-seek-hud-fill"></div></div>' +
-                '</div>' +
+                '</div>') +
 
                 // Premium Loading Overlay with Logo
                 '<div class="player-loading" id="player-loading">' +
@@ -1092,6 +1194,12 @@
                 // Cinema Bottom Controls Bar - Floating Glass
                 '<div class="player-controls visible" id="player-controls">' +
                 
+                (isLiveStream ?
+                '<div class="player-live-bar" id="player-live-bar">' +
+                '<span class="player-live-dot"></span>' +
+                '<span class="player-live-status-text">' + NexusConfig.escapeHtml(NexusConfig.t('player_live_badge') || 'مباشر') + ' • HLS</span>' +
+                '</div>'
+                :
                 // Premium Timeline with Thumb
                 '<div class="player-timeline" id="player-timeline">' +
                 '<span class="player-time cinematic-time" id="player-time-current">00:00</span>' +
@@ -1101,21 +1209,24 @@
                 '<div class="player-progress-thumb" id="player-progress-thumb"></div>' +
                 '</div>' +
                 '<span class="player-time cinematic-time" id="player-time-total">00:00</span>' +
-                '</div>' +
+                '</div>') +
 
                 // Premium Buttons Row - Cinema Style
                 '<div class="player-buttons" id="player-buttons">' +
-                '<button class="player-button cinematic-button focusable" id="btn-rewind" title="' + NexusConfig.t('player_rewind') + '">' + rewindSvg + '<span class="button-label">10s</span></button>' +
+                (isLiveStream ? '' : '<button class="player-button cinematic-button focusable" id="btn-rewind" title="' + NexusConfig.t('player_rewind') + '">' + rewindSvg + '<span class="button-label">10s</span></button>') +
                 '<button class="player-button player-button-play cinematic-button focusable" id="btn-play-pause" title="' + NexusConfig.t('player_play') + ' / ' + NexusConfig.t('player_pause') + '">' + playSvg + '</button>' +
-                '<button class="player-button cinematic-button focusable" id="btn-forward" title="' + NexusConfig.t('player_forward') + '"><span class="button-label">10s</span>' + forwardSvg + '</button>' +
-                (this.isSports ? '' : '<button class="player-button cinematic-button focusable" id="btn-subtitles">' + ccSvg + '<span class="button-label" id="btn-subtitles-label">' + NexusConfig.t('player_subtitles') + '</span></button>') +
-                (this.isSports ? '' : '<button class="player-button cinematic-button focusable" id="btn-audio">' + audioSvg + '<span class="button-label" id="btn-audio-label">' + NexusConfig.t('player_audio') + '</span></button>') +
+                (isLiveStream ? '<button class="player-button cinematic-button focusable" id="btn-reload-stream" title="' + (NexusConfig.getLanguage() === 'ar' ? 'إعادة تحميل البث' : 'Reload Stream') + '">' + reloadSvg + '<span class="button-label">' + (NexusConfig.getLanguage() === 'ar' ? 'تحديث' : 'Reload') + '</span></button>' : '') +
+                (isLiveStream ? '' : '<button class="player-button cinematic-button focusable" id="btn-forward" title="' + NexusConfig.t('player_forward') + '"><span class="button-label">10s</span>' + forwardSvg + '</button>') +
+                (isLiveStream ? '' : '<button class="player-button cinematic-button focusable" id="btn-subtitles">' + ccSvg + '<span class="button-label" id="btn-subtitles-label">' + NexusConfig.t('player_subtitles') + '</span></button>') +
+                (isLiveStream ? '' : '<button class="player-button cinematic-button focusable" id="btn-audio">' + audioSvg + '<span class="button-label" id="btn-audio-label">' + NexusConfig.t('player_audio') + '</span></button>') +
+                (isLiveStream ? '' : '<button class="player-button cinematic-button focusable" id="btn-quality"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left:6px;" aria-hidden="true" focusable="false"><rect x="2" y="13" width="4" height="8" rx="1"/><rect x="9" y="8" width="4" height="13" rx="1"/><rect x="16" y="3" width="4" height="18" rx="1"/></svg><span class="button-label" id="btn-quality-label">' + NexusConfig.t('player_quality_auto') + '</span></button>') +
                 '<button class="player-button player-button-icon-only cinematic-button focusable" id="btn-close-player" title="' + NexusConfig.t('player_close_short') + '">' + closeSvg + '</button>' +
                 '</div>' +
 
                 '</div>' + // player-controls
                 '</div>' + // player-container
 
+                (isLiveStream ? '' :
                 // Cinema Style Subtitle Selection Modal
                 '<div class="player-modal-backdrop hidden" id="player-subtitles-modal">' +
                 '<div class="cinematic-modal">' +
@@ -1164,6 +1275,22 @@
                 '</div>' +
                 '</div>' +
 
+                // Quality Selection Modal
+                '<div class="player-modal-backdrop hidden" id="player-quality-modal">' +
+                '<div class="cinematic-modal">' +
+                '<div class="cinematic-modal-header">' +
+                '<h3 class="modal-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-left:8px;"><rect x="2" y="13" width="4" height="8" rx="1"/><rect x="9" y="8" width="4" height="13" rx="1"/><rect x="16" y="3" width="4" height="18" rx="1"/></svg>' + NexusConfig.t('player_quality_title') + '</h3>' +
+                '<div class="modal-subtitle">' + NexusConfig.t('player_quality_hint') + '</div>' +
+                '</div>' +
+                '<div class="cinematic-modal-body">' +
+                '<div id="player-quality-list" class="cinematic-list"></div>' +
+                '</div>' +
+                '<div class="cinematic-modal-footer">' +
+                '<button class="player-button focusable cinematic-button modal-close" id="btn-close-quality-modal">' + NexusConfig.t('player_close_short') + '</button>' +
+                '</div>' +
+                '</div>' +
+                '</div>') +
+
                 '</div>'; // player-page
 
             document.getElementById('app').insertAdjacentHTML('beforeend', html);
@@ -1180,6 +1307,7 @@
         bindPlayerControls: function () {
             var self = this;
             var toggle = document.getElementById('btn-play-pause');
+            var reloadBtn = document.getElementById('btn-reload-stream');
             var rewind = document.getElementById('btn-rewind');
             var forward = document.getElementById('btn-forward');
             var backBtn = document.getElementById('btn-player-back');
@@ -1194,6 +1322,7 @@
             var progressBar = document.getElementById('player-progress-container');
 
             if (toggle) toggle.onclick = function () { self.togglePlayPause(); };
+            if (reloadBtn) reloadBtn.onclick = function () { self.retryCurrent(); };
             if (rewind) rewind.onclick = function () { self.skip(-10); };
             if (forward) forward.onclick = function () { self.skip(10); };
             if (skipBtn) skipBtn.onclick = function () { self.skipActiveSegment(); };
@@ -1209,6 +1338,12 @@
             
             var closeAudioModal = document.getElementById('btn-close-audio-modal');
             if (closeAudioModal) closeAudioModal.onclick = function () { self.closeModals(); };
+
+            var qualityBtn = document.getElementById('btn-quality');
+            if (qualityBtn) qualityBtn.onclick = function () { self.openQualityModal(); };
+
+            var closeQualityModal = document.getElementById('btn-close-quality-modal');
+            if (closeQualityModal) closeQualityModal.onclick = function () { self.closeModals(); };
             
             if (closeSubModal) closeSubModal.onclick = function () { self.closeModals(); };
 
@@ -1237,7 +1372,11 @@
                 self.clearNextEpisodeCountdown();
             };
 
-            FocusManager.register(document.querySelectorAll('#player-page .player-buttons .focusable, #btn-skip-segment, #player-next-episode-card .focusable'));
+            var focusSelector = '#player-page .player-buttons .focusable';
+            if (!this.isSports && !this.isLive) {
+                focusSelector += ', #btn-skip-segment, #player-next-episode-card .focusable';
+            }
+            FocusManager.register(document.querySelectorAll(focusSelector));
         },
 
         openSubtitlesModal: function () {
@@ -1518,17 +1657,19 @@
         closeModals: function () {
             var subModal = document.getElementById('player-subtitles-modal');
             var audioModal = document.getElementById('player-audio-modal');
+            var qualityModal = document.getElementById('player-quality-modal');
             var extSubsModal = document.getElementById('player-external-subs-modal');
             var srcModal = document.getElementById('player-sources-modal');
             if (subModal) subModal.classList.add('hidden');
             if (audioModal) audioModal.classList.add('hidden');
+            if (qualityModal) qualityModal.classList.add('hidden');
             if (extSubsModal) extSubsModal.classList.add('hidden');
             if (srcModal) srcModal.classList.add('hidden');
             FocusManager.register(document.querySelectorAll('#player-controls .focusable'));
         },
 
         isAnyModalOpen: function () {
-            var ids = ['player-subtitles-modal', 'player-audio-modal', 'player-external-subs-modal', 'player-sources-modal'];
+            var ids = ['player-subtitles-modal', 'player-audio-modal', 'player-quality-modal', 'player-external-subs-modal', 'player-sources-modal'];
             for (var i = 0; i < ids.length; i++) {
                 var el = document.getElementById(ids[i]);
                 if (el && !el.classList.contains('hidden')) return true;
@@ -1619,6 +1760,114 @@
             }
         },
 
+        openQualityModal: function () {
+            var modal = document.getElementById('player-quality-modal');
+            var list = document.getElementById('player-quality-list');
+            if (!modal || !list) return;
+
+            var self = this;
+            var html = '';
+            var curAutoLabel = '';
+            if (this.hlsInstance && this.hlsInstance.currentLevel >= 0 && this.qualityLevels.length > 0) {
+                for (var qi = 0; qi < this.qualityLevels.length; qi++) {
+                    if (this.qualityLevels[qi].id === this.hlsInstance.currentLevel) {
+                        curAutoLabel = ' (' + this.qualityLevels[qi].label + ')';
+                        break;
+                    }
+                }
+            }
+
+            // Auto row
+            var isAuto = this.selectedQualityIndex === -1;
+            html += '<div class="player-modal-item focusable ' + (isAuto ? 'active' : '') + '" data-quality-idx="-1" tabindex="0">';
+            html += '<span>' + NexusConfig.t('player_quality_auto') + curAutoLabel;
+            html += '<span class="player-modal-item-note">' + NexusConfig.escapeHtml(NexusConfig.t('player_quality_auto_note')) + '</span></span>';
+            if (isAuto) html += '<span class="player-modal-item-check">' + playerIconCheck(18) + NexusConfig.escapeHtml(NexusConfig.t('settings_active')) + '</span>';
+            html += '</div>';
+
+            if (this.qualityLevels.length === 0) {
+                html += '<div class="player-modal-empty">' + NexusConfig.escapeHtml(NexusConfig.t('player_quality_none')) + '</div>';
+            } else {
+                for (var i = 0; i < this.qualityLevels.length; i++) {
+                    var lvl = this.qualityLevels[i];
+                    var isSel = this.selectedQualityIndex === lvl.id;
+                    html += '<div class="player-modal-item focusable ' + (isSel ? 'active' : '') + '" data-quality-idx="' + lvl.id + '" tabindex="0">';
+                    html += '<span>' + NexusConfig.escapeHtml(lvl.label) + '</span>';
+                    if (isSel) html += '<span class="player-modal-item-check">' + playerIconCheck(18) + NexusConfig.escapeHtml(NexusConfig.t('settings_active')) + '</span>';
+                    html += '</div>';
+                }
+            }
+
+            list.innerHTML = html;
+            modal.classList.remove('hidden');
+
+            var items = list.querySelectorAll('[data-quality-idx]');
+            for (var j = 0; j < items.length; j++) {
+                items[j].onclick = (function (idx) {
+                    return function () {
+                        self.selectQuality(idx);
+                        self.closeModals();
+                    };
+                })(parseInt(items[j].getAttribute('data-quality-idx'), 10));
+            }
+
+            FocusManager.register(document.querySelectorAll('#player-quality-modal .focusable'));
+        },
+
+        selectQuality: function (index) {
+            this.selectedQualityIndex = index;
+            if (this.hlsInstance) {
+                if (index === -1) {
+                    this.hlsInstance.currentLevel = -1; // Auto
+                    this.hlsInstance.autoLevelEnabled = true;
+                } else {
+                    this.hlsInstance.currentLevel = index; // Lock specific level
+                    this.hlsInstance.autoLevelEnabled = false;
+                }
+            }
+            this.updateQualityButton();
+
+            // Toast feedback
+            var lvlLabel = NexusConfig.t('player_quality_auto');
+            if (index >= 0) {
+                for (var i = 0; i < this.qualityLevels.length; i++) {
+                    if (this.qualityLevels[i].id === index) {
+                        lvlLabel = this.qualityLevels[i].label;
+                        break;
+                    }
+                }
+            }
+            if (window.NexusApp && NexusApp.showToast) {
+                NexusApp.showToast(NexusConfig.t('player_quality_changed') + ' ' + lvlLabel);
+            }
+        },
+
+        updateQualityButton: function () {
+            var btn = document.getElementById('btn-quality-label');
+            if (!btn) return;
+            if (this.selectedQualityIndex === -1) {
+                var curLabel = '';
+                if (this.hlsInstance && this.hlsInstance.currentLevel >= 0 && this.qualityLevels.length > 0) {
+                    for (var qi = 0; qi < this.qualityLevels.length; qi++) {
+                        if (this.qualityLevels[qi].id === this.hlsInstance.currentLevel) {
+                            curLabel = ' (' + this.qualityLevels[qi].label + ')';
+                            break;
+                        }
+                    }
+                }
+                btn.textContent = NexusConfig.t('player_quality_auto') + curLabel;
+            } else {
+                var selLvl = null;
+                for (var i = 0; i < this.qualityLevels.length; i++) {
+                    if (this.qualityLevels[i].id === this.selectedQualityIndex) {
+                        selLvl = this.qualityLevels[i];
+                        break;
+                    }
+                }
+                btn.textContent = selLvl ? selLvl.label : NexusConfig.t('player_quality_auto');
+            }
+        },
+
         retryCurrent: function () {
             if (!this.primarySource) { this.stop(); return; }
             this.sourceIndex = 0;
@@ -1634,6 +1883,8 @@
         },
 
         updateProgress: function () {
+            if (this.isSports || this.isLive) return;
+
             // Update time numbers
             var currentEl = document.getElementById('player-time-current');
             var totalEl = document.getElementById('player-time-total');
@@ -1651,6 +1902,7 @@
             // Skip action + subtitle cue display
             this.updateSkipSegment();
             this.renderActiveSubtitleCue();
+            this.updateQualityButton();
 
             // Next Episode Countdown check for series:
             if (this.canPlayNextEpisode() && !this.nextEpisodeActive && !this.nextEpisodeDismissed && this.duration > 60000) {
@@ -1667,8 +1919,9 @@
             var textEl = document.getElementById('player-subtitle-text');
             if (!overlay || !textEl) return;
 
-            if (this.activeSubtitleIndex === -1 || !this.subtitleCues.length) {
+            if (this.isSports || this.isLive || this.activeSubtitleIndex === -1 || !this.subtitleCues.length) {
                 overlay.classList.remove('active');
+                textEl.textContent = '';
                 return;
             }
 
@@ -1684,10 +1937,13 @@
             }
 
             if (matchedCue && matchedCue.text) {
-                textEl.textContent = matchedCue.text;
+                if (textEl.textContent !== matchedCue.text) {
+                    textEl.textContent = matchedCue.text;
+                }
                 overlay.classList.add('active');
             } else {
                 overlay.classList.remove('active');
+                textEl.textContent = '';
             }
         },
 
@@ -1719,11 +1975,13 @@
         showControls: function () {
             var controls = document.getElementById('player-controls');
             var header = document.getElementById('player-header');
+            var page = document.getElementById('player-page');
             if (!controls) return;
 
             var wasHidden = !controls.classList.contains('visible');
             controls.classList.add('visible');
             if (header) header.classList.add('visible');
+            if (page) page.classList.add('controls-visible');
 
             // The chrome owns the timeline now; the transient seek HUD steps aside.
             var seekHud = document.getElementById('player-seek-hud');
@@ -1732,22 +1990,31 @@
             if (shell) shell.classList.remove('seeking');
 
             if (wasHidden && window.FocusManager) {
-                FocusManager.register(document.querySelectorAll('#player-controls .focusable, #btn-skip-segment'));
+                var focusSelector = '#player-controls .focusable';
+                if (!this.isSports && !this.isLive) {
+                    focusSelector += ', #btn-skip-segment';
+                }
+                FocusManager.register(document.querySelectorAll(focusSelector));
             }
 
             clearTimeout(this.controlsTimeout);
             this.controlsTimeout = window.setTimeout(function () {
-                var page = document.getElementById('player-page');
-                if (!page) return;
+                var p = document.getElementById('player-page');
+                if (!p) return;
                 var error = document.getElementById('player-error');
                 if (error && !error.classList.contains('hidden')) return;
                 var subModal = document.getElementById('player-subtitles-modal');
                 if (subModal && !subModal.classList.contains('hidden')) return;
                 var srcModal = document.getElementById('player-sources-modal');
                 if (srcModal && !srcModal.classList.contains('hidden')) return;
+                var audioModal = document.getElementById('player-audio-modal');
+                if (audioModal && !audioModal.classList.contains('hidden')) return;
+                var qualityModal = document.getElementById('player-quality-modal');
+                if (qualityModal && !qualityModal.classList.contains('hidden')) return;
 
                 controls.classList.remove('visible');
                 if (header) header.classList.remove('visible');
+                p.classList.remove('controls-visible');
                 if (window.FocusManager) FocusManager.clear();
             }, NexusConfig.playback.controlsTimeout || 4500);
         }

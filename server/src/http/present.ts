@@ -72,6 +72,7 @@ export class Presenter {
       mediaId: movieItem?.id ?? null,
       firstMediaId: (items.find((i) => i.season !== 0) ?? items[0])?.id ?? null,
       runtimeSec: movieItem ? this.runtime(movieItem) : null,
+      tmdbId: t.meta?.tmdbId,
     };
   }
 

@@ -746,11 +746,12 @@ body.player-open #nav-tabs {
     font-weight: 500;
     color: var(--color-text-primary);
     line-height: 1.45;
-    text-shadow: none;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
     box-shadow: none;
     direction: rtl;
     unicode-bidi: plaintext;
     white-space: pre-wrap;
+    text-align: center;
 }
 
 /* Floating Cinema Controls Bar */
@@ -1425,14 +1426,17 @@ html[dir="rtl"] .settings-item.focused {
 
 /* Subtitles sit on a solid plate — no blur, no glow. */
 .player-subtitle-overlay {
+    display: none;
     position: absolute;
-    bottom: 190px;
+    bottom: 72px;
     left: 0;
     right: 0;
     -webkit-justify-content: center;
     justify-content: center;
     z-index: 15;
     pointer-events: none;
+    -webkit-transition: bottom 0.25s ease;
+    transition: bottom 0.25s ease;
 }
 
 .player-subtitle-overlay.active {
@@ -1440,22 +1444,73 @@ html[dir="rtl"] .settings-item.focused {
     display: flex;
 }
 
+/* While controls are showing, smoothly lift subtitle plate above the controls bar */
+.player-page.controls-visible .player-subtitle-overlay {
+    bottom: 190px;
+}
+
 /* While the seek HUD is up, the subtitle plate steps above it. */
 .player-page.seeking .player-subtitle-overlay {
-    bottom: 290px;
+    bottom: 210px;
 }
 
 @media (max-height: 820px) {
+    .player-subtitle-overlay {
+        bottom: 56px;
+    }
+
+    .player-page.controls-visible .player-subtitle-overlay {
+        bottom: 150px;
+    }
+
     .player-page.seeking .player-subtitle-overlay {
-        bottom: 250px;
+        bottom: 170px;
     }
 }
 
 .player-subtitle-container {
     background: rgba(0, 0, 0, 0.78);
     border-radius: var(--border-radius);
-    padding: 12px 24px;
-    max-width: 62%;
+    padding: 10px 24px;
+    max-width: 68%;
+    text-align: center;
+    box-sizing: border-box;
+}
+
+/* Live Stream Status Bar in Cinema Player */
+.player-live-bar {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    margin-bottom: 14px;
+    padding: 6px 16px;
+}
+
+.player-live-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--color-brand-red);
+    margin-left: 10px;
+    display: inline-block;
+    box-shadow: 0 0 10px rgba(179, 32, 47, 0.75);
+    animation: pulse 2s infinite ease-in-out;
+}
+
+html[dir="rtl"] .player-live-dot {
+    margin-left: 10px;
+    margin-right: 0;
+}
+
+.player-live-status-text {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    letter-spacing: 0.5px;
+    font-family: inherit;
 }
 
 /* Loading: one ring, one line. */
@@ -2135,6 +2190,7 @@ html[dir="rtl"] .player-subtitle-text {
     font-family: 'Amiri', 'IBM Plex Sans Arabic', serif;
     font-size: 34px;
     line-height: 1.5;
+    text-align: center;
 }
 
 html[dir="rtl"] .modal-title {

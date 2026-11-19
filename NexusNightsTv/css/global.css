@@ -80,7 +80,7 @@
     --poster-height: 312px;
     --backdrop-width: 432px;
     --backdrop-height: 243px;
-    --hero-height: 720px;
+    --hero-height: 660px;
 
     /* One radius language: 8 for surfaces, pill for chips */
     --focus-border: 4px;
@@ -157,7 +157,7 @@ body {
 .player-modal-backdrop.hidden,
 .player-error.hidden,
 .player-loading.hidden {
-    display: none !important;
+    display: none;
 }
 
 /* ============================================
@@ -431,4 +431,26 @@ html[dir="rtl"] .state-actions > * + * {
 
 .scroll-container::-webkit-scrollbar {
     display: none;
+}
+
+/* ============================================
+   720p PANELS — token scale for short viewports
+   Component-level tightening lives at the end of components.css, after
+   the component rules it overrides.
+   ============================================ */
+
+@media (max-height: 820px) {
+    :root {
+        --nav-height: 80px;
+        --live-band-height: 104px;
+        --poster-width: 168px;
+        --poster-height: 252px;
+        --backdrop-width: 352px;
+        --backdrop-height: 198px;
+        --hero-height: 380px;
+        --spacing-2xl: 48px;
+        --spacing-3xl: 64px;
+        --font-size-2xl: 52px;
+        --font-size-hero: 64px;
+    }
 }

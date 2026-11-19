@@ -7,7 +7,7 @@ import type { EpisodeSummary, TitleSummary } from '../api-types';
 import { Play } from './Icons';
 
 const ring =
-  'ring-1 ring-white/[0.08] transition-all duration-300 ease-[var(--ease-out-expo)] group-hover/card:ring-gilt/40 group-hover/card:shadow-[0_14px_32px_-6px_rgba(0,0,0,0.95)] group-hover/card:-translate-y-1.5 group-focus-visible/card:ring-gilt';
+  'ring-1 ring-white/[0.08] transition-all duration-300 ease-[var(--ease-out-expo)] group-hover/card:ring-gilt/50 group-hover/card:shadow-[0_16px_36px_-6px_rgba(0,0,0,0.95),0_0_24px_rgba(179,32,47,0.28)] group-hover/card:-translate-y-2 group-hover/card:scale-[1.02] group-focus-visible/card:ring-2 group-focus-visible/card:ring-white group-focus-visible/card:shadow-[0_0_28px_rgba(179,32,47,0.45)] group-focus-visible/card:-translate-y-2 group-focus-visible/card:scale-[1.02]';
 
 /** Portrait poster; falls back to a typographic card when there is no artwork. */
 export const TitleCard = memo(function TitleCard({ title }: { title: TitleSummary }) {

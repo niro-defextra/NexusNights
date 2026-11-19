@@ -53,17 +53,25 @@
                     // Hidden chrome: d-pad left/right scrub, OK skips the
                     // active segment. Visible chrome keeps spatial focus.
                     if (!modalOpen && !controlsVisible) {
-                        if (e.keyCode === 37) {
-                            e.preventDefault();
-                            if (NexusPlayer.seekBy(-10000)) return;
-                        } else if (e.keyCode === 39) {
-                            e.preventDefault();
-                            if (NexusPlayer.seekBy(10000)) return;
-                        } else if (e.keyCode === 13) {
-                            e.preventDefault();
-                            if (NexusPlayer.skipActiveSegment && NexusPlayer.skipActiveSegment()) return;
-                            NexusPlayer.showControls();
-                            return;
+                        if (NexusPlayer.isSports || NexusPlayer.isLive) {
+                            if (e.keyCode === 37 || e.keyCode === 39 || e.keyCode === 13 || e.keyCode === 38 || e.keyCode === 40) {
+                                e.preventDefault();
+                                NexusPlayer.showControls();
+                                return;
+                            }
+                        } else {
+                            if (e.keyCode === 37) {
+                                e.preventDefault();
+                                if (NexusPlayer.seekBy(-10000)) return;
+                            } else if (e.keyCode === 39) {
+                                e.preventDefault();
+                                if (NexusPlayer.seekBy(10000)) return;
+                            } else if (e.keyCode === 13) {
+                                e.preventDefault();
+                                if (NexusPlayer.skipActiveSegment && NexusPlayer.skipActiveSegment()) return;
+                                NexusPlayer.showControls();
+                                return;
+                            }
                         }
                     }
 

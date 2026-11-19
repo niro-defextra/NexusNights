@@ -50,7 +50,7 @@ export class StreamResolver {
   private pending = new Map<string, Promise<ResolvedStream>>();
   private activeBrowsers = 0;
   private readonly MAX_CONCURRENT_BROWSERS = 3;
-  private readonly CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+  private readonly CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes max for fresh tokens
 
   private getBrowserPath(): string | undefined {
     const paths = [
@@ -60,11 +60,15 @@ export class StreamResolver {
     return paths.find((p) => fs.existsSync(p));
   }
 
-  private getCacheKey(req: { tmdbId: number; kind: 'movie' | 'series'; season?: number; episode?: number }): string {
-    if (req.kind === 'series') {
-      return `series-${req.tmdbId}-s${req.season ?? 1}e${req.episode ?? 1}`;
+  private getCacheKey(req: { tmdbId: number; kind: 'movie' | 'series'; season?: number; episode?: number; provider?: string; targetUrl?: string }): string {
+    const base = req.kind === 'series'
+      ? `series-${req.tmdbId}-s${req.season ?? 1}e${req.episode ?? 1}`
+      : `movie-${req.tmdbId}`;
+    if (req.targetUrl) {
+      const hash = Buffer.from(req.targetUrl).toString('hex').slice(0, 12);
+      return `${base}-t-${hash}`;
     }
-    return `movie-${req.tmdbId}`;
+    return req.provider ? `${base}-p-${req.provider.toLowerCase().replace(/[^a-z0-9]/g, '')}` : base;
   }
 
   /**
@@ -82,6 +86,18 @@ export class StreamResolver {
   }
 
   /**
+   * Evict an expired or invalid stream from cache immediately.
+   */
+  evict(streamId: string): void {
+    for (const [key, item] of this.cache.entries()) {
+      if (item.id === streamId) {
+        this.cache.delete(key);
+      }
+    }
+    this.cache.delete(`id:${streamId}`);
+  }
+
+  /**
    * Resolves a media item to its direct HLS stream URL.
    */
   async resolve(req: {
@@ -89,6 +105,8 @@ export class StreamResolver {
     kind: 'movie' | 'series';
     season?: number;
     episode?: number;
+    provider?: string;
+    targetUrl?: string;
   }): Promise<ResolvedStream> {
     const snifferEnabled = process.env.ENABLE_STREAM_SNIFFER !== 'false' && process.env.DISABLE_SNIFFER !== 'true';
     if (!snifferEnabled) {
@@ -175,7 +193,7 @@ export class StreamResolver {
   }
 
   private async sniffFromProvider(
-    req: { tmdbId: number; kind: 'movie' | 'series'; season?: number; episode?: number },
+    req: { tmdbId: number; kind: 'movie' | 'series'; season?: number; episode?: number; provider?: string; targetUrl?: string },
     cacheKey: string
   ): Promise<ResolvedStream> {
     const startTime = Date.now();
@@ -186,44 +204,58 @@ export class StreamResolver {
     const e = req.episode ?? 1;
     const isSeries = req.kind === 'series';
 
-    // Comprehensive target providers list with clean embed parameters
-    const providerTargets: Array<{ name: string; url: string; referer: string }> = [
-      {
-        name: 'Vidrift',
-        url: isSeries
-          ? `https://embed.vidrift.net/embed/tv/${req.tmdbId}/${s}/${e}?title=true&hide=next,episodes,cast`
-          : `https://embed.vidrift.net/embed/movie/${req.tmdbId}?title=true&hide=next,episodes,cast`,
-        referer: 'https://embed.vidrift.net/',
-      },
-      {
-        name: 'VixSrc',
-        url: isSeries
-          ? `https://vixsrc.to/tv/${req.tmdbId}/${s}/${e}`
-          : `https://vixsrc.to/movie/${req.tmdbId}`,
-        referer: 'https://vixsrc.to/',
-      },
-      {
-        name: 'Vidfast',
-        url: isSeries
-          ? `https://vidfast.vc/tv/${req.tmdbId}/${s}/${e}?pip=hide`
-          : `https://vidfast.vc/movie/${req.tmdbId}?pip=hide`,
-        referer: 'https://vidfast.vc/',
-      },
-      {
-        name: 'Aether',
-        url: isSeries
-          ? `https://aether.ist/media/tmdb-tv-${req.tmdbId}/${s}/${e}`
-          : `https://aether.ist/media/tmdb-movie-${req.tmdbId}`,
-        referer: 'https://aether.ist/',
-      },
-      {
-        name: 'Vidlove',
-        url: isSeries
-          ? `https://player.vidlove.cc/embed/tv/${req.tmdbId}/${s}/${e}`
-          : `https://player.vidlove.cc/embed/movie/${req.tmdbId}`,
-        referer: 'https://player.vidlove.cc/',
-      },
-    ];
+    let providerTargets: Array<{ name: string; url: string; referer: string }> = [];
+
+    // If an explicit target embedUrl was passed (e.g. ArabMedia servers or third-party embed), sniff it directly:
+    if (req.targetUrl) {
+      const u = req.targetUrl;
+      let referer = 'https://movizland.online/';
+      if (u.includes('liiivideo') || u.includes('vidspeed') || u.includes('abyssplayer') || u.includes('vidmoly')) {
+        referer = 'https://movizland.online/';
+      } else {
+        try { referer = new URL(u).origin + '/'; } catch {}
+      }
+      providerTargets.push({
+        name: req.provider || 'Target',
+        url: req.targetUrl,
+        referer: referer,
+      });
+    } else {
+      // General M3U8 streaming providers in strict priority order: Aether -> VixSrc -> Vidrift
+      providerTargets = [
+        {
+          name: 'Aether',
+          url: isSeries
+            ? `https://aether.ist/media/tmdb-tv-${req.tmdbId}/${s}/${e}`
+            : `https://aether.ist/media/tmdb-movie-${req.tmdbId}`,
+          referer: 'https://aether.ist/',
+        },
+        {
+          name: 'VixSrc',
+          url: isSeries
+            ? `https://vixsrc.to/tv/${req.tmdbId}/${s}/${e}`
+            : `https://vixsrc.to/movie/${req.tmdbId}`,
+          referer: 'https://vixsrc.to/',
+        },
+        {
+          name: 'Vidrift',
+          url: isSeries
+            ? `https://embed.vidrift.net/embed/tv/${req.tmdbId}/${s}/${e}?title=true&hide=next,episodes,cast`
+            : `https://embed.vidrift.net/embed/movie/${req.tmdbId}?title=true&hide=next,episodes,cast`,
+          referer: 'https://embed.vidrift.net/',
+        },
+      ];
+
+      if (req.provider) {
+        const pClean = req.provider.toLowerCase();
+        const match = providerTargets.find(
+          (t) => t.name.toLowerCase().includes(pClean) || pClean.includes(t.name.toLowerCase())
+        );
+        if (match) {
+          providerTargets = [match, ...providerTargets.filter((t) => t !== match)];
+        }
+      }
+    }
 
     console.log(`[StreamResolver] Starting fast multi-target sniff for ${cacheKey} (${providerTargets.length} targets)`);
     this.activeBrowsers++;
@@ -238,8 +270,6 @@ export class StreamResolver {
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-gpu',
-          '--no-zygote',
-          '--single-process',
           '--disable-software-rasterizer',
           '--disable-extensions',
           '--autoplay-policy=no-user-gesture-required',
@@ -247,9 +277,6 @@ export class StreamResolver {
           '--disable-web-security',
           '--disable-blink-features=AutomationControlled',
           '--window-size=800,600',
-          '--js-flags=--max-old-space-size=128',
-          '--disk-cache-size=1',
-          '--media-cache-size=1',
         ],
       };
 
@@ -317,8 +344,8 @@ export class StreamResolver {
                 const isThumb = u.includes('.vtt') || u.includes('.jpg') || u.includes('.png');
                 const isAdPing = u.includes('ping') || u.includes('doubleclick') || u.includes('analytics');
 
-                const isM3u8 = (u.includes('.m3u8') || u.includes('/playlist/')) && !isThumb && !isAdPing;
-                const isMedia = resType === 'media' && (u.includes('.mp4') || u.includes('.m3u8')) && !isThumb;
+                const isM3u8 = (u.includes('.m3u8') || u.includes('/playlist/') || u.includes('.urlset')) && !isThumb && !isAdPing;
+                const isMedia = (resType === 'media' || u.includes('.mp4') || u.includes('.m3u8')) && (u.includes('.mp4') || u.includes('.m3u8')) && !isThumb && !isAdPing;
 
                 if ((isM3u8 || isMedia) && !capturedUrl) {
                   capturedUrl = u;
@@ -341,24 +368,36 @@ export class StreamResolver {
             });
 
             // Fast navigation with timeout
-            const pageTimeout = Math.min(8000, remainingTime - 500);
+            const pageTimeout = Math.min(12000, Math.max(5000, remainingTime - 500));
             await page.goto(target.url, {
               waitUntil: 'domcontentloaded',
               timeout: pageTimeout,
               referer: target.referer,
             });
 
-            // Synthetic play trigger after 1.2s if stream not yet emitted
-            setTimeout(async () => {
+            // Immediately trigger play on player button/overlay if present
+            await page.evaluate(() => {
+              const doc = (globalThis as any).document;
+              if (doc) {
+                const btn = doc.querySelector('button[aria-label*="Play"], .play-button, .vjs-big-play-button, video, div[class*="play"]');
+                if (btn && typeof btn.click === 'function') btn.click();
+              }
+            }).catch(() => {});
+
+            // Secondary synthetic play trigger after 800ms if stream not yet emitted
+            const deferredClick = setTimeout(async () => {
               if (page && !page.isClosed() && !capturedUrl) {
                 try {
-                  await page.evaluate(`(() => {
-                    const btn = document.querySelector('button[aria-label*="Play"], .play-button, .vjs-big-play-button, video, div[class*="play"]');
-                    if (btn && typeof btn.click === 'function') btn.click();
-                  })()`).catch(() => {});
+                  await page.evaluate(() => {
+                    const doc = (globalThis as any).document;
+                    if (doc) {
+                      const btn = doc.querySelector('button[aria-label*="Play"], .play-button, .vjs-big-play-button, video, div[class*="play"]');
+                      if (btn && typeof btn.click === 'function') btn.click();
+                    }
+                  }).catch(() => {});
                 } catch {}
               }
-            }, 1200);
+            }, 800);
 
             // Wait for stream capture or batch timeout
             const res = await Promise.race([
@@ -366,11 +405,14 @@ export class StreamResolver {
               new Promise<null>((r) => setTimeout(() => r(null), pageTimeout)),
             ]);
 
+            clearTimeout(deferredClick);
+
             if (res) {
               return { ...res, provider: target.name };
             }
             return null;
-          } catch {
+          } catch (pageErr: any) {
+            console.warn(`[StreamResolver] Sniff target ${target.name} failed:`, pageErr.message);
             return null;
           } finally {
             if (page && !page.isClosed()) {
@@ -392,6 +434,19 @@ export class StreamResolver {
         throw new Error(`All providers failed for tmdbId=${req.tmdbId} kind=${req.kind}`);
       }
 
+      let ttl = this.CACHE_TTL_MS;
+      const expiresMatch = resolvedResult.url.match(/expires=(\d+)/);
+      if (expiresMatch) {
+        const expSec = parseInt(expiresMatch[1], 10);
+        if (!isNaN(expSec)) {
+          const expMs = expSec > 2000000000 ? expSec : expSec * 1000;
+          const diff = expMs - Date.now();
+          if (diff > 0 && diff < ttl) {
+            ttl = Math.max(30000, diff - 60000);
+          }
+        }
+      }
+
       const streamId = `stream-${Buffer.from(cacheKey).toString('hex').slice(0, 16)}`;
       const resolved: ResolvedStream = {
         id: streamId,
@@ -402,7 +457,7 @@ export class StreamResolver {
         playlistUrl: resolvedResult.url,
         headers: resolvedResult.headers,
         createdAt: Date.now(),
-        expiresAt: Date.now() + this.CACHE_TTL_MS,
+        expiresAt: Date.now() + ttl,
         provider: resolvedResult.provider,
       };
 

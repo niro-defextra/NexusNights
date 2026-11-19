@@ -153,7 +153,7 @@
                                 tmdbId: tmdbId,
                                 localId: localId,
                                 type: 'movie',
-                                title: playback.title || 'NEXUSNIGHT',
+                                title: playback.title || 'NexusNights',
                                 year: playback.releaseYear,
                                 posterUrl: playback.posterUrl,
                                 backdropUrl: playback.backdropUrl
@@ -162,7 +162,7 @@
                             NexusPlayer.play(playback.source, playback.alternatives, playback.subtitles, meta);
                         }).catch(function (err) {
                             console.error('[MoviesPage] Playback error:', err);
-                            NexusApp.showToast(err.message || 'فشل التشغيل');
+                            NexusApp.showToast(NexusApp.describeError(err));
                         });
                     }
                 };
@@ -173,7 +173,7 @@
 
         showError: function (error) {
             NexusApp.showErrorState({
-                title: 'فشل تحميل الأفلام',
+                title: NexusConfig.getLanguage() === 'ar' ? 'تعذّر تحميل الأفلام' : 'Movies unavailable',
                 message: error && error.message,
                 onAction: function () { MoviesPage.render(); }
             });

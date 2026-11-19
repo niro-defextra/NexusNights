@@ -72,10 +72,8 @@ export function TopBar() {
     <>
       <header
         className={`fixed inset-x-0 top-0 z-40 flex h-14 sm:h-16 items-center gap-3 sm:gap-4 px-[var(--pad)] pt-[env(safe-area-inset-top,0px)] transition-all duration-200 ${
-          isSports
-            ? 'bg-[#07080b] border-b border-white/[0.08] shadow-[0_8px_30px_rgba(0,0,0,0.85)]'
-            : scrolled
-            ? 'bg-ink/85 backdrop-blur-2xl border-b border-gilt/15 shadow-[0_8px_32px_rgba(0,0,0,0.7)]'
+          isSports || scrolled
+            ? 'bg-ink/90 backdrop-blur-2xl border-b border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.7)]'
             : 'bg-gradient-to-b from-ink/90 via-ink/50 to-transparent border-b border-white/[0.04] backdrop-blur-[2px]'
         }`}
       >
@@ -88,43 +86,40 @@ export function TopBar() {
           </span>
         </a>
 
-        {/* Desktop Navigation */}
-        <nav className="ms-2 hidden items-center gap-4 text-sm sm:flex shrink-0">
+        {/* Desktop Navigation (TV-Signature Capsule Ramp) */}
+        <nav className="ms-2.5 hidden items-center gap-1.5 text-xs font-semibold sm:flex shrink-0 p-1 rounded-full bg-crypt/60 border border-white/[0.06] backdrop-blur-md">
           <a
             href={hrefs.home}
-            className={`relative py-1 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 ${
-              isHome ? 'text-bone font-medium' : 'text-dust/80 hover:text-bone focus-visible:text-gilt'
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-200 ${
+              isHome
+                ? 'bg-blood text-white shadow-[0_2px_12px_rgba(179,32,47,0.45)] font-bold'
+                : 'text-dust/85 hover:text-bone hover:bg-white/5 active:scale-95'
             }`}
           >
             {t('home')}
-            {isHome && (
-              <span className="absolute -bottom-1.5 inset-x-0 h-0.5 bg-gilt rounded-full shadow-[0_0_8px_rgba(212,175,106,0.85)]" />
-            )}
           </a>
 
           <a
             href={hrefs.sports}
-            className={`relative py-1 flex items-center gap-1.5 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 ${
-              isSports ? 'text-emerald-400 font-medium' : 'text-dust/80 hover:text-bone focus-visible:text-emerald-400'
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-200 ${
+              isSports
+                ? 'bg-blood text-white shadow-[0_2px_12px_rgba(179,32,47,0.45)] font-bold'
+                : 'text-dust/85 hover:text-bone hover:bg-white/5 active:scale-95'
             }`}
           >
             <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
             <span>{t('sports')}</span>
-            {isSports && (
-              <span className="absolute -bottom-1.5 inset-x-0 h-0.5 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.85)]" />
-            )}
           </a>
 
           <a
             href={hrefs.downloads}
-            className={`relative py-1 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 ${
-              isDownloads ? 'text-bone font-medium' : 'text-dust/80 hover:text-bone focus-visible:text-gilt'
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all duration-200 ${
+              isDownloads
+                ? 'bg-blood text-white shadow-[0_2px_12px_rgba(179,32,47,0.45)] font-bold'
+                : 'text-dust/85 hover:text-bone hover:bg-white/5 active:scale-95'
             }`}
           >
             {lang === 'ar' ? 'التنزيلات' : 'Downloads'}
-            {isDownloads && (
-              <span className="absolute -bottom-1.5 inset-x-0 h-0.5 bg-gilt rounded-full shadow-[0_0_8px_rgba(212,175,106,0.85)]" />
-            )}
           </a>
 
           {!isDiscordActivity && (
@@ -306,17 +301,21 @@ export function TopBar() {
             <a
               href={hrefs.home}
               className={`flex items-center justify-between rounded-xl px-3.5 py-3 transition-all duration-200 active:scale-[0.98] ${
-                isHome ? 'bg-gilt/15 text-gilt font-medium' : 'text-bone hover:bg-white/[0.05]'
+                isHome
+                  ? 'bg-blood/20 text-white border border-blood/40 font-bold shadow-[0_0_16px_rgba(179,32,47,0.3)]'
+                  : 'text-bone hover:bg-white/[0.05]'
               }`}
             >
               <span>{t('home')}</span>
-              {isHome && <span className="size-2 rounded-full bg-gilt shadow-[0_0_8px_rgba(212,175,106,0.8)]" />}
+              {isHome && <span className="size-2 rounded-full bg-blood shadow-[0_0_8px_rgba(179,32,47,0.8)]" />}
             </a>
 
             <a
               href={hrefs.sports}
               className={`flex items-center justify-between rounded-xl px-3.5 py-3 transition-all duration-200 active:scale-[0.98] ${
-                isSports ? 'bg-emerald-500/15 text-emerald-400 font-medium' : 'text-bone hover:bg-white/[0.05]'
+                isSports
+                  ? 'bg-blood/20 text-white border border-blood/40 font-bold shadow-[0_0_16px_rgba(179,32,47,0.3)]'
+                  : 'text-bone hover:bg-white/[0.05]'
               }`}
             >
               <span className="flex items-center gap-2">
@@ -329,11 +328,13 @@ export function TopBar() {
             <a
               href={hrefs.downloads}
               className={`flex items-center justify-between rounded-xl px-3.5 py-3 transition-all duration-200 active:scale-[0.98] ${
-                isDownloads ? 'bg-gilt/15 text-gilt font-medium' : 'text-bone hover:bg-white/[0.05]'
+                isDownloads
+                  ? 'bg-blood/20 text-white border border-blood/40 font-bold shadow-[0_0_16px_rgba(179,32,47,0.3)]'
+                  : 'text-bone hover:bg-white/[0.05]'
               }`}
             >
               <span>{lang === 'ar' ? 'التنزيلات' : 'Downloads'}</span>
-              {isDownloads && <span className="size-2 rounded-full bg-gilt shadow-[0_0_8px_rgba(212,175,106,0.8)]" />}
+              {isDownloads && <span className="size-2 rounded-full bg-blood shadow-[0_0_8px_rgba(179,32,47,0.8)]" />}
             </a>
 
             {!isDiscordActivity && (

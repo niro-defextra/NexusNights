@@ -11,6 +11,15 @@ build/
 .env.*
 !.env.example
 
+# ── Signing certificates & keystores (NEVER commit) ───────────
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.crt
+*.key
+
 # ── Runtime data (generated at run time) ──────────────────────
 data/
 
@@ -27,7 +36,18 @@ media/*
 *.vtt
 *.ass
 
-# ── Archives & binaries ───────────────────────────────────────
+# ── App binaries (built artifacts — never commit) ─────────────
+# Root-level APK (committed previously by mistake)
+NexusNight.apk
+# Deployment folders: keep the folder, ignore the binaries inside
+directed/*.apk
+directed/*.wgt
+directed/*.aab
+client/public/downloads/*.apk
+client/public/downloads/*.wgt
+client/public/downloads/*.aab
+
+# ── Archives ──────────────────────────────────────────────────
 *.zip
 *.rar
 *.7z
@@ -44,6 +64,19 @@ pnpm-debug.log*
 # ── Test / coverage ───────────────────────────────────────────
 coverage/
 .nyc_output/
+
+# ── Local dev / agent tooling (not part of source code) ───────
+.agents/
+.impeccable/review/*.png
+.impeccable/surfaces/
+.verify/
+scripts/debug-sniff.js
+scripts/test-arab-stream.js
+scripts/check-es5.js
+
+# ── Tizen TV build artifacts (already in NexusNightsTv/.gitignore)
+NexusNightsTv/.buildResult/
+NexusNightsTv/.sign/
 
 # ── Editors / OS ──────────────────────────────────────────────
 .vscode/*

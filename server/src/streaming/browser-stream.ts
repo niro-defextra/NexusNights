@@ -7,6 +7,12 @@ import { getStealthContextOptions, setupStealthPage, emulateHumanBehavior } from
 /**
  * Brave Browser Paths by OS
  */
+
+/*
+* Fixes the resolving of the Brave browser executable path for different operating systems.
+*/
+
+
 function getBravePath(): string | undefined {
   const platform = process.platform;
   

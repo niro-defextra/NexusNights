@@ -65,19 +65,19 @@ export class PlaybackOrchestrator {
     return this.orchestrate(req);
   }
 
-  private classificationCache = new Map<string, { data: { isTurkish: boolean; isAnime: boolean }; exp: number }>();
+  private classificationCache = new Map<string, { data: { isTurkish: boolean; isAnime: boolean; isArabic: boolean }; exp: number }>();
 
   /**
    * Classify content language and genre via TMDB (cached)
    */
-  private async classifyContent(tmdbId: number, kind: 'movie' | 'series'): Promise<{ isTurkish: boolean; isAnime: boolean }> {
+  private async classifyContent(tmdbId: number, kind: 'movie' | 'series'): Promise<{ isTurkish: boolean; isAnime: boolean; isArabic: boolean }> {
     const cacheKey = `${kind}-${tmdbId}`;
     const cached = this.classificationCache.get(cacheKey);
     if (cached && Date.now() < cached.exp) {
       return cached.data;
     }
 
-    const fallback = { isTurkish: false, isAnime: false };
+    const fallback = { isTurkish: false, isAnime: false, isArabic: false };
     const TMDB_API_KEY = process.env.TMDB_API_KEY;
     if (!TMDB_API_KEY) {
       return fallback;
@@ -112,10 +112,12 @@ export class PlaybackOrchestrator {
 
       const genres = Array.isArray(data.genres) ? data.genres.map((g) => g.id) : [];
 
+      const ARABIC_COUNTRIES = ['EG', 'SA', 'AE', 'SY', 'LB', 'MA', 'DZ', 'TN', 'KW', 'QA', 'JO', 'IQ', 'OM', 'BH', 'YE', 'PS', 'SD', 'LY'];
+      const isArabic = lang === 'ar' || originCountries.some((c) => ARABIC_COUNTRIES.includes(c));
       const isTurkish = lang === 'tr' || originCountries.includes('TR');
       const isAnime = lang === 'ja' || (genres.includes(16) && (originCountries.includes('JP') || lang === 'ja'));
 
-      const result = { isTurkish, isAnime };
+      const result = { isTurkish, isAnime, isArabic };
       this.classificationCache.set(cacheKey, { data: result, exp: Date.now() + 2 * 3600 * 1000 });
       return result;
     } catch {
@@ -133,17 +135,29 @@ export class PlaybackOrchestrator {
 
     const diagnostics: PlaybackDiagnostic[] = [];
 
-    // Intelligent content classification: route Turkish to Dizibal, Anime to HiAnime
-    const { isTurkish, isAnime } = await this.classifyContent(req.tmdbId, req.kind);
+    // Intelligent content classification: route Arabic to ArabMedia, Turkish to Dizibal, Anime to HiAnime
+    const { isTurkish, isAnime, isArabic } = await this.classifyContent(req.tmdbId, req.kind);
 
-    if (isTurkish) {
+    if (isArabic) {
+      diagnostics.push({
+        code: 'ARABIC_CONTENT_DETECTED',
+        message: 'Arabic content detected - prioritizing ArabMedia provider for direct authentic streaming',
+        severity: 'info',
+      });
+      // Move ArabMedia to index 0, filter out non-Arabic specialized scrapers
+      activeProviders = activeProviders.filter((p) => p.id !== 'dizibal' && p.id !== 'hianime');
+      const arab = activeProviders.find((p) => p.id === 'arab-media');
+      if (arab) {
+        activeProviders = [arab, ...activeProviders.filter((p) => p.id !== 'arab-media')];
+      }
+    } else if (isTurkish) {
       diagnostics.push({
         code: 'TURKISH_CONTENT_DETECTED',
         message: 'Turkish content detected - prioritizing Dizibal provider',
         severity: 'info',
       });
-      // Move Dizibal to index 0, filter out anime-specific providers
-      activeProviders = activeProviders.filter((p) => p.id !== 'hianime');
+      // Move Dizibal to index 0, filter out other specialty providers
+      activeProviders = activeProviders.filter((p) => p.id !== 'hianime' && p.id !== 'arab-media');
       const dizibal = activeProviders.find((p) => p.id === 'dizibal');
       if (dizibal) {
         activeProviders = [dizibal, ...activeProviders.filter((p) => p.id !== 'dizibal')];
@@ -154,15 +168,23 @@ export class PlaybackOrchestrator {
         message: 'Anime detected - prioritizing HiAnime provider for direct native HLS & soft subtitles',
         severity: 'info',
       });
-      // Move HiAnime to index 0, filter out Turkish-specific Dizibal
-      activeProviders = activeProviders.filter((p) => p.id !== 'dizibal');
+      // Move HiAnime to index 0, filter out other specialty providers
+      activeProviders = activeProviders.filter((p) => p.id !== 'dizibal' && p.id !== 'arab-media');
       const hianime = activeProviders.find((p) => p.id === 'hianime');
       if (hianime) {
         activeProviders = [hianime, ...activeProviders.filter((p) => p.id !== 'hianime')];
       }
     } else {
-      // General Hollywood / International content: filter out language-specific scrapers
-      activeProviders = activeProviders.filter((p) => p.id !== 'dizibal' && p.id !== 'hianime');
+      // General Hollywood / International content:
+      // Filter out language-specific scrapers (hianime, arab-media),
+      // and sort strictly by user priority: Aether (#1) -> VixSrc (#2) -> Vidrift (#3) -> Dizibal (#4 fallback with English audio)
+      activeProviders = activeProviders.filter((p) => p.id !== 'hianime' && p.id !== 'arab-media');
+      const generalOrder = ['aether', 'vixsrc', 'vidrift', 'dizibal'];
+      activeProviders.sort((a, b) => {
+        const ia = generalOrder.indexOf(a.id);
+        const ib = generalOrder.indexOf(b.id);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      });
     }
 
     // Note disabled providers in diagnostics
@@ -287,6 +309,11 @@ export class PlaybackOrchestrator {
       // Quality scoring
       if (source.quality.includes('1080')) score += 10;
       else if (source.quality.includes('720')) score += 5;
+
+      // Keep Dizibal as fallback option behind primary general providers (Aether, VixSrc, Vidrift) for non-Turkish media
+      if (pId === 'dizibal' && source.priority <= 60) {
+        score -= 60;
+      }
 
       // Health score multiplier
       const healthScore = this.health.getProviderScore(pId);

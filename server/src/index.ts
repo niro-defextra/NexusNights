@@ -1,4 +1,11 @@
-import 'dotenv/config';
+import path from 'node:path';
+import dotenv from 'dotenv';
+
+// Always load root .env first regardless of cwd
+const ROOT_DIR = path.resolve(__dirname, '..', '..');
+dotenv.config({ path: path.join(ROOT_DIR, '.env') });
+dotenv.config(); // fallback to cwd .env if present
+
 import dns from 'node:dns';
 try {
   dns.setDefaultResultOrder('ipv4first');

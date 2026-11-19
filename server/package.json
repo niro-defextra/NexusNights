@@ -9,9 +9,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit -p .",
     "scan": "tsx src/cli.ts scan",
-    "list": "tsx src/cli.ts list",
-    "sample-media": "tsx scripts/make-sample-media.ts",
-    "test": "node --import tsx --test test/*.test.ts"
+    "list": "tsx src/cli.ts list"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
