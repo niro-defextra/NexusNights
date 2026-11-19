@@ -47,7 +47,7 @@ export interface RoomDeps {
   durationOf: (id: string) => number | undefined;
 }
 
-const STUCK_MS = 30_000;
+const STUCK_MS = 8_000;
 export const MAX_MEMBERS = 50;
 
 /**
@@ -244,7 +244,16 @@ export class Room {
         audioTrack: 0,
         playbackRate: 1,
       };
-      for (const m of this.members.values()) { m.awaitingLoad = true; m.stalled = false; m.bufferingSince = now; }
+      for (const m of this.members.values()) {
+        if (m.sockets.size > 0) {
+          m.awaitingLoad = true;
+          m.stalled = false;
+          m.bufferingSince = now;
+        } else {
+          m.awaitingLoad = false;
+          m.stalled = false;
+        }
+      }
       this.recomputeHold(now);
       return { ok: true, changed: true };
     }
@@ -290,13 +299,19 @@ export class Room {
   /** Periodic: never let a stuck client freeze the room forever. */
   tick(now: number): boolean {
     for (const m of this.members.values()) {
-      if ((m.awaitingLoad || m.stalled) && now - m.bufferingSince > STUCK_MS) { m.awaitingLoad = false; m.stalled = false; }
+      if (m.sockets.size === 0) {
+        m.awaitingLoad = false;
+        m.stalled = false;
+      } else if ((m.awaitingLoad || m.stalled) && now - m.bufferingSince > STUCK_MS) {
+        m.awaitingLoad = false;
+        m.stalled = false;
+      }
     }
     return this.recomputeHold(now);
   }
 
   private recomputeHold(now: number): boolean {
-    const any = [...this.members.values()].some((m) => m.awaitingLoad || m.stalled);
+    const any = [...this.members.values()].some((m) => m.sockets.size > 0 && (m.awaitingLoad || m.stalled));
     const s = this.state;
     const should = s.playing && any;
     if (should === s.hold) return false;
@@ -313,7 +328,9 @@ export class Room {
   }
 
   waitingFor(): string[] {
-    return [...this.members.values()].filter((m) => m.awaitingLoad || m.stalled).map((m) => m.name);
+    return [...this.members.values()]
+      .filter((m) => m.sockets.size > 0 && (m.awaitingLoad || m.stalled))
+      .map((m) => m.name);
   }
 
   publicRoom(): PublicRoom {

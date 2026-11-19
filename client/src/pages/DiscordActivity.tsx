@@ -286,7 +286,11 @@ export function DiscordActivity() {
         }
       } catch (err) {
         console.error('[DiscordActivity] Error fetching playback:', err);
-        if (!cancel) setPlaybackLoading(false);
+        if (!cancel) {
+          setPlaybackLoading(false);
+          room.setBuffering('load', false);
+          room.toast(lang === 'ar' ? 'فشل تحميل روابط البث المباشر' : 'Failed to load streaming playback');
+        }
       }
     };
 
@@ -568,7 +572,11 @@ export function DiscordActivity() {
                     canControl={room.canControl}
                     intentPlaying={!!room.state?.playing}
                     holdLabel={room.active && room.state?.hold && room.waitingFor.length
-                      ? t('waitingFor', { names: room.waitingFor.join(', ') })
+                      ? (() => {
+                          const myName = room.me?.name || auth.user?.username;
+                          const others = room.waitingFor.filter((n) => n !== myName);
+                          return others.length > 0 ? t('waitingFor', { names: others.join(', ') }) : null;
+                        })()
                       : null}
                     onDisabledControlClick={() => room.toast(t('onlyHost'))}
                     onBuffering={(k, v) => room.setBuffering(k, v)}

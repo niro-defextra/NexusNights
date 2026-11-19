@@ -245,6 +245,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       
       setErrorCode(code);
       setPhase('error');
+      cb.current.onBuffering?.('load', false);
+      cb.current.onBuffering?.('stall', false);
     };
 
     const begin = () => {
@@ -375,7 +377,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
         setPrep(0.4);
         setFailoverMessage(lang === 'ar' ? `جاري الاتصال بسيرفر ${source.provider}...` : `Connecting to ${source.provider}...`);
         try {
-          const res = await fetch('/api/streaming/resolve-native', {
+          const res = await fetch(u('/api/streaming/resolve-native') || '/api/streaming/resolve-native', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

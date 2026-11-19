@@ -239,7 +239,9 @@ export function Watch({ id }: { id: string }) {
     : undefined;
 
   const guard = (fn: () => void) => () => (room.canControl ? fn() : room.toast(t('onlyHost')));
-  const hold = roomMode && room.state?.hold && room.waitingFor.length ? t('waitingFor', { names: room.waitingFor.join(', ') }) : null;
+  const myName = room.me?.name;
+  const othersWaiting = roomMode && room.state?.hold ? room.waitingFor.filter((n) => n !== myName) : [];
+  const hold = othersWaiting.length > 0 ? t('waitingFor', { names: othersWaiting.join(', ') }) : null;
 
   const next = () => {
     if (!media.nextId) return;

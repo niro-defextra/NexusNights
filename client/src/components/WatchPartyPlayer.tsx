@@ -137,7 +137,10 @@ export const WatchPartyPlayer = forwardRef<PlayerHandle, Props>(
                 onBack={onBack}
                 onNext={() => {}}
                 onEnded={onEnded}
-                onReady={onReady}
+                onReady={() => {
+                  onReady?.();
+                  room.setBuffering('load', false);
+                }}
                 onProgress={onProgress}
                 onBuffering={(k: 'load' | 'stall', v: boolean) => room.setBuffering(k, v)}
                 onUserPlay={(tt: number) => guard(() => void room.send({ type: 'play', position: tt }))()}

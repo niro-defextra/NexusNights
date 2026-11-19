@@ -30,8 +30,12 @@ function parse(hash: string): Route {
     return { name: 'sports' };
   }
 
-  // Discord Activity Mode
-  if (parts[0] === 'discord' || parts[0] === 'activity') {
+  // Discord Activity Mode (explicit hash or auto-detected embedded Discord environment)
+  const isDiscordEnv = typeof window !== 'undefined' && (
+    window.location.hostname.endsWith('.discordsays.com') ||
+    new URLSearchParams(window.location.search).has('frame_id')
+  );
+  if (parts[0] === 'discord' || parts[0] === 'activity' || (parts.length === 0 && isDiscordEnv)) {
     return { name: 'discord' };
   }
 
