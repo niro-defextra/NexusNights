@@ -22,11 +22,7 @@ export function TopBar() {
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
 
   const isAdmin = auth.isAdmin;
-  const isDiscordActivity = typeof window !== 'undefined' && (
-    window.location.hostname.endsWith('.discordsays.com') ||
-    new URLSearchParams(window.location.search).has('frame_id') ||
-    window.location.hash.includes('#/discord')
-  );
+  const isDiscordActivity = window.location.hash.includes('#/discord');
 
   // Close mobile panels on route changes
   useEffect(() => {

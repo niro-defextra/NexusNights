@@ -6,7 +6,6 @@ import { useRoom } from '../room/RoomContext';
 import { useI18n } from '../i18n';
 import type { EpisodeDetail, PlaybackConfigPublic } from '../api-types';
 import { MessageCircle, Users, X } from './Icons';
-import { isDiscordEnvironment } from '../discord/DiscordSDK';
 
 interface Props {
   media: EpisodeDetail;
@@ -23,7 +22,7 @@ interface Props {
 
 /**
  * Watch Party Player - Special layout for synchronized viewing
- * - Chat panel on the left (completely hidden in Discord Activity)
+ * - Chat panel on the left
  * - Player on the right with host-only controls
  * - Viewers can only fullscreen
  */
@@ -31,7 +30,7 @@ export const WatchPartyPlayer = forwardRef<PlayerHandle, Props>(
   ({ media, title, subtitle, streamingConfig, startAt, hold, onBack, onEnded, onReady, onProgress }, ref) => {
     const { t } = useI18n();
     const room = useRoom();
-    const [showChat, setShowChat] = useState(!isDiscordEnvironment);
+    const [showChat, setShowChat] = useState(true);
 
     const isHost = room.isHost;
     const canControl = room.canControl;
@@ -43,9 +42,9 @@ export const WatchPartyPlayer = forwardRef<PlayerHandle, Props>(
 
     return (
       <div className="fixed inset-0 bg-ink flex">
-        {/* Chat Panel - Left Side (hidden in Discord Activity) */}
-        {showChat && !isDiscordEnvironment && (
-          <div className="w-80 border-r border-white/10 flex flex-col bg-crypt shrink-0">
+        {/* Chat Panel - Left Side */}
+        {showChat && (
+          <div className="w-80 border-r border-white/10 flex flex-col bg-crypt">
             {/* Chat Header */}
             <div className="h-14 border-b border-white/10 flex items-center justify-between px-4">
               <div className="flex items-center gap-2">
@@ -87,32 +86,25 @@ export const WatchPartyPlayer = forwardRef<PlayerHandle, Props>(
         )}
 
         {/* Player Area - Right Side */}
-        <div className="flex-1 flex flex-col relative min-w-0">
+        <div className="flex-1 flex flex-col relative">
           {/* Top Bar */}
           <div className="h-14 border-b border-white/10 flex items-center justify-between px-4 bg-crypt/95 backdrop-blur">
-            <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-3">
               <button
                 onClick={onBack}
-                className="text-dust hover:text-bone transition shrink-0"
+                className="text-dust hover:text-bone transition"
                 aria-label="Back"
               >
                 ←
               </button>
-              <div className="min-w-0">
-                <h1 className="text-bone font-semibold truncate">{title}</h1>
-                {subtitle && <p className="text-sm text-dust truncate">{subtitle}</p>}
+              <div>
+                <h1 className="text-bone font-semibold">{title}</h1>
+                {subtitle && <p className="text-sm text-dust">{subtitle}</p>}
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              {/* Room members badge */}
-              <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-dust">
-                <Users className="size-3.5 text-gilt" />
-                <span>{room.room?.members.length || 0}</span>
-                {isHost && <span className="text-gilt font-medium">({t('youAreHost')})</span>}
-              </div>
-
-              {!isDiscordEnvironment && !showChat && (
+            <div className="flex items-center gap-2">
+              {!showChat && (
                 <button
                   onClick={() => setShowChat(true)}
                   className="flex items-center gap-2 rounded-lg border border-gilt/30 bg-gilt/10 px-3 py-1.5 text-sm text-gilt transition hover:border-gilt hover:bg-gilt/20"

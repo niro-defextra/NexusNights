@@ -2,7 +2,7 @@ import Hls from 'hls.js';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, u } from '../api';
 import type { EpisodeDetail, PlaybackErrorCode, PlaybackConfigPublic, PlaybackSourcePublic, AniSkipTimingsPublic } from '../api-types';
-import { ArrowLeft, AudioTracks, Check, Copy, ExitFullscreen, Fullscreen, Gauge, Lock, Next, Pause, Pip, Play, Skip, Sliders, Spinner, Subtitles, Volume } from '../components/Icons';
+import { ArrowLeft, AudioTracks, ExitFullscreen, Fullscreen, Gauge, Lock, Next, Pause, Pip, Play, Skip, Sliders, Spinner, Subtitles, Volume } from '../components/Icons';
 import { clamp, fmtTime } from '../format';
 import { useI18n } from '../i18n';
 import { ControlButton, Menu } from './Menu';
@@ -75,54 +75,6 @@ const str = (k: string) => { try { return localStorage.getItem(k); } catch { ret
 const put = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
 const sleep = (ms: number, s: AbortSignal) => new Promise<void>((res) => { const t = setTimeout(res, ms); s.addEventListener('abort', () => { clearTimeout(t); res(); }, { once: true }); });
 
-export interface PlaybackDiagnostic {
-  timestamp: string;
-  provider?: string;
-  sourceUrl?: string;
-  hlsType?: string;
-  hlsDetails?: string;
-  hlsReason?: string;
-  httpStatus?: number | string;
-  fragUrl?: string;
-  time?: number;
-  timeFormatted?: string;
-  nativeError?: string;
-  snifferError?: string;
-  message?: string;
-  attemptedCount?: number;
-  totalSources?: number;
-}
-
-function formatDebugReport(
-  diag: PlaybackDiagnostic | null,
-  events: string[],
-  currentSource: PlaybackSourcePublic | null,
-  streamingConfig: PlaybackConfigPublic | null | undefined,
-  errorCode: string
-): string {
-  const lines: string[] = [
-    '=== NEXUSNIGHTS PLAYER DIAGNOSTIC REPORT ===',
-    `Timestamp: ${diag?.timestamp || new Date().toLocaleTimeString()}`,
-    `Provider: ${diag?.provider || currentSource?.provider || 'Unknown'}`,
-    `Video Position: ${diag?.timeFormatted || 'N/A'}`,
-    `Error Code: ${errorCode}`,
-    `HTTP Status: ${diag?.httpStatus ?? 'N/A'}`,
-    `HLS Error: ${diag?.hlsType ? `${diag.hlsType} (${diag.hlsDetails || 'N/A'})` : 'None'}`,
-    `HLS Reason: ${diag?.hlsReason || 'None'}`,
-    `Failed Segment: ${diag?.fragUrl || 'None'}`,
-    `Source URL: ${diag?.sourceUrl || currentSource?.url || 'N/A'}`,
-    `Sniffer Error: ${diag?.snifferError || 'None'}`,
-    `Native Video Error: ${diag?.nativeError || 'None'}`,
-    `Summary: ${diag?.message || 'N/A'}`,
-    `Total Sources: ${streamingConfig ? [streamingConfig.source, ...streamingConfig.alternatives].filter(Boolean).length : 0}`,
-    '',
-    '--- Recent Events Log ---',
-    ...(events.length > 0 ? events : ['(No recorded events)']),
-    '============================================',
-  ];
-  return lines.join('\n');
-}
-
 export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref) {
   const { media, title, subtitle, startAt = 0, autoPlay = true, controlled = false, canControl = true, onDisabledControlClick, theatreMode = false, hasNext, onBack, onNext, onEnded, onProgress, onUserPlay, onUserPause, onUserSeek, onSubtitleChange, onAudioChange, onSpeedChange, intentPlaying, onReady, onBuffering, holdLabel, hideSpeed, overlay, extraControls } = props;
   const { streamingConfig, streamingLoading, streamingError, skipTimings } = props;
@@ -140,18 +92,6 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
   const [currentSourceIndex, setCurrentSourceIndex] = useState(0);
   const [failoverMessage, setFailoverMessage] = useState<string | null>(null);
   const attemptedSources = useRef(new Set<string>());
-
-  // ── diagnostic / debug state ──────────────────────────────────────────────
-  const [diagnosticLog, setDiagnosticLog] = useState<PlaybackDiagnostic | null>(null);
-  const [debugEvents, setDebugEvents] = useState<string[]>([]);
-  const [showDebugOverlay, setShowDebugOverlay] = useState(false);
-  const [copiedLog, setCopiedLog] = useState(false);
-
-  const pushDebugEvent = useCallback((event: string) => {
-    const timeStr = new Date().toLocaleTimeString();
-    const line = `[${timeStr}] ${event}`;
-    setDebugEvents((prev) => [...prev.slice(-30), line]);
-  }, []);
 
   const allSources = useMemo(() => {
     if (!streamingConfig) return [];
@@ -276,42 +216,16 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     setDuration(media.runtimeSec ?? 0);
     setFailoverMessage(null);
 
-    const fail = (
-      code: PlaybackErrorCode = 'playback_failed',
-      canFailover = false,
-      diag?: Partial<PlaybackDiagnostic>
-    ) => {
+    const fail = (code: PlaybackErrorCode = 'playback_failed', canFailover = false) => {
       if (dead) return;
-
-      const curSource = allSources[currentSourceIndex] || streamingConfig?.source || null;
-      const curTime = v.currentTime || time;
-
-      const fullDiag: PlaybackDiagnostic = {
-        timestamp: new Date().toLocaleTimeString(),
-        provider: diag?.provider || curSource?.provider || 'Unknown',
-        sourceUrl: diag?.sourceUrl || curSource?.url,
-        hlsType: diag?.hlsType,
-        hlsDetails: diag?.hlsDetails,
-        hlsReason: diag?.hlsReason,
-        httpStatus: diag?.httpStatus,
-        fragUrl: diag?.fragUrl,
-        time: curTime,
-        timeFormatted: fmtTime(curTime),
-        nativeError: diag?.nativeError,
-        snifferError: diag?.snifferError,
-        message: diag?.message || (code === 'media_not_ready' ? 'Streaming sources not ready' : 'Playback failed'),
-        attemptedCount: attemptedSources.current.size,
-        totalSources: allSources.length,
-      };
-
-      setDiagnosticLog(fullDiag);
-      pushDebugEvent(`FAIL (${code}): ${fullDiag.provider} | ${fullDiag.hlsDetails || fullDiag.nativeError || fullDiag.snifferError || fullDiag.message || ''}`);
       
       // Try automatic failover for streaming sources
       if (canFailover && streamingConfig) {
+        const allSources = [streamingConfig.source, ...streamingConfig.alternatives].filter(Boolean) as PlaybackSourcePublic[];
         const tried = attemptedSources.current;
         
         // Prioritize an untried source from a different provider first
+        const curSource = allSources[currentSourceIndex];
         const currentProvider = curSource?.provider;
         
         let nextSource = allSources.find(alt => !tried.has(alt.url) && alt.provider !== currentProvider);
@@ -322,13 +236,10 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
         if (nextSource) {
           tried.add(nextSource.url);
           const nextIdx = allSources.indexOf(nextSource);
-          pushDebugEvent(`Failover -> Attempting ${nextSource.provider} (${nextIdx + 1}/${allSources.length})`);
           setFailoverMessage(t('fallbackPreparing'));
           setCurrentSourceIndex(nextIdx >= 0 ? nextIdx : currentSourceIndex + 1);
           setRetry(prev => prev + 1);
           return;
-        } else {
-          pushDebugEvent(`All ${allSources.length} sources exhausted.`);
         }
       }
       
@@ -442,28 +353,23 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       }
 
       if (streamingError) {
-        return fail('media_not_ready', false, {
-          message: `Streaming config error: ${streamingError}`,
-        });
+        return fail('media_not_ready');
       }
 
       if (!streamingConfig || !streamingConfig.source) {
-        return fail(media.playbackError ?? 'media_not_ready', false, {
-          message: media.playbackError || 'No streaming sources available from backend',
-        });
+        return fail(media.playbackError ?? 'media_not_ready');
       }
 
       // Get current streaming source
       const allSources = [streamingConfig.source, ...streamingConfig.alternatives];
       const source = allSources[currentSourceIndex] || streamingConfig.source;
-      if (!source) return fail('media_not_ready', false, { message: 'Source not found at current index' });
+      if (!source) return fail('media_not_ready');
 
       // Mark this source as attempted
       attemptedSources.current.add(source.url);
 
       setPhase('loading');
       let url = u(source.url) || source.url;
-      pushDebugEvent(`Init source ${currentSourceIndex + 1}/${allSources.length}: ${source.provider} (${source.type})`);
 
       // On-demand native sniffer resolution
       if (url.includes('/api/streaming/resolve-native')) {
@@ -490,19 +396,12 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
             throw new Error(data.message || 'Sniffer resolution failed');
           }
           url = u(data.streamUrl) || data.streamUrl;
-          pushDebugEvent(`Sniffer resolved for ${source.provider}`);
           setPhase('loading');
           setFailoverMessage(null);
         } catch (err: any) {
           if (dead) return;
           console.warn('[Player] On-demand sniffer failed, failing over:', err.message);
-          pushDebugEvent(`Sniffer error on ${source.provider}: ${err.message}`);
-          return fail('playback_failed', true, {
-            provider: source.provider,
-            sourceUrl: source.url,
-            snifferError: err.message,
-            message: `Sniffer failed: ${err.message}`,
-          });
+          return fail('playback_failed', true);
         }
       }
 
@@ -586,7 +485,6 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           syncStreamingHlsTracks();
-          pushDebugEvent(`Manifest parsed: ${source.provider} (${hls?.levels.length || 0} levels, ${hls?.audioTracks.length || 0} audio)`);
           
           // Report success to backend
           api.reportPlaybackSuccess({
@@ -638,7 +536,6 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           if (d.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR || d.details === Hls.ErrorDetails.BUFFER_SEEK_OVER_HOLE) {
             stallCount++;
             console.warn(`[Player] Buffer stall detected (${stallCount}/5) at ${v.currentTime.toFixed(2)}s`);
-            pushDebugEvent(`Stall (${stallCount}/5) at ${v.currentTime.toFixed(1)}s`);
 
             // 1. Check for a micro buffer hole ahead and jump past it if < 1.5s
             try {
@@ -682,14 +579,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
                 responseStatus: 0,
                 errorDetails: 'persistent_buffer_stalled',
               }).catch(() => {});
-              fail('playback_failed', true, {
-                provider: source.provider,
-                sourceUrl: source.url,
-                hlsType: d.type,
-                hlsDetails: 'persistent_buffer_stalled',
-                time: v.currentTime,
-                message: `Persistent buffer stall (5x) at ${v.currentTime.toFixed(1)}s`,
-              });
+              fail('playback_failed', true);
             }
             return;
           }
@@ -712,17 +602,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
                 responseStatus: status || 0,
                 errorDetails: `${d.details} - fragLoadError`,
               }).catch(() => {});
-              fail('playback_failed', true, {
-                provider: source.provider,
-                sourceUrl: source.url,
-                hlsType: d.type,
-                hlsDetails: d.details,
-                httpStatus: status || 0,
-                fragUrl: d.frag?.url,
-                hlsReason: d.reason,
-                time: v.currentTime,
-                message: `Segment load failed with HTTP ${status || 0}`,
-              });
+              fail('playback_failed', true);
               return;
             }
           }
@@ -731,29 +611,14 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           // bytes are unusable. After a few in a row, give up on this source and fail over.
           if (d.details === Hls.ErrorDetails.FRAG_PARSING_ERROR && ++fragParseFails >= 3) {
             console.log('[Player] Repeated fragParsingError, failing over to alternative source');
-            fail('playback_failed', true, {
-              provider: source.provider,
-              sourceUrl: source.url,
-              hlsType: d.type,
-              hlsDetails: d.details,
-              fragUrl: d.frag?.url,
-              time: v.currentTime,
-              message: 'Corrupted stream segment parsing error',
-            });
+            fail('playback_failed', true);
             return;
           }
 
           // If manifest cannot be parsed at all (e.g. 404/HTML returned instead of M3U8), failover immediately!
           if (d.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR) {
             console.warn('[Player] Fatal manifestParsingError, failing over immediately to alternative source');
-            fail('playback_failed', true, {
-              provider: source.provider,
-              sourceUrl: source.url,
-              hlsType: d.type,
-              hlsDetails: d.details,
-              httpStatus: d.response?.code,
-              message: 'Invalid M3U8 manifest or blocked stream',
-            });
+            fail('playback_failed', true);
             return;
           }
           
@@ -802,25 +667,13 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           // For streaming sources, be more aggressive with failover
           if (d.type === Hls.ErrorTypes.NETWORK_ERROR && net++ < 2) {
             console.log('[Player] Network error, retrying... (attempt', net, 'of 2)');
-            pushDebugEvent(`HLS network error (retry ${net}/2): ${d.details}`);
             hls?.startLoad();
           } else if (d.type === Hls.ErrorTypes.MEDIA_ERROR && mediaErr++ < 1) {
             console.log('[Player] Media error, recovering... (attempt', mediaErr, 'of 1)');
-            pushDebugEvent(`HLS media error (recovery 1/1): ${d.details}`);
             hls?.recoverMediaError();
           } else {
             console.log('[Player] Fatal error limit reached, attempting failover to alternative source');
-            fail('playback_failed', true, {
-              provider: source.provider,
-              sourceUrl: source.url,
-              hlsType: d.type,
-              hlsDetails: d.details,
-              hlsReason: d.reason,
-              httpStatus: d.response?.code,
-              fragUrl: d.frag?.url,
-              time: v.currentTime,
-              message: `Fatal HLS error (${d.type} - ${d.details})`,
-            });
+            fail('playback_failed', true);
           }
         });
         
@@ -834,16 +687,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           if (startRef.current > 0) v.currentTime = startRef.current;
           begin();
         }, { once: true });
-        v.addEventListener('error', () => {
-          const nativeErr = `Safari HLS error code ${v.error?.code}: ${v.error?.message || 'load error'}`;
-          pushDebugEvent(nativeErr);
-          fail('playback_failed', true, {
-            provider: source.provider,
-            sourceUrl: source.url,
-            nativeError: nativeErr,
-            message: nativeErr,
-          });
-        }, { once: true });
+        v.addEventListener('error', () => fail('playback_failed', true), { once: true });
       }
       // STREAMING: Direct MP4
       else if (source.type === 'mp4') {
@@ -852,16 +696,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           if (startRef.current > 0) v.currentTime = startRef.current;
           begin();
         }, { once: true });
-        v.addEventListener('error', () => {
-          const nativeErr = `MP4 error code ${v.error?.code}: ${v.error?.message || 'load error'}`;
-          pushDebugEvent(nativeErr);
-          fail('playback_failed', true, {
-            provider: source.provider,
-            sourceUrl: source.url,
-            nativeError: nativeErr,
-            message: nativeErr,
-          });
-        }, { once: true });
+        v.addEventListener('error', () => fail('playback_failed', true), { once: true });
       }
       else {
         return fail('playback_failed', true);
@@ -906,26 +741,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       on('volumechange', () => { setVolume(v.volume); setMuted(v.muted); }),
       on('ratechange', () => setRate(v.playbackRate)),
       on('durationchange', () => setDuration(effDuration())),
-      on('error', () => {
-        if (v.getAttribute('src')) {
-          const code = v.error?.code;
-          const msg = v.error?.message;
-          const nativeErr = `HTMLMediaElement error code ${code}: ${msg || 'playback pipeline error'}`;
-          pushDebugEvent(nativeErr);
-          setErrorCode('playback_failed');
-          setPhase('error');
-          setDiagnosticLog((prev) => ({
-            timestamp: new Date().toLocaleTimeString(),
-            provider: currentSource?.provider || 'Unknown',
-            sourceUrl: currentSource?.url,
-            time: v.currentTime,
-            timeFormatted: fmtTime(v.currentTime),
-            nativeError: nativeErr,
-            message: nativeErr,
-            ...prev,
-          }));
-        }
-      }),
+      on('error', () => { if (v.getAttribute('src')) setPhase('error'); }),
       on('ended', () => {
         setPlaying(false);
         cb.current.onProgress?.(effDuration(), effDuration());
@@ -1482,19 +1298,6 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
                 {lang === 'ar' ? `الموضع السابق: ${fmtTime(startAt)}` : `Resume: ${fmtTime(startAt)}`}
               </span>
             )}
-            {/* Live Debug Log Toggle Button */}
-            <button
-              onClick={() => setShowDebugOverlay((s) => !s)}
-              className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-mono transition active:scale-95 ${
-                showDebugOverlay
-                  ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300'
-                  : 'border-white/20 bg-black/60 text-dust hover:text-bone hover:border-white/40'
-              }`}
-              title={lang === 'ar' ? 'عرض سجل التشخيص المباشر' : 'Live Diagnostic Overlay'}
-            >
-              <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>LOG</span>
-            </button>
             <div className="relative">
               <button
                 onClick={() => setMenu(menu === 'source' ? null : 'source')}
@@ -1574,189 +1377,13 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           )}
         </div>
       )}
-      {/* Live Diagnostic Overlay */}
-      {showDebugOverlay && (
-        <div className="absolute top-16 end-4 z-40 w-80 max-w-[92vw] rounded-xl border border-white/20 bg-zinc-950/95 p-3 text-start font-mono text-xs text-bone shadow-2xl backdrop-blur-md">
-          <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-2">
-            <div className="flex items-center gap-1.5">
-              <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="font-bold text-gilt">⚡ Live Diagnostics</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => {
-                  const logText = formatDebugReport(diagnosticLog, debugEvents, currentSource, streamingConfig, errorCode);
-                  navigator.clipboard?.writeText(logText).then(() => {
-                    setCopiedLog(true);
-                    setTimeout(() => setCopiedLog(false), 2000);
-                  });
-                }}
-                className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-bone transition hover:bg-white/20"
-              >
-                {copiedLog ? '✓ Copied' : 'Copy'}
-              </button>
-              <button
-                onClick={() => setShowDebugOverlay(false)}
-                className="rounded px-1.5 py-0.5 text-[10px] text-dust hover:text-bone"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-          <div className="space-y-1 text-[11px] text-dust">
-            <div>Provider: <span className="text-bone font-bold">{currentSource?.provider || 'N/A'}</span></div>
-            <div>Time: <span className="text-bone">{fmtTime(time)} / {fmtTime(duration)}</span></div>
-            <div>Buffered ahead: <span className="text-emerald-400 font-bold">{Math.max(0, bufEnd - time).toFixed(1)}s</span></div>
-            <div>Phase: <span className="text-bone">{phase}</span></div>
-          </div>
-          <div className="mt-2 border-t border-white/10 pt-2">
-            <p className="text-[10px] font-bold text-dust mb-1">Recent Events ({debugEvents.length}):</p>
-            <div className="max-h-36 overflow-y-auto space-y-0.5 text-[10px] text-zinc-400 select-text">
-              {debugEvents.slice(-15).map((e, i) => (
-                <div key={i} className={e.includes('FAIL') || e.includes('error') ? 'text-red-400 font-semibold' : ''}>{e}</div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {phase === 'error' && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black/90 px-4 text-center overflow-y-auto py-8">
-          <div className="size-12 rounded-full bg-blood/20 border border-blood/50 flex items-center justify-center text-blood text-2xl font-bold">
-            ⚠️
-          </div>
-          <p className="font-display text-2xl font-bold text-bone">{t('playbackError')}</p>
-          <p className="max-w-md text-sm text-dust">{t(errorHint)}</p>
-
-          {/* Diagnostic Log Card */}
-          <div className="my-2 w-full max-w-xl rounded-xl border border-red-500/40 bg-zinc-950/95 p-3.5 text-start shadow-2xl backdrop-blur-md">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-2.5">
-              <div className="flex items-center gap-2">
-                <span className="size-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="font-mono text-xs font-bold text-red-400">
-                  {lang === 'ar' ? '🔍 سجل تشخيص الخطأ (Debug Log)' : '🔍 Playback Diagnostic Log'}
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  const logText = formatDebugReport(diagnosticLog, debugEvents, currentSource, streamingConfig, errorCode);
-                  navigator.clipboard?.writeText(logText).then(() => {
-                    setCopiedLog(true);
-                    setTimeout(() => setCopiedLog(false), 2500);
-                  });
-                }}
-                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/10 px-2.5 py-1 font-mono text-xs text-bone transition hover:bg-white/20 active:scale-95"
-              >
-                {copiedLog ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5 text-gilt" />}
-                <span>{copiedLog ? (lang === 'ar' ? 'تم النسخ!' : 'Copied!') : (lang === 'ar' ? 'نسخ التقرير' : 'Copy Log')}</span>
-              </button>
-            </div>
-
-            {/* Technical Parameters */}
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-xs text-dust mb-2">
-              <div>
-                <span className="text-zinc-500">{lang === 'ar' ? 'السيرفر:' : 'Provider:'} </span>
-                <span className="text-bone font-bold">{diagnosticLog?.provider || currentSource?.provider || 'N/A'}</span>
-              </div>
-              <div>
-                <span className="text-zinc-500">{lang === 'ar' ? 'موضع التوقف:' : 'Time:'} </span>
-                <span className="text-bone">{diagnosticLog?.timeFormatted || fmtTime(time)}</span>
-              </div>
-              <div>
-                <span className="text-zinc-500">{lang === 'ar' ? 'حالة HTTP:' : 'HTTP Status:'} </span>
-                <span className={diagnosticLog?.httpStatus ? 'text-red-400 font-bold' : 'text-zinc-400'}>
-                  {diagnosticLog?.httpStatus ? String(diagnosticLog.httpStatus) : 'N/A'}
-                </span>
-              </div>
-              <div>
-                <span className="text-zinc-500">{lang === 'ar' ? 'كود المشغل:' : 'Error Code:'} </span>
-                <span className="text-amber-400 font-semibold">{errorCode}</span>
-              </div>
-
-              {diagnosticLog?.hlsDetails && (
-                <div className="col-span-2">
-                  <span className="text-zinc-500">{lang === 'ar' ? 'خطأ HLS:' : 'HLS Error:'} </span>
-                  <span className="text-red-300 font-medium">{diagnosticLog.hlsType ? `${diagnosticLog.hlsType} / ` : ''}{diagnosticLog.hlsDetails}</span>
-                </div>
-              )}
-              {diagnosticLog?.fragUrl && (
-                <div className="col-span-2 truncate">
-                  <span className="text-zinc-500">{lang === 'ar' ? 'القطعة المتعثرة:' : 'Failed Segment:'} </span>
-                  <span className="text-zinc-300 select-all text-[11px] break-all">{diagnosticLog.fragUrl}</span>
-                </div>
-              )}
-              {diagnosticLog?.snifferError && (
-                <div className="col-span-2">
-                  <span className="text-zinc-500">Sniffer: </span>
-                  <span className="text-red-300 font-medium">{diagnosticLog.snifferError}</span>
-                </div>
-              )}
-              {diagnosticLog?.nativeError && (
-                <div className="col-span-2">
-                  <span className="text-zinc-500">Native: </span>
-                  <span className="text-red-300 font-medium">{diagnosticLog.nativeError}</span>
-                </div>
-              )}
-              {diagnosticLog?.message && !diagnosticLog?.hlsDetails && !diagnosticLog?.snifferError && (
-                <div className="col-span-2">
-                  <span className="text-zinc-500">{lang === 'ar' ? 'السبب:' : 'Reason:'} </span>
-                  <span className="text-zinc-300">{diagnosticLog.message}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Event Timeline */}
-            {debugEvents.length > 0 && (
-              <div className="mt-2.5 rounded-lg bg-black/70 p-2 font-mono text-[10px] text-zinc-400 max-h-28 overflow-y-auto space-y-0.5 border border-white/5 select-text">
-                {debugEvents.map((evt, idx) => (
-                  <div key={idx} className={evt.includes('FAIL') || evt.includes('error') ? 'text-red-400' : ''}>
-                    {evt}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Action buttons */}
-          <div className="mt-1 flex flex-wrap items-center justify-center gap-3">
-            <button
-              onClick={() => setRetry((r) => r + 1)}
-              className="rounded-md bg-blood px-5 py-2.5 font-semibold text-bone transition hover:bg-blood-hot active:scale-95"
-            >
-              {t('retry')}
-            </button>
-            {allSources.length > 1 && (
-              <div className="relative">
-                <button
-                  onClick={() => setMenu(menu === 'source' ? null : 'source')}
-                  className="rounded-md border border-gilt/40 bg-gilt/15 px-4 py-2.5 font-semibold text-gilt transition hover:bg-gilt/25 active:scale-95"
-                >
-                  {lang === 'ar' ? `تغيير السيرفر (${allSources.length})` : `Select Server (${allSources.length})`}
-                </button>
-                {menu === 'source' && (
-                  <Menu
-                    title={t('source')}
-                    placement="top"
-                    selected={String(currentSourceIndex)}
-                    onSelect={(id) => {
-                      selectSource(Number(id));
-                      setMenu(null);
-                    }}
-                    items={allSources.map((s, idx) => ({
-                      id: String(idx),
-                      label: s.provider,
-                      hint: s.quality || 'HLS',
-                    }))}
-                  />
-                )}
-              </div>
-            )}
-            <button
-              onClick={onBack}
-              className="rounded-md border border-white/20 px-5 py-2.5 text-bone transition hover:bg-white/10 active:scale-95"
-            >
-              {t('back')}
-            </button>
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/80 px-6 text-center">
+          <p className="font-display text-2xl">{t('playbackError')}</p>
+          <p className="max-w-sm text-sm text-dust">{t(errorHint)}</p>
+          <div className="mt-2 flex gap-3">
+            <button onClick={() => setRetry((r) => r + 1)} className="rounded-md bg-blood px-5 py-2.5 font-semibold transition hover:bg-blood-hot">{t('retry')}</button>
+            <button onClick={onBack} className="rounded-md border border-white/20 px-5 py-2.5 transition hover:bg-white/10">{t('back')}</button>
           </div>
         </div>
       )}

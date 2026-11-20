@@ -5,7 +5,6 @@ import { useI18n } from '../i18n';
 import { ChatPanel } from '../room/ChatPanel';
 import { useRoom } from '../room/RoomContext';
 import { u } from '../api';
-import { isDiscordEnvironment } from '../discord/DiscordSDK';
 
 interface Props {
   hlsUrl: string;
@@ -25,7 +24,7 @@ export function ServerStreamPlayer({ hlsUrl, title, subtitle, onBack }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showChat, setShowChat] = useState(!isDiscordEnvironment);
+  const [showChat, setShowChat] = useState(true);
   const [fs, setFs] = useState(false);
   const [muted, setMuted] = useState(false);
   const hlsRef = useRef<Hls | null>(null);
@@ -162,9 +161,9 @@ export function ServerStreamPlayer({ hlsUrl, title, subtitle, onBack }: Props) {
 
   return (
     <div className="fixed inset-0 bg-ink flex">
-      {/* Chat Panel - Left Side (hidden in Discord Activity) */}
-      {showChat && !isDiscordEnvironment && (
-        <div className="w-80 border-r border-white/10 flex flex-col bg-crypt shrink-0">
+      {/* Chat Panel - Left Side */}
+      {showChat && (
+        <div className="w-80 border-r border-white/10 flex flex-col bg-crypt">
           {/* Chat Header */}
           <div className="h-14 border-b border-white/10 flex items-center justify-between px-4">
             <div className="flex items-center gap-2">
@@ -204,31 +203,24 @@ export function ServerStreamPlayer({ hlsUrl, title, subtitle, onBack }: Props) {
       )}
 
       {/* Player Area - Right Side */}
-      <div className="flex-1 flex flex-col relative min-w-0">
+      <div className="flex-1 flex flex-col relative">
         {/* Top Bar */}
         <div className="h-14 border-b border-white/10 flex items-center justify-between px-4 bg-crypt/95 backdrop-blur">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-3">
             <button
               onClick={onBack}
-              className="text-dust hover:text-bone transition shrink-0"
+              className="text-dust hover:text-bone transition"
               aria-label="Back"
             >
               ←
             </button>
-            <div className="min-w-0">
-              <h1 className="text-bone font-semibold truncate">{title}</h1>
-              {subtitle && <p className="text-sm text-dust truncate">{subtitle}</p>}
+            <div>
+              <h1 className="text-bone font-semibold">{title}</h1>
+              {subtitle && <p className="text-sm text-dust">{subtitle}</p>}
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Room members badge */}
-            <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-dust">
-              <Users className="size-3.5 text-gilt" />
-              <span>{room.room?.members.length || 0}</span>
-              {isHost && <span className="text-gilt font-medium">({t('youAreHost')})</span>}
-            </div>
-
+          <div className="flex items-center gap-2">
             <button
               onClick={() => {
                 if (videoRef.current) {
@@ -250,7 +242,7 @@ export function ServerStreamPlayer({ hlsUrl, title, subtitle, onBack }: Props) {
               {fs ? <ExitFullscreen className="size-4" /> : <Fullscreen className="size-4" />}
             </button>
 
-            {!isDiscordEnvironment && !showChat && (
+            {!showChat && (
               <button
                 onClick={() => setShowChat(true)}
                 className="flex items-center gap-2 rounded-lg border border-gilt/30 bg-gilt/10 px-3 py-1.5 text-sm text-gilt transition hover:border-gilt hover:bg-gilt/20"
