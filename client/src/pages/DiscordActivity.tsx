@@ -500,22 +500,8 @@ export function DiscordActivity() {
           </button>
         </nav>
 
-        {/* Right Tools: Chat Toggle, Share Link, Language, Avatar */}
+        {/* Right Tools: Share Link, Language, Avatar */}
         <div className="flex items-center gap-2">
-          {activeTab === 'watch' && (
-            <button
-              onClick={() => setChatOpen(!chatOpen)}
-              className={`flex size-8 items-center justify-center rounded-xl border transition-colors md:hidden ${
-                chatOpen 
-                  ? 'border-gilt/40 bg-gilt/15 text-gilt' 
-                  : 'border-white/10 bg-white/5 text-dust hover:text-bone'
-              }`}
-              title={t('chat')}
-            >
-              <ChatBubble className="size-4" />
-            </button>
-          )}
-
           <button
             onClick={handleCopyLink}
             className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-bone transition-colors hover:border-gilt/40 hover:bg-gilt/10"
@@ -674,85 +660,6 @@ export function DiscordActivity() {
                 </div>
               )}
             </div>
-
-            {/* Live Chat Panel (Collapsible Drawer on Mobile, Sidebar on Desktop) */}
-            <aside
-              className={`
-                border-white/10 bg-crypt/95 flex flex-col transition-all duration-300
-                md:w-72 lg:w-80 md:border-s md:relative md:flex
-                ${chatOpen ? 'h-64 md:h-full border-t md:border-t-0' : 'hidden md:flex'}
-              `}
-            >
-              <div className="flex h-11 shrink-0 items-center justify-between border-b border-white/10 px-3.5 font-semibold text-xs text-bone">
-                <div className="flex items-center gap-1.5">
-                  <ChatBubble className="size-3.5 text-gilt" />
-                  <span>{t('liveChat')}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-dust">{room.chat.length} msgs</span>
-                  <button 
-                    onClick={() => setChatOpen(false)}
-                    className="md:hidden size-6 flex items-center justify-center rounded text-dust hover:text-bone"
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Chat Message Feed */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-                {room.chat.length === 0 ? (
-                  <div className="flex h-full flex-col items-center justify-center text-center p-3 text-dust">
-                    <MessageCircle className="size-6 text-dust/40 mb-1.5" />
-                    <p className="text-[11px] font-semibold text-bone">{t('popcornReady')}</p>
-                    <p className="text-[10px] text-dust/70 mt-0.5">{lang === 'ar' ? 'أرسل رسالة أو تفاعل مع أصدقائك في المشاهدة!' : 'Send a reaction or message to your friends watching with you!'}</p>
-                  </div>
-                ) : (
-                  room.chat.map((msg) => {
-                    const isMe = msg.userId === room.me?.id;
-                    return (
-                      <div key={msg.id} className={`flex items-start gap-2 ${isMe ? 'flex-row-reverse text-right' : ''}`}>
-                        <Avatar user={{ id: msg.userId, name: msg.name, avatar: msg.avatar }} size={24} />
-                        <div className="min-w-0 max-w-[80%]">
-                          <div className={`flex items-baseline gap-1.5 mb-0.5 ${isMe ? 'justify-end' : ''}`}>
-                            <span className="text-[11px] font-bold text-gilt truncate">{msg.name}</span>
-                            <span className="text-[9px] text-dust/60">
-                              {new Date(msg.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                          <div className={`rounded-xl px-2.5 py-1 text-xs break-words leading-relaxed ${
-                            isMe ? 'bg-gilt text-ink font-medium shadow-sm' : 'bg-white/10 text-bone'
-                          }`}>
-                            {msg.text}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                <div ref={chatScrollRef} />
-              </div>
-
-              {/* Chat Input */}
-              <form onSubmit={handleSendChat} className="p-2 border-t border-white/10 bg-ink/90">
-                <div className="relative flex items-center">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder={t('saySomethingInLobby')}
-                    className="w-full rounded-xl border border-white/10 bg-ink py-2 ps-3 pe-8 text-xs text-bone placeholder:text-dust/60 focus:border-gilt/50 focus:outline-none"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!chatInput.trim()}
-                    className="absolute end-1.5 flex size-6 items-center justify-center rounded-lg text-gilt hover:bg-gilt/15 disabled:opacity-30 transition"
-                  >
-                    <Send className="size-3" />
-                  </button>
-                </div>
-              </form>
-            </aside>
           </div>
         )}
 

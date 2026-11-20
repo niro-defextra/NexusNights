@@ -11,6 +11,7 @@ import { useRoom } from '../room/RoomContext';
 import { useI18n } from '../i18n';
 import { Avatar } from './Avatar';
 import { ChatPanel } from '../room/ChatPanel';
+import { isDiscordEnvironment } from '../discord/DiscordSDK';
 
 interface Props {
   title: string;
@@ -51,8 +52,8 @@ export function HostControlPanel({ title, subtitle, mode = 'screenShare', onBack
 
   return (
     <div className="fixed inset-0 bg-gradient-to-br from-ink via-crypt to-ash text-bone overflow-hidden flex">
-      {/* Chat sidebar */}
-      {chatOpen && (
+      {/* Chat sidebar (hidden in Discord Activity) */}
+      {chatOpen && !isDiscordEnvironment && (
         <div className="w-80 border-r border-white/10 flex flex-col bg-crypt shrink-0">
           <ChatPanel onClose={() => setChatOpen(false)} className="flex-1 rounded-none border-0 shadow-none bg-transparent" />
         </div>
@@ -89,23 +90,25 @@ export function HostControlPanel({ title, subtitle, mode = 'screenShare', onBack
                 )}
               </div>
 
-              {/* Chat toggle button */}
-              <button
-                onClick={() => setChatOpen((o) => !o)}
-                className={`relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
-                  chatOpen
-                    ? 'bg-gilt/20 border border-gilt/40 text-gilt'
-                    : 'border border-white/10 bg-white/5 text-dust hover:text-bone hover:bg-white/10'
-                }`}
-              >
-                <MessageCircle className="size-4" />
-                <span>الشات</span>
-                {room.unread > 0 && !chatOpen && (
-                  <span className="absolute -end-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blood-hot text-[0.6rem] font-bold text-white">
-                    {room.unread > 9 ? '9+' : room.unread}
-                  </span>
-                )}
-              </button>
+              {/* Chat toggle button (hidden in Discord Activity) */}
+              {!isDiscordEnvironment && (
+                <button
+                  onClick={() => setChatOpen((o) => !o)}
+                  className={`relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                    chatOpen
+                      ? 'bg-gilt/20 border border-gilt/40 text-gilt'
+                      : 'border border-white/10 bg-white/5 text-dust hover:text-bone hover:bg-white/10'
+                  }`}
+                >
+                  <MessageCircle className="size-4" />
+                  <span>الشات</span>
+                  {room.unread > 0 && !chatOpen && (
+                    <span className="absolute -end-1 -top-1 flex size-4 items-center justify-center rounded-full bg-blood-hot text-[0.6rem] font-bold text-white">
+                      {room.unread > 9 ? '9+' : room.unread}
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </header>

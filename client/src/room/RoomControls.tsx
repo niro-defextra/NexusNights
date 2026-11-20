@@ -7,6 +7,7 @@ import { ChatPanel, ReactionLayer, ReactionTray } from './ChatPanel';
 import { PeoplePanel } from './PeoplePanel';
 import { useRoom } from './RoomContext';
 import { Toasts } from './Toasts';
+import { isDiscordEnvironment } from '../discord/DiscordSDK';
 
 export type Panel = null | 'chat' | 'people' | 'react';
 
@@ -21,7 +22,9 @@ export function RoomButtons({ panel, setPanel }: { panel: Panel; setPanel: (p: P
   return (
     <>
       <div className="relative"><ControlButton label={t('reactions')} active={panel === 'react'} onClick={() => toggle('react')}><Smile className="size-6" /></ControlButton></div>
-      <div className="relative"><ControlButton label={t('chat')} active={panel === 'chat'} onClick={() => toggle('chat')}><Chat className="size-6" /></ControlButton><Badge n={r.unread} /></div>
+      {!isDiscordEnvironment && (
+        <div className="relative"><ControlButton label={t('chat')} active={panel === 'chat'} onClick={() => toggle('chat')}><Chat className="size-6" /></ControlButton><Badge n={r.unread} /></div>
+      )}
       <div className="relative"><ControlButton label={t('people')} active={panel === 'people'} onClick={() => toggle('people')}><Users className="size-6" /></ControlButton><Badge n={pending || 0} /></div>
     </>
   );
@@ -53,9 +56,9 @@ export function RoomOverlay({ panel, setPanel, gesture, onGesture }: { panel: Pa
   return (
     <>
       <ReactionLayer />
-      <ChatToast hidden={panel === 'chat'} />
+      {!isDiscordEnvironment && <ChatToast hidden={panel === 'chat'} />}
       <Toasts inPlayer />
-      {panel === 'chat' && <ChatPanel onClose={() => setPanel(null)} className="absolute bottom-24 end-3 top-16 z-30 w-[min(22rem,88cqw)]" />}
+      {!isDiscordEnvironment && panel === 'chat' && <ChatPanel onClose={() => setPanel(null)} className="absolute bottom-24 end-3 top-16 z-30 w-[min(22rem,88cqw)]" />}
       {panel === 'people' && <PeoplePanel onClose={() => setPanel(null)} className="absolute bottom-24 end-3 z-30 max-h-[calc(100cqh-8rem)] w-[min(22rem,88cqw)]" />}
       {panel === 'react' && <ReactionTray className="absolute bottom-24 end-3 z-30" />}
       {gesture && (

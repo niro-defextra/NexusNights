@@ -14,14 +14,28 @@ import { DiscordSDK, DiscordSDKMock } from '@discord/embedded-app-sdk';
 
 // ── Discord environment detection ───────────────────────────────────────────
 // Discord Activities run inside `*.discordsays.com` iframes, with a `frame_id`
-// query param.  We also allow explicit `/discord` or `#/discord` paths for
-// development.
-const isDiscordEnvironment =
-  typeof window !== 'undefined' &&
-  (window.location.hostname.endsWith('.discordsays.com') ||
-    window.location.pathname.includes('/discord') ||
-    window.location.hash.includes('#/discord') ||
-    new URLSearchParams(window.location.search).has('frame_id'));
+// query param. We also allow explicit `/discord` or `#/discord` paths or query
+// parameters for development and cross-domain testing.
+export function checkIsDiscord(): boolean {
+  if (typeof window === 'undefined') return false;
+  const h = window.location.hostname;
+  const s = window.location.search;
+  const hash = window.location.hash;
+  const p = window.location.pathname;
+  return (
+    h.endsWith('.discordsays.com') ||
+    p.includes('/discord') ||
+    hash.includes('#/discord') ||
+    s.includes('frame_id') ||
+    hash.includes('frame_id') ||
+    s.includes('channel_id') ||
+    hash.includes('channel_id') ||
+    s.includes('platform=discord') ||
+    new URLSearchParams(s).has('frame_id')
+  );
+}
+
+export const isDiscordEnvironment = checkIsDiscord();
 
 const clientId: string = process.env.DISCORD_CLIENT_ID || '';
 
