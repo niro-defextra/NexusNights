@@ -177,9 +177,9 @@ export class PlaybackOrchestrator {
     } else {
       // General Hollywood / International content:
       // Filter out language-specific scrapers (hianime, arab-media),
-      // and sort strictly by user priority: Aether (#1) -> VixSrc (#2) -> Vidrift (#3) -> Dizibal (#4 fallback with English audio)
+      // and sort strictly by user priority: Vidrift (#1) -> Aether (#2) -> Dizibal (#3) -> VixSrc (#4 fallback)
       activeProviders = activeProviders.filter((p) => p.id !== 'hianime' && p.id !== 'arab-media');
-      const generalOrder = ['aether', 'vixsrc', 'vidrift', 'dizibal'];
+      const generalOrder = ['vidrift', 'aether', 'dizibal', 'vixsrc'];
       activeProviders.sort((a, b) => {
         const ia = generalOrder.indexOf(a.id);
         const ib = generalOrder.indexOf(b.id);

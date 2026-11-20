@@ -5,7 +5,7 @@ export class VidriftAdapter implements ProviderAdapter {
   readonly name = 'Vidrift';
   readonly isSupported = true;
   readonly supportedTypes = ['movie', 'series'] as const;
-  readonly basePriority = 100; // Third general provider (Vidrift #3)
+  readonly basePriority = 130; // Primary general provider (Vidrift #1)
 
   private readonly BASE_URL = 'https://embed.vidrift.net';
 

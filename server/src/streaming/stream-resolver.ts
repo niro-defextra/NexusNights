@@ -226,8 +226,15 @@ export class StreamResolver {
         throw new Error(`Cannot sniff Arabic provider without a targetUrl`);
       }
 
-      // General M3U8 streaming providers in strict priority order: Aether -> VixSrc -> Vidrift
+      // General M3U8 streaming providers in strict priority order: Vidrift -> Aether -> VixSrc
       providerTargets = [
+        {
+          name: 'Vidrift',
+          url: isSeries
+            ? `https://embed.vidrift.net/embed/tv/${req.tmdbId}/${s}/${e}?title=true&hide=next,episodes,cast`
+            : `https://embed.vidrift.net/embed/movie/${req.tmdbId}?title=true&hide=next,episodes,cast`,
+          referer: 'https://embed.vidrift.net/',
+        },
         {
           name: 'Aether',
           url: isSeries
@@ -241,13 +248,6 @@ export class StreamResolver {
             ? `https://vixsrc.to/tv/${req.tmdbId}/${s}/${e}`
             : `https://vixsrc.to/movie/${req.tmdbId}`,
           referer: 'https://vixsrc.to/',
-        },
-        {
-          name: 'Vidrift',
-          url: isSeries
-            ? `https://embed.vidrift.net/embed/tv/${req.tmdbId}/${s}/${e}?title=true&hide=next,episodes,cast`
-            : `https://embed.vidrift.net/embed/movie/${req.tmdbId}?title=true&hide=next,episodes,cast`,
-          referer: 'https://embed.vidrift.net/',
         },
       ];
 
