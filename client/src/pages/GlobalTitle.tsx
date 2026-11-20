@@ -394,7 +394,7 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
           HERO BANNER
           ════════════════════════════════════════════════════════════════════════ */}
       <div
-        className={`relative isolate w-full h-[clamp(22rem,48vh,32rem)] select-none ${
+        className={`relative isolate w-full h-[clamp(32rem,65vh,44rem)] select-none ${
           isImmersive ? 'z-[999]' : 'overflow-hidden'
         }`}
       >
@@ -851,7 +851,7 @@ export function GlobalTitle({ kind, tmdbId }: Props) {
 
           {/* ── Desktop Right Sidebar (Poster + Details) ────────────────── */}
           <aside
-            className="hidden lg:block w-[240px] xl:w-[260px] shrink-0 space-y-3.5 lg:sticky lg:top-20 lg:-mt-36 xl:-mt-44 z-20 order-1 lg:order-2"
+            className="hidden lg:block w-[240px] xl:w-[260px] shrink-0 space-y-3.5 lg:sticky lg:top-20 lg:-mt-48 xl:-mt-56 z-20 order-1 lg:order-2"
           >
             {/* Poster Card */}
             {title.posterUrl && (
