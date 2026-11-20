@@ -43,6 +43,13 @@ const BLOCKED_DOMAINS = [
   'adsterra.com',
   'histats.com',
   'connatix.com',
+  'onclickperformance.com',
+  'adnxs.com',
+  'scorecardresearch.com',
+  'disqus.com',
+  'exoclick.com',
+  'trafficjunky.net',
+  'tsyndicate.com',
 ];
 
 export class StreamResolver {
@@ -51,6 +58,54 @@ export class StreamResolver {
   private activeBrowsers = 0;
   private readonly MAX_CONCURRENT_BROWSERS = 3;
   private readonly CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes max for fresh tokens
+  private sharedBrowser: Browser | null = null;
+  private sharedBrowserPromise: Promise<Browser> | null = null;
+
+  private async getOrCreateBrowser(): Promise<Browser> {
+    if (this.sharedBrowser && this.sharedBrowser.isConnected()) {
+      return this.sharedBrowser;
+    }
+    if (this.sharedBrowserPromise) {
+      return this.sharedBrowserPromise;
+    }
+
+    this.sharedBrowserPromise = (async () => {
+      try {
+        const browserPath = this.getBrowserPath();
+        const launchOptions: any = {
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-software-rasterizer',
+            '--disable-extensions',
+            '--autoplay-policy=no-user-gesture-required',
+            '--mute-audio',
+            '--disable-web-security',
+            '--disable-blink-features=AutomationControlled',
+            '--window-size=800,600',
+          ],
+        };
+
+        if (browserPath) {
+          launchOptions.executablePath = browserPath;
+        }
+
+        const b = await chromium.launch(launchOptions);
+        b.on('disconnected', () => {
+          this.sharedBrowser = null;
+        });
+        this.sharedBrowser = b;
+        return b;
+      } finally {
+        this.sharedBrowserPromise = null;
+      }
+    })();
+
+    return this.sharedBrowserPromise;
+  }
 
   private getBrowserPath(): string | undefined {
     const paths = [
@@ -264,32 +319,10 @@ export class StreamResolver {
 
     console.log(`[StreamResolver] Starting fast multi-target sniff for ${cacheKey} (${providerTargets.length} targets)`);
     this.activeBrowsers++;
-    let browser: Browser | null = null;
     let context: BrowserContext | null = null;
 
     try {
-      const launchOptions: any = {
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--disable-software-rasterizer',
-          '--disable-extensions',
-          '--autoplay-policy=no-user-gesture-required',
-          '--mute-audio',
-          '--disable-web-security',
-          '--disable-blink-features=AutomationControlled',
-          '--window-size=800,600',
-        ],
-      };
-
-      if (browserPath) {
-        launchOptions.executablePath = browserPath;
-      }
-
-      browser = await chromium.launch(launchOptions);
+      const browser = await this.getOrCreateBrowser();
       context = await browser.newContext({
         viewport: { width: 800, height: 600 },
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -309,20 +342,34 @@ export class StreamResolver {
         const batch = providerTargets.slice(i, i + 2);
         console.log(`[StreamResolver] Racing batch: ${batch.map((b) => b.name).join(' vs ')}`);
 
+        const abortController = new AbortController();
+
         const racePromises = batch.map(async (target) => {
           if (!context) return null;
           let page: Page | null = null;
           try {
+            if (abortController.signal.aborted) return null;
             page = await context.newPage();
+
+            // Auto-close page on abort
+            const abortHandler = () => {
+              if (page && !page.isClosed()) {
+                page.close().catch(() => {});
+              }
+            };
+            abortController.signal.addEventListener('abort', abortHandler, { once: true });
 
             // Aggressive resource & ad blocking for ultra-fast load
             await page.route('**/*', (route) => {
+              if (abortController.signal.aborted) {
+                return route.abort().catch(() => {});
+              }
               const reqObj = route.request();
               const type = reqObj.resourceType();
               const url = reqObj.url();
 
               // Abort heavy non-video assets
-              if (type === 'image' || type === 'font') {
+              if (type === 'image' || type === 'font' || type === 'stylesheet' || (type === 'media' && !url.includes('.m3u8'))) {
                 return route.abort();
               }
 
@@ -344,6 +391,7 @@ export class StreamResolver {
               if (!page) return;
 
               page.on('request', (request) => {
+                if (abortController.signal.aborted || capturedUrl) return;
                 const u = request.url();
                 const resType = request.resourceType();
                 const isThumb = u.includes('.vtt') || u.includes('.jpg') || u.includes('.png');
@@ -360,7 +408,7 @@ export class StreamResolver {
               });
 
               page.on('response', (res) => {
-                if (res.status() >= 400) return;
+                if (abortController.signal.aborted || capturedUrl || res.status() >= 400) return;
                 const u = res.url();
                 const cType = (res.headers()['content-type'] || '').toLowerCase();
                 const isMpeg = cType.includes('mpegurl') || cType.includes('application/x-mpegurl');
@@ -374,7 +422,7 @@ export class StreamResolver {
             });
 
             // Fast navigation with timeout
-            const pageTimeout = Math.min(12000, Math.max(5000, remainingTime - 500));
+            const pageTimeout = Math.min(10000, Math.max(4000, remainingTime - 500));
             await page.goto(target.url, {
               waitUntil: 'domcontentloaded',
               timeout: pageTimeout,
@@ -390,9 +438,9 @@ export class StreamResolver {
               }
             }).catch(() => {});
 
-            // Secondary synthetic play trigger after 800ms if stream not yet emitted
+            // Secondary synthetic play trigger after 600ms if stream not yet emitted
             const deferredClick = setTimeout(async () => {
-              if (page && !page.isClosed() && !capturedUrl) {
+              if (page && !page.isClosed() && !capturedUrl && !abortController.signal.aborted) {
                 try {
                   await page.evaluate(() => {
                     const doc = (globalThis as any).document;
@@ -403,22 +451,25 @@ export class StreamResolver {
                   }).catch(() => {});
                 } catch {}
               }
-            }, 800);
+            }, 600);
 
-            // Wait for stream capture or batch timeout
+            // Wait for stream capture or batch timeout or abort
             const res = await Promise.race([
               streamPromise,
               new Promise<null>((r) => setTimeout(() => r(null), pageTimeout)),
+              new Promise<null>((r) => {
+                if (abortController.signal.aborted) r(null);
+                else abortController.signal.addEventListener('abort', () => r(null), { once: true });
+              }),
             ]);
 
             clearTimeout(deferredClick);
 
-            if (res) {
+            if (res && !abortController.signal.aborted) {
               return { ...res, provider: target.name };
             }
             return null;
-          } catch (pageErr: any) {
-            console.warn(`[StreamResolver] Sniff target ${target.name} failed:`, pageErr.message);
+          } catch {
             return null;
           } finally {
             if (page && !page.isClosed()) {
@@ -427,8 +478,29 @@ export class StreamResolver {
           }
         });
 
-        const batchResults = await Promise.all(racePromises);
-        const winner = batchResults.find((r): r is { url: string; headers: Record<string, string>; provider: string } => r !== null);
+        // Fast Winner Selection: First target to find a stream instantly wins and aborts the others
+        const winner = await new Promise<{ url: string; headers: Record<string, string>; provider: string } | null>((resolveWinner) => {
+          let pending = racePromises.length;
+          for (const p of racePromises) {
+            p.then((result) => {
+              if (result && !abortController.signal.aborted) {
+                abortController.abort();
+                resolveWinner(result);
+              } else {
+                pending--;
+                if (pending === 0 && !abortController.signal.aborted) {
+                  resolveWinner(null);
+                }
+              }
+            }).catch(() => {
+              pending--;
+              if (pending === 0 && !abortController.signal.aborted) {
+                resolveWinner(null);
+              }
+            });
+          }
+        });
+
         if (winner) {
           console.log(`[StreamResolver] ✅ Winner captured: ${winner.provider} in ${Date.now() - startTime}ms`);
           resolvedResult = winner;
@@ -472,7 +544,6 @@ export class StreamResolver {
     } finally {
       this.activeBrowsers--;
       if (context) await context.close().catch(() => {});
-      if (browser) await browser.close().catch(() => {});
     }
   }
 }

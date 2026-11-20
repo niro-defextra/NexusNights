@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Login } from './auth/Login';
@@ -12,14 +12,24 @@ import { Watch } from './pages/Watch';
 import { RoomProvider, useRoom } from './room/RoomContext';
 import { RoomBanner } from './room/RoomBanner';
 import { Toasts } from './room/Toasts';
-import { UniversalEmbedPlayer } from './player/embed/UniversalEmbedPlayer';
-import { ProvidersDashboard } from './pages/ProvidersDashboard';
-import { DiscoverRooms } from './pages/DiscoverRooms';
-import { AdminDashboard } from './pages/AdminDashboard';
-import { DiscordActivity } from './pages/DiscordActivity';
-import { SportsPage } from './pages/SportsPage';
-import { Downloads } from './pages/Downloads';
 import { go, useRoute } from './router';
+
+// Lazy-loaded routes for ultra-fast initial bundle (<150KB)
+const ProvidersDashboard = lazy(() => import('./pages/ProvidersDashboard').then(m => ({ default: m.ProvidersDashboard })));
+const DiscoverRooms = lazy(() => import('./pages/DiscoverRooms').then(m => ({ default: m.DiscoverRooms })));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const DiscordActivity = lazy(() => import('./pages/DiscordActivity').then(m => ({ default: m.DiscordActivity })));
+const SportsPage = lazy(() => import('./pages/SportsPage').then(m => ({ default: m.SportsPage })));
+const Downloads = lazy(() => import('./pages/Downloads').then(m => ({ default: m.Downloads })));
+const UniversalEmbedPlayer = lazy(() => import('./player/embed/UniversalEmbedPlayer').then(m => ({ default: m.UniversalEmbedPlayer })));
+
+function PageFallback() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center">
+      <div className="size-8 animate-spin rounded-full border-2 border-blood-hot border-t-transparent" aria-hidden="true" />
+    </div>
+  );
+}
 
 /** Shown when a non-admin tries to access an admin-only page */
 function AdminGate({ children }: { children: ReactNode }) {
@@ -51,15 +61,23 @@ function Routes() {
     }
   }, [mediaId, room.active, room.connection, room.roomId, route]);
 
-  if (route.name === 'discord') return <DiscordActivity />;
+  if (route.name === 'discord') {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <DiscordActivity />
+      </Suspense>
+    );
+  }
   if (route.name === 'watch') return <Watch key={route.id} id={route.id} />;
   if (route.name === 'embed-poc') {
     return (
-      <UniversalEmbedPlayer
-        title="Universal Player.js Compatibility POC"
-        subtitle="Testing @videojs/playerjs-video & Video.js 10 Custom Skin"
-        onBack={() => go.home()}
-      />
+      <Suspense fallback={<PageFallback />}>
+        <UniversalEmbedPlayer
+          title="Universal Player.js Compatibility POC"
+          subtitle="Testing @videojs/playerjs-video & Video.js 10 Custom Skin"
+          onBack={() => go.home()}
+        />
+      </Suspense>
     );
   }
   
@@ -69,23 +87,25 @@ function Routes() {
       <RoomBanner />
       <Toasts />
       <main key={route.name === 'title' ? route.id : route.name === 'global-title' ? `${route.kind}-${route.tmdbId}` : route.name} className="animate-fade pb-20 sm:pb-0">
-        {route.name === 'title' ? (
-          <UnifiedTitlePage id={route.id} />
-        ) : route.name === 'global-title' ? (
-          <GlobalTitle kind={route.kind} tmdbId={route.tmdbId} />
-        ) : route.name === 'sports' || route.name === 'sports-watch' ? (
-          <SportsPage />
-        ) : route.name === 'downloads' ? (
-          <Downloads />
-        ) : route.name === 'providers' ? (
-          <AdminGate><ProvidersDashboard /></AdminGate>
-        ) : route.name === 'discover-rooms' ? (
-          <DiscoverRooms />
-        ) : route.name === 'admin-dashboard' ? (
-          <AdminDashboard />
-        ) : (
-          <GlobalHome />
-        )}
+        <Suspense fallback={<PageFallback />}>
+          {route.name === 'title' ? (
+            <UnifiedTitlePage id={route.id} />
+          ) : route.name === 'global-title' ? (
+            <GlobalTitle kind={route.kind} tmdbId={route.tmdbId} />
+          ) : route.name === 'sports' || route.name === 'sports-watch' ? (
+            <SportsPage />
+          ) : route.name === 'downloads' ? (
+            <Downloads />
+          ) : route.name === 'providers' ? (
+            <AdminGate><ProvidersDashboard /></AdminGate>
+          ) : route.name === 'discover-rooms' ? (
+            <DiscoverRooms />
+          ) : route.name === 'admin-dashboard' ? (
+            <AdminDashboard />
+          ) : (
+            <GlobalHome />
+          )}
+        </Suspense>
       </main>
       <BottomNav />
     </>

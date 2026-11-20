@@ -94,6 +94,9 @@ function isTokenExpired(status: number): boolean {
   return status === 403 || status === 401 || status === 410 || status === 400;
 }
 
+// Micro-cache for master playlists (3 seconds) to handle concurrent watchers in Discord watch parties
+const masterPlaylistCache = new Map<string, { text: string; expiresAt: number }>();
+
 /**
  * GET /api/stream-proxy/master/:id.m3u8
  * Fetches and rewrites the master playlist.
@@ -102,6 +105,16 @@ function isTokenExpired(status: number): boolean {
  */
 streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) => {
   const { id } = req.params;
+
+  // Check micro-cache first
+  const cached = masterPlaylistCache.get(id);
+  if (cached && Date.now() < cached.expiresAt) {
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.send(cached.text);
+    return;
+  }
   const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
   const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
   const serverOrigin = `${protoHeader}://${hostHeader}`;
@@ -189,6 +202,7 @@ streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) =>
       return;
     }
     const rewritten = rewriteManifest(manifestText, stream.playlistUrl, stream.id, serverOrigin);
+    masterPlaylistCache.set(id, { text: rewritten, expiresAt: Date.now() + 3000 });
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -244,6 +258,7 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
       if (isTokenExpired(upstream.status)) {
         // Evict expired stream from resolver cache so next playback or reload gets a fresh token
         console.log(`[StreamProxy] Segment token expired (${upstream.status}) for stream ${id}. Evicting from cache.`);
+        masterPlaylistCache.delete(id);
         streamResolver.evict(id);
         res.status(410).send('Segment token expired');
         return;

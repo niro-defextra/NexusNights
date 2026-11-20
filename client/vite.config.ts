@@ -36,7 +36,10 @@ export default defineConfig(({ mode }) => {
       chunkSizeWarningLimit: 900,
       rollupOptions: {
         output: {
-          manualChunks: { hls: ['hls.js'] },
+          manualChunks: {
+            hls: ['hls.js'],
+            three: ['three'],
+          },
         },
       },
     },
