@@ -5,6 +5,7 @@ import { roomApi } from '../api/rooms';
 import { useAuth, getToken } from '../auth/AuthContext';
 import { useI18n } from '../i18n';
 import { bestOffset, type SyncState } from './sync';
+import { discordSdk } from '../discord/DiscordSDK';
 
 export type ControlMode = 'host' | 'selected' | 'everyone';
 export interface RoomMember { id: string; name: string; avatar: string | null; guest: boolean; isHost: boolean; canControl: boolean; buffering: boolean }
@@ -81,7 +82,7 @@ function parseRoomParams() {
   const hashSearch = qIdx !== -1 ? new URLSearchParams(hash.substring(qIdx)) : null;
 
   // Discord Activity passes channel_id or instance_id when launched in a voice channel
-  const discordChannel = search.get('channel_id') || hashSearch?.get('channel_id') || search.get('instance_id') || hashSearch?.get('instance_id');
+  const discordChannel = search.get('channel_id') || hashSearch?.get('channel_id') || search.get('instance_id') || hashSearch?.get('instance_id') || discordSdk.channelId;
   const room = hashSearch?.get('room') || search.get('room') || (discordChannel ? `dc-${discordChannel}` : null);
   const name = hashSearch?.get('name') || search.get('name') || null;
   const invite = hashSearch?.get('invite') || search.get('invite') || null;

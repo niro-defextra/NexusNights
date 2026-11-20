@@ -6,8 +6,8 @@ export function BottomNav() {
   const route = useRoute();
   const { lang, t } = useI18n();
 
-  // Hide on video player, discord embed, or admin pages where full height is needed
-  if (route.name === 'watch' || route.name === 'discord' || route.name === 'embed-poc') {
+  // Hide on video player or POC pages where full height is needed
+  if (route.name === 'watch' || route.name === 'embed-poc') {
     return null;
   }
 

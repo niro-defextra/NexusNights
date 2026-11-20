@@ -11,8 +11,7 @@ export type Route =
   | { name: 'embed-poc' }
   | { name: 'providers' }
   | { name: 'discover-rooms' }
-  | { name: 'admin-dashboard' }
-  | { name: 'discord' };
+  | { name: 'admin-dashboard' };
 
 function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
@@ -30,13 +29,9 @@ function parse(hash: string): Route {
     return { name: 'sports' };
   }
 
-  // Discord Activity Mode (explicit hash or auto-detected embedded Discord environment)
-  const isDiscordEnv = typeof window !== 'undefined' && (
-    window.location.hostname.endsWith('.discordsays.com') ||
-    new URLSearchParams(window.location.search).has('frame_id')
-  );
-  if (parts[0] === 'discord' || parts[0] === 'activity' || (parts.length === 0 && isDiscordEnv)) {
-    return { name: 'discord' };
+  // Legacy Discord Activity hash aliases -> redirect to standard Home
+  if (parts[0] === 'discord' || parts[0] === 'activity') {
+    return { name: 'home' };
   }
 
   // Admin Dashboard
@@ -107,7 +102,7 @@ export const go = {
   providers: () => { location.hash = '#/providers'; },
   discoverRooms: () => { location.hash = '#/rooms'; },
   adminDashboard: () => { location.hash = '#/admin'; },
-  discord: (room?: string) => { location.hash = room ? `#/discord?room=${encodeURIComponent(room)}` : '#/discord'; },
+  discord: (room?: string) => { location.hash = room ? `#/?room=${encodeURIComponent(room)}` : '#/'; },
   globalTitle: (kind: 'movie' | 'series', tmdbId: number) => { 
     location.hash = `#/${kind === 'movie' ? 'movie' : 'tv'}/${tmdbId}`; 
   },
@@ -123,7 +118,7 @@ export const hrefs = {
   providers: '#/providers',
   discoverRooms: '#/rooms',
   adminDashboard: '#/admin',
-  discord: '#/discord',
+  discord: '#/',
   globalTitle: (kind: 'movie' | 'series', tmdbId: number) => 
     `#/${kind === 'movie' ? 'movie' : 'tv'}/${tmdbId}`,
 };

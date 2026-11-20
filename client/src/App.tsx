@@ -18,7 +18,6 @@ import { go, useRoute } from './router';
 const ProvidersDashboard = lazy(() => import('./pages/ProvidersDashboard').then(m => ({ default: m.ProvidersDashboard })));
 const DiscoverRooms = lazy(() => import('./pages/DiscoverRooms').then(m => ({ default: m.DiscoverRooms })));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
-const DiscordActivity = lazy(() => import('./pages/DiscordActivity').then(m => ({ default: m.DiscordActivity })));
 const SportsPage = lazy(() => import('./pages/SportsPage').then(m => ({ default: m.SportsPage })));
 const Downloads = lazy(() => import('./pages/Downloads').then(m => ({ default: m.Downloads })));
 const UniversalEmbedPlayer = lazy(() => import('./player/embed/UniversalEmbedPlayer').then(m => ({ default: m.UniversalEmbedPlayer })));
@@ -55,19 +54,12 @@ function Routes() {
     if (!room.active || room.connection !== 'connected') { last.current = null; return; }
     if (mediaId && mediaId !== last.current) {
       last.current = mediaId;
-      if (!(route.name === 'watch' && route.id === mediaId) && route.name !== 'discord') {
+      if (!(route.name === 'watch' && route.id === mediaId)) {
         window.location.hash = room.roomId ? `#/watch/${mediaId}?room=${room.roomId}` : `#/watch/${mediaId}`;
       }
     }
   }, [mediaId, room.active, room.connection, room.roomId, route]);
 
-  if (route.name === 'discord') {
-    return (
-      <Suspense fallback={<PageFallback />}>
-        <DiscordActivity />
-      </Suspense>
-    );
-  }
   if (route.name === 'watch') return <Watch key={route.id} id={route.id} />;
   if (route.name === 'embed-poc') {
     return (
@@ -117,9 +109,11 @@ import { SplashScreen } from '@capacitor/splash-screen';
 import { initBackButton } from './native/back-button';
 import { initDeepLinks } from './native/deep-links';
 import { handleExternalToken } from './auth/AuthContext';
+import { useDiscordReady } from './discord/useDiscord';
 
 function AppContent() {
   const { user, loading } = useAuth();
+  useDiscordReady();
 
   useEffect(() => {
     const unbindBack = initBackButton((msg) => {
