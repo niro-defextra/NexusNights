@@ -177,7 +177,7 @@ function TmdbMovieView({ data }: { data: TmdbMovieDetail }) {
         <div className="absolute inset-0 -z-10 bg-gradient-to-r from-ink via-ink/75 to-ink/20 rtl:bg-gradient-to-l" />
         <div className="absolute inset-0 -z-10 bg-gradient-to-t from-ink via-ink/20 to-ink/60" />
         
-        <div className="flex min-h-[min(66dvh,34rem)] items-end px-[var(--pad)] pb-10 pt-28">
+        <div className="flex min-h-[min(66dvh,34rem)] items-end px-[var(--pad)] pb-10 pt-36">
           <div className="flex gap-6 max-w-full">
             {/* Poster */}
             {posterUrl && (
@@ -287,7 +287,7 @@ function TmdbTvView({ data }: { data: TmdbTvDetail }) {
         <div className="absolute inset-0 -z-10 bg-gradient-to-r from-ink via-ink/75 to-ink/20 rtl:bg-gradient-to-l" />
         <div className="absolute inset-0 -z-10 bg-gradient-to-t from-ink via-ink/20 to-ink/60" />
         
-        <div className="flex min-h-[min(66dvh,34rem)] items-end px-[var(--pad)] pb-10 pt-28">
+        <div className="flex min-h-[min(66dvh,34rem)] items-end px-[var(--pad)] pb-10 pt-36">
           <div className="flex gap-6 max-w-full">
             {/* Poster */}
             {posterUrl && (
@@ -578,7 +578,7 @@ function LocalTitle({ id }: { id: string }) {
         <div className="absolute inset-0 -z-10 bg-gradient-to-t from-ink via-ink/30 to-ink/50" />
 
         {/* Hero content */}
-        <div className="flex min-h-[min(72dvh,38rem)] items-end px-[var(--pad)] pb-12 pt-28">
+        <div className="flex min-h-[min(72dvh,38rem)] items-end px-[var(--pad)] pb-12 pt-36">
           <div className="max-w-[min(42rem,100%)] animate-rise">
             <p className="mb-2 text-xs font-medium uppercase tracking-[0.3em] text-gilt">
               {data.kind === 'series' ? t('series') : t('movie')}
