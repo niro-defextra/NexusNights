@@ -4,7 +4,9 @@
  */
 
 import express, { type Request, type Response } from 'express';
+import { Readable } from 'node:stream';
 import type { ProviderSource } from './types';
+import { getSegment, setSegment, SEGMENT_CACHE_MAX_ITEM_BYTES } from './segment-cache';
 
 export const providerStreamProxyRouter = express.Router();
 
@@ -48,22 +50,6 @@ export function getProviderStream(id: string): ProviderSource | null {
 }
 
 /**
- * Check if a URL points to a CORS-enabled CDN that the browser can fetch directly.
- * Dizibal segments live on pilavyer*.top which serves Access-Control-Allow-Origin: *.
- * Playlists and keys live on the player host (pilavyerplay.top) which does NOT send CORS.
- */
-function isCorsEnabledCdn(absoluteUrl: string, baseUrl: string): boolean {
-  try {
-    const segHost = new URL(absoluteUrl).hostname;
-    const baseHost = new URL(baseUrl).hostname;
-    // External CDN host (different from player host) = direct fetch OK
-    return segHost !== baseHost;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Check if a URL is likely an HLS playlist (not a binary segment).
  */
 function isPlaylistUrl(url: string): boolean {
@@ -73,12 +59,15 @@ function isPlaylistUrl(url: string): boolean {
 /**
  * Rewrite HLS manifest:
  * - Playlists and keys → always proxy (they need server-side CORS + rewriting)
- * - Video/audio segments on CORS-enabled CDN → leave direct (fast, no server overhead)
- * - Segments on restricted host → proxy
+ * - Video/audio segments → always proxy as well. The Dizibal CDN sends
+ *   Access-Control-Allow-Origin: * but rejects requests carrying our page Origin
+ *   with 403, so a browser-side direct fetch never works. The proxy sets the
+ *   provider's own Referer/Origin and makes 720p playback reliable.
  */
 function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string, serverOrigin = ''): string {
   const lines = manifestText.split('\n');
   const rewrittenLines: string[] = [];
+  const prefix = serverOrigin ? `${serverOrigin}/api/provider-stream-proxy/segment` : '/api/provider-stream-proxy/segment';
 
   for (let line of lines) {
     const trimmed = line.trim();
@@ -89,7 +78,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string
         try {
           const absoluteUrl = new URL(uri, baseUrl).href;
           // URI in tags are always playlists or keys → always proxy
-          const proxiedUrl = `${serverOrigin}/api/provider-stream-proxy/segment?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
+          const proxiedUrl = `${prefix}?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
           return `URI="${proxiedUrl}"`;
         } catch {
           return `URI="${uri}"`;
@@ -108,20 +97,8 @@ function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string
     // Non-comment lines: sub-playlists or media segments
     try {
       const absoluteUrl = new URL(trimmed, baseUrl).href;
-
-      if (isPlaylistUrl(absoluteUrl)) {
-        // Sub-playlists must be proxied so their inner URLs get rewritten
-        const proxiedUrl = `${serverOrigin}/api/provider-stream-proxy/segment?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
-        rewrittenLines.push(proxiedUrl);
-      } else if (isCorsEnabledCdn(absoluteUrl, baseUrl)) {
-        // Media segment on CDN with CORS → let the browser fetch directly!
-        // This eliminates the server as middleman → dramatically faster + instant seeks
-        rewrittenLines.push(absoluteUrl);
-      } else {
-        // Segment on restricted host → proxy it
-        const proxiedUrl = `${serverOrigin}/api/provider-stream-proxy/segment?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
-        rewrittenLines.push(proxiedUrl);
-      }
+      const proxiedUrl = `${prefix}?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
+      rewrittenLines.push(proxiedUrl);
     } catch {
       rewrittenLines.push(line);
     }
@@ -203,7 +180,18 @@ providerStreamProxyRouter.get('/segment', async (req: Request, res: Response) =>
     return;
   }
 
+  const cacheKey = `${id}:${url}`;
   try {
+    const cachedSegment = req.headers.range ? undefined : getSegment(cacheKey);
+    if (cachedSegment) {
+      res.setHeader('Content-Type', cachedSegment.contentType || 'application/octet-stream');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'public, max-age=3600, immutable');
+      res.setHeader('Content-Length', String(cachedSegment.body.length));
+      res.send(cachedSegment.body);
+      return;
+    }
+
     const upstream = await fetch(url, {
       headers: source.headers || {},
       signal: AbortSignal.timeout(30000),
@@ -255,13 +243,13 @@ providerStreamProxyRouter.get('/segment', async (req: Request, res: Response) =>
       return;
     }
 
-    // Binary data (encryption key, or any remaining proxied segment)
-    // Stream it instead of buffering the whole thing in memory
+    // Forward content headers immediately for low Time-To-First-Byte (TTFB)
     res.setHeader('Content-Type', contentType || 'application/octet-stream');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Cache-Control', 'public, max-age=3600, immutable');
 
     const contentLength = upstream.headers.get('content-length');
+    const length = contentLength ? Number(contentLength) : 0;
     if (contentLength) res.setHeader('Content-Length', contentLength);
 
     if (!upstream.body) {
@@ -269,21 +257,38 @@ providerStreamProxyRouter.get('/segment', async (req: Request, res: Response) =>
       return;
     }
 
-    // Pipe ReadableStream → Node.js response (no buffering!)
-    const reader = upstream.body.getReader();
-    const pump = async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(value);
-        }
-        res.end();
-      } catch (err: any) {
-        res.destroy(err);
+    // Stream binary video segments directly to the response with backpressure.
+    // Simultaneously buffer chunks to populate the in-memory LRU cache so subsequent requests/rewinds hit RAM.
+    const canBuffer = !req.headers.range && (!length || length <= SEGMENT_CACHE_MAX_ITEM_BYTES);
+    const nodeStream = Readable.fromWeb(upstream.body as any);
+    const chunks: Buffer[] = [];
+    let collectedBytes = 0;
+
+    nodeStream.on('data', (chunk: Buffer) => {
+      if (canBuffer && collectedBytes + chunk.length <= SEGMENT_CACHE_MAX_ITEM_BYTES) {
+        chunks.push(chunk);
+        collectedBytes += chunk.length;
       }
-    };
-    void pump();
+    });
+
+    nodeStream.on('end', () => {
+      if (canBuffer && chunks.length > 0 && collectedBytes <= SEGMENT_CACHE_MAX_ITEM_BYTES) {
+        try {
+          const body = Buffer.concat(chunks);
+          setSegment(cacheKey, body, contentType || 'application/octet-stream');
+        } catch {}
+      }
+    });
+
+    nodeStream.on('error', () => {
+      if (!res.writableEnded) res.end();
+    });
+
+    nodeStream.pipe(res);
+
+    req.on('close', () => {
+      nodeStream.destroy();
+    });
   } catch (error: any) {
     if (!res.headersSent) {
       console.error(`[ProviderStreamProxy] Segment fetch error for ${url.substring(0, 100)}:`, error.message);

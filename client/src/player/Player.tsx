@@ -70,6 +70,14 @@ interface Props {
 }
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
+/** "1080p" → 1080, "720p" → 720. Unknown labels return 0. */
+const qualityHeight = (quality?: string): number => {
+  if (!quality) return 0;
+  const m = quality.match(/(\d{3,4})\s*p/i);
+  if (m) return Number(m[1]);
+  if (/4k|2160/i.test(quality)) return 2160;
+  return 0;
+};
 const num = (k: string, d: number) => { try { const v = Number(localStorage.getItem(k)); return Number.isFinite(v) && localStorage.getItem(k) !== null ? v : d; } catch { return d; } };
 const str = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const put = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
@@ -89,7 +97,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
   cb.current = { onProgress, onEnded, onNext, onReady, onBuffering };
 
   // ── streaming failover state ──────────────────────────────────────────────
-  const [currentSourceIndex, setCurrentSourceIndex] = useState(0);
+  // null = no explicit choice yet, so the connection-aware default below applies.
+  const [sourceSelection, setSourceSelection] = useState<number | null>(null);
   const [failoverMessage, setFailoverMessage] = useState<string | null>(null);
   const attemptedSources = useRef(new Set<string>());
 
@@ -97,11 +106,49 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     if (!streamingConfig) return [];
     return [streamingConfig.source, ...streamingConfig.alternatives].filter(Boolean) as PlaybackSourcePublic[];
   }, [streamingConfig]);
+
+  // Start on the lowest-bitrate source only when the browser reports a genuinely
+  // slow link. Otherwise start on the primary source (usually 1080p) and let the
+  // stall watchdog drop to 720p at the same timestamp if it cannot keep up.
+  const preferredSourceIndex = useMemo(() => {
+    if (!allSources.length || typeof navigator === 'undefined') return 0;
+    const conn = (navigator as any).connection;
+    const downlink = typeof conn?.downlink === 'number' ? conn.downlink : undefined;
+    const saveData = conn?.saveData === true;
+    const effectiveType = typeof conn?.effectiveType === 'string' ? conn.effectiveType : '';
+    const slow =
+      saveData ||
+      effectiveType === 'slow-2g' ||
+      effectiveType === '2g' ||
+      effectiveType === '3g' ||
+      (downlink !== undefined && downlink > 0 && downlink < 8);
+    if (!slow) return 0;
+
+    let bestIdx = 0;
+    let bestHeight = Number.POSITIVE_INFINITY;
+    allSources.forEach((s, idx) => {
+      const h = qualityHeight(s.quality);
+      if (h <= 0) return;
+      // Lowest resolution wins; on a tie a direct provider beats an embed/sniffer.
+      const better =
+        h < bestHeight ||
+        (h === bestHeight && !s.isEmbed && allSources[bestIdx]?.isEmbed === true);
+      if (better) {
+        bestHeight = h;
+        bestIdx = idx;
+      }
+    });
+    return bestIdx;
+  }, [allSources]);
+
+  const currentSourceIndex = sourceSelection ?? preferredSourceIndex;
   const currentSource = allSources[currentSourceIndex] || streamingConfig?.source || null;
 
   useEffect(() => {
-    setCurrentSourceIndex(0);
+    setSourceSelection(null);
     attemptedSources.current.clear();
+    // A new title/episode starts from its own saved position, not the previous failover time.
+    startRef.current = startAt;
   }, [media.id]);
 
   const [phase, setPhase] = useState<'preparing' | 'loading' | 'ready' | 'error'>('loading');
@@ -195,6 +242,15 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
 
   const doFlash = (kind: 'play' | 'pause' | 'back' | 'fwd') => setFlash({ kind, n: ++flashN.current });
 
+  // Auto-dismiss center flash indicator (play/pause/skip) after 600ms
+  useEffect(() => {
+    if (!flash) return;
+    const timer = setTimeout(() => {
+      setFlash(null);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [flash]);
+
   const syncBuffered = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -208,6 +264,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     const v = videoRef.current!;
     const ac = new AbortController();
     let hls: Hls | null = null;
+    let watchdog: number | undefined;
+    let autoCappedTimer: any = null;
     let dead = false;
     live.current = false;
     setPhase('loading');
@@ -221,14 +279,27 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       
       // Try automatic failover for streaming sources
       if (canFailover && streamingConfig) {
-        const allSources = [streamingConfig.source, ...streamingConfig.alternatives].filter(Boolean) as PlaybackSourcePublic[];
+        // A provider switch must resume where the viewer actually was, not at the
+        // original resume point from the page load.
+        if (v.currentTime > 0.5) startRef.current = v.currentTime;
+
         const tried = attemptedSources.current;
-        
-        // Prioritize an untried source from a different provider first
         const curSource = allSources[currentSourceIndex];
         const currentProvider = curSource?.provider;
-        
-        let nextSource = allSources.find(alt => !tried.has(alt.url) && alt.provider !== currentProvider);
+        const currentHeight = qualityHeight(curSource?.quality);
+
+        // Smooth beats sharp: try a lower-resolution source first (720p before
+        // another 1080p), then an untried different provider, then anything left.
+        let nextSource: PlaybackSourcePublic | undefined = allSources
+          .filter((alt) => {
+            const h = qualityHeight(alt.quality);
+            return !tried.has(alt.url) && h > 0 && currentHeight > 0 && h < currentHeight;
+          })
+          .sort((a, b) => qualityHeight(a.quality) - qualityHeight(b.quality))[0];
+
+        if (!nextSource) {
+          nextSource = allSources.find(alt => !tried.has(alt.url) && alt.provider !== currentProvider);
+        }
         if (!nextSource) {
           nextSource = allSources.find(alt => !tried.has(alt.url));
         }
@@ -236,8 +307,13 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
         if (nextSource) {
           tried.add(nextSource.url);
           const nextIdx = allSources.indexOf(nextSource);
-          setFailoverMessage(t('fallbackPreparing'));
-          setCurrentSourceIndex(nextIdx >= 0 ? nextIdx : currentSourceIndex + 1);
+          const nextLabel = nextSource.quality
+            ? `${nextSource.provider} · ${nextSource.quality}`
+            : nextSource.provider;
+          setFailoverMessage(lang === 'ar'
+            ? `جاري التحويل إلى ${nextLabel}...`
+            : `Switching to ${nextLabel}...`);
+          setSourceSelection(nextIdx >= 0 ? nextIdx : currentSourceIndex + 1);
           setRetry(prev => prev + 1);
           return;
         }
@@ -407,31 +483,66 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
 
       // STREAMING: HLS source
       if ((source.type === 'hls' || url.includes('.m3u8')) && Hls.isSupported()) {
+        const conn = (navigator as any).connection;
+        const downlink = typeof conn?.downlink === 'number' ? conn.downlink : undefined;
+        const saveData = conn?.saveData === true;
+        const effectiveType = typeof conn?.effectiveType === 'string' ? conn.effectiveType : '';
+        const lowMemory = typeof (navigator as any).deviceMemory === 'number' && (navigator as any).deviceMemory < 4;
+        const normalMaxBufferSize = lowMemory ? 80 * 1000 * 1000 : 140 * 1000 * 1000;
+        const pauseMaxBufferSize = lowMemory ? 120 * 1000 * 1000 : 250 * 1000 * 1000;
+        const pauseBufferSeconds = lowMemory ? 120 : 240;
+        const isSlowLink = saveData || (downlink !== undefined && downlink > 0 && downlink < 8) || effectiveType === '2g' || effectiveType === '3g' || effectiveType === 'slow-2g';
+
         hls = new Hls({
           startPosition: startRef.current,
           enableWorker: true,
           lowLatencyMode: false,
-          maxBufferLength: 30,          // seconds ahead to buffer
-          maxMaxBufferLength: 60,        // absolute max buffer
-          backBufferLength: 20,          // seconds behind to keep
+          capLevelToPlayerSize: true, // Prevents downloading oversized 1080p/4K on mobile or smaller viewports
+          progressive: true,          // Enables progressive fragment processing for faster playback start
+          // Smooth VOD buffering: fast startup with resilient cushion
+          maxBufferLength: 45,           // seconds ahead to buffer
+          maxMaxBufferLength: 120,       // absolute max buffer
+          maxBufferSize: normalMaxBufferSize,
+          backBufferLength: 45,          // seconds behind to keep for instant rewind
           maxBufferHole: 0.8,            // tolerate gaps up to 0.8s without stalling
           highBufferWatchdogPeriod: 2,
-          nudgeOffset: 0.15,            // jump 150ms forward when stuck in a gap
-          nudgeMaxRetry: 10,            // retry up to 10 times to jump past timestamp gaps
+          nudgeOffset: 0.15,             // jump 150ms forward when stuck in a gap
+          nudgeMaxRetry: 10,             // retry up to 10 times to jump past timestamp gaps
           maxFragLookUpTolerance: 0.3,
-          fragLoadingTimeOut: 25000,
-          fragLoadingMaxRetry: 6,
+          fragLoadingTimeOut: 20000,
+          fragLoadingMaxRetry: 4,
           fragLoadingRetryDelay: 1000,
-          fragLoadingMaxRetryTimeout: 64000,
+          fragLoadingMaxRetryTimeout: 16000,
           levelLoadingTimeOut: 15000,
-          levelLoadingMaxRetry: 4,
-          abrEwmaDefaultEstimate: 800000,
-          abrBandWidthFactor: 0.8,
-          abrBandWidthUpFactor: 0.7,
+          levelLoadingMaxRetry: 3,
+          startFragPrefetch: true,
+          testBandwidth: true,
+          // Conservative start estimate (1.5 Mbps ~ 480p/720p) ensures instant startup with zero initial stall.
+          // ABR will smoothly ramp up to 1080p if bandwidth allows.
+          abrEwmaDefaultEstimate: isSlowLink ? 1000000 : 1800000,
+          abrBandWidthFactor: 0.75,      // 25% safety margin against jitter/latency spikes
+          abrBandWidthUpFactor: 0.70,    // Only upscale when connection is solidly fast
+          maxStarvationDelay: 3,         // Emergency level downswitch within 3 seconds of buffer starvation
           xhrSetup: (xhr) => { xhr.withCredentials = false; },
         });
         hlsRef.current = hls;
-        let net = 0, mediaErr = 0, fragParseFails = 0, fragLoadFails = 0, stallCount = 0;
+        console.info('[Player] HLS init', {
+          provider: source.provider,
+          quality: source.quality,
+          startPosition: startRef.current,
+          levels: hls.levels.length,
+        });
+        let net = 0, mediaErr = 0, fragParseFails = 0, fragLoadFails = 0;
+        let started = false;
+        let startedAt = 0;
+        let failoverTriggered = false;
+        let lastProgressAt = performance.now();
+        let lastProgressTime = v.currentTime;
+        let lastFragLoadingAt = performance.now();
+        let lastStartLoadAt = 0;
+        let stallEvents: number[] = [];
+        let stallLogAt = 0;
+        let pauseBufferApplied = false;
         
         const syncStreamingHlsTracks = () => {
           if (!hls) return;
@@ -483,9 +594,221 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           }
         };
 
+        // While paused, hls.js keeps loading only up to maxBufferLength. Raising
+        // the cap here lets a pause build a real read-ahead instead of stopping
+        // after the normal 60 seconds.
+        const applyPauseReadAhead = (paused: boolean) => {
+          if (!hls || dead) return;
+          try {
+            if (paused) {
+              if (pauseBufferApplied) return;
+              pauseBufferApplied = true;
+              hls.config.maxBufferLength = pauseBufferSeconds;
+              hls.config.maxMaxBufferLength = pauseBufferSeconds;
+              hls.config.maxBufferSize = pauseMaxBufferSize;
+              console.info('[Player] Pause read-ahead enabled', { targetSeconds: pauseBufferSeconds });
+              hls.startLoad();
+            } else if (pauseBufferApplied) {
+              pauseBufferApplied = false;
+              hls.config.maxBufferLength = 60;
+              hls.config.maxMaxBufferLength = 180;
+              hls.config.maxBufferSize = normalMaxBufferSize;
+            }
+          } catch { /* config change must never break playback */ }
+        };
+        v.addEventListener('pause', () => applyPauseReadAhead(true), { signal: ac.signal });
+        v.addEventListener('play', () => {
+          lastProgressAt = performance.now();
+          lastProgressTime = v.currentTime;
+          stallEvents = [];
+          applyPauseReadAhead(false);
+        }, { signal: ac.signal });
+
+        const bufferAhead = () => {
+          try {
+            const b = v.buffered;
+            for (let i = 0; i < b.length; i++) {
+              if (b.start(i) <= v.currentTime + 0.25 && b.end(i) >= v.currentTime) {
+                return Math.max(0, b.end(i) - v.currentTime);
+              }
+            }
+          } catch { /* ignore */ }
+          return 0;
+        };
+
+        let lastDownswitchAt = 0;
+
+        // Adaptive Quality Reduction for Slow Internet Connections
+        const emergencyDownswitch = (reason: string) => {
+          if (!hls || dead || !started) return;
+          const now = performance.now();
+          if (now - lastDownswitchAt < 4000) return;
+          lastDownswitchAt = now;
+
+          const lvls = hls.levels;
+          if (!lvls || lvls.length <= 1) return;
+
+          // Only adapt down if the user is on Auto (-1)
+          if (currentLevelIdx !== -1) return;
+
+          const curLvl = hls.currentLevel >= 0 ? hls.currentLevel : (hls.loadLevel >= 0 ? hls.loadLevel : lvls.length - 1);
+          if (curLvl > 0) {
+            const targetLvl = Math.max(0, curLvl - 1);
+            console.warn(`[Player] Adaptive Quality Downscale: dropping quality from level ${curLvl} to ${targetLvl} (${lvls[targetLvl]?.height || 'low'}p) due to ${reason}`);
+
+            hls.nextLoadLevel = targetLvl;
+            hls.autoLevelCapping = targetLvl;
+
+            // Multiple stalls in succession: drop all the way to lowest level (e.g. 360p/480p) to keep playback smooth
+            if (stallEvents.length >= 2) {
+              hls.nextLoadLevel = 0;
+              hls.autoLevelCapping = 0;
+              console.warn(`[Player] Multiple stalls! Locking quality to level 0 (${lvls[0]?.height || 'lowest'}p) for continuous smooth playback`);
+            }
+
+            // Restore uncap after 60 seconds of healthy playback
+            if (autoCappedTimer) clearTimeout(autoCappedTimer);
+            autoCappedTimer = setTimeout(() => {
+              if (hls && !dead) {
+                console.info('[Player] Network stabilized, lifting autoLevelCapping');
+                hls.autoLevelCapping = -1;
+              }
+            }, 60000);
+          }
+        };
+
+        // Count distinct stalls, not hls.js error spam. `waiting` catches short
+        // buffer underruns ("plays a bit, freezes a bit") that never become a
+        // 25-second no-progress event; the watchdog catches long freezes.
+        const recordStall = (reason: string) => {
+          const now = performance.now();
+          if (!started || v.paused || !startedAt || now - startedAt < 10000 || v.currentTime < 5) return;
+          if (stallEvents.length > 0 && now - stallEvents[stallEvents.length - 1] < 3000) return;
+          stallEvents.push(now);
+          stallEvents = stallEvents.filter((t) => now - t <= 90000);
+          emergencyDownswitch(reason);
+          if (now - stallLogAt > 4000) {
+            stallLogAt = now;
+            console.warn('[Player] Playback stalled', {
+              reason,
+              at: Number(v.currentTime.toFixed(2)),
+              noProgressSec: Number(((now - lastProgressAt) / 1000).toFixed(1)),
+              bufferAhead: Number(bufferAhead().toFixed(2)),
+              readyState: v.readyState,
+              networkState: v.networkState,
+              levels: hls?.levels?.length ?? 0,
+              bandwidthEstimate: hls?.bandwidthEstimate,
+              downlink,
+              effectiveType,
+            });
+          }
+        };
+        v.addEventListener('waiting', () => {
+          if (!v.paused && v.currentTime > 1 && bufferAhead() < 2.5) {
+            recordStall('waiting');
+            emergencyDownswitch('buffer_underrun');
+          }
+        }, { signal: ac.signal });
+
+        const triggerFailover = (reason: string) => {
+          if (dead || failoverTriggered || !started) return;
+          failoverTriggered = true;
+          const at = v.currentTime;
+          if (at > 0.5) startRef.current = at;
+          console.warn('[Player] Failover: ' + reason, {
+            at: Number(at.toFixed(2)),
+            bufferAhead: Number(bufferAhead().toFixed(2)),
+            readyState: v.readyState,
+            networkState: v.networkState,
+            levels: hls?.levels?.length ?? 0,
+            bandwidthEstimate: hls?.bandwidthEstimate,
+            downlink,
+            effectiveType,
+          });
+          api.reportPlaybackFailure({
+            provider: source.provider,
+            sourceUrl: source.url,
+            failureType: 'http_timeout',
+            responseStatus: 0,
+            errorDetails: 'stall:' + reason,
+          }).catch(() => {});
+          fail('playback_failed', true);
+        };
+
+        // Time-based watchdog with active stall prevention and gap recovery
+        watchdog = window.setInterval(() => {
+          if (dead || !started || v.paused || failoverTriggered) return;
+          const now = performance.now();
+          const noProgressMs = now - lastProgressAt;
+          const buf = bufferAhead();
+
+          // Healthy playback: currentTime is moving, or we have plenty of buffer.
+          if (v.readyState >= 3 && noProgressMs < 3500) return;
+          if (noProgressMs < 6000) return;
+
+          recordStall('no_progress');
+
+          // If buffer is low and no progress, trigger emergency quality drop immediately
+          if (buf < 2.0) {
+            emergencyDownswitch('watchdog_low_buffer');
+          }
+
+          // Wake a genuinely idle loader at most once every 8s.
+          if (buf < 1.5 && now - lastFragLoadingAt > 8000 && now - lastStartLoadAt > 8000) {
+            lastStartLoadAt = now;
+            console.info('[Player] No fragment activity for 8s, waking loader once');
+            try { hls?.startLoad(); } catch { /* ignore */ }
+          }
+
+          // Check for tiny micro-gap when readyState is stuck
+          if (v.readyState < 3 && buf > 0.1 && noProgressMs > 3000) {
+            try {
+              const b = v.buffered;
+              const cur = v.currentTime;
+              for (let i = 0; i < b.length; i++) {
+                const start = b.start(i);
+                if (start > cur && (start - cur) <= 0.8) {
+                  console.log(`[Player] Watchdog nudging over gap (${(start - cur).toFixed(2)}s)`);
+                  v.currentTime = start + 0.05;
+                  v.play().catch(() => {});
+                  break;
+                }
+              }
+            } catch {}
+          }
+
+          // Sustained stall: for single-level streams failover faster (14s) than multi-level (25s)
+          const isSingleLevel = !hls?.levels || hls.levels.length <= 1;
+          const stallTimeout = isSingleLevel ? 14000 : 25000;
+          if (noProgressMs >= stallTimeout || stallEvents.length >= 3) {
+            triggerFailover(noProgressMs >= stallTimeout ? `no_progress_${Math.round(stallTimeout / 1000)}s` : 'three_stalls_90s');
+          }
+        }, 1500);
+
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          started = true;
+          startedAt = performance.now();
+          lastProgressAt = startedAt;
+          lastProgressTime = v.currentTime;
+          stallEvents = [];
           syncStreamingHlsTracks();
-          
+
+          console.info('[Player] HLS manifest parsed', {
+            levels: hls?.levels.map((lvl: any) => ({
+              height: lvl.height,
+              bitrate: lvl.bitrate,
+              name: lvl.name,
+            })),
+            audioTracks: hls?.audioTracks?.map((t: any) => ({ lang: t.lang, name: t.name })),
+            downlink,
+            effectiveType,
+            saveData,
+          });
+
+          // If the viewer opened the page and does not autoplay, still use the
+          // larger read-ahead window instead of sitting at a 60-second cap.
+          if (v.paused) applyPauseReadAhead(true);
+
           // Report success to backend
           api.reportPlaybackSuccess({
             provider: source.provider,
@@ -503,19 +826,43 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           live.current = !!d.details.live;
           setDuration(effDuration());
         });
+
+        hls.on(Hls.Events.FRAG_LOADING, () => {
+          lastFragLoadingAt = performance.now();
+        });
+
+        hls.on(Hls.Events.FRAG_LOADED, (_e, d: any) => {
+          lastFragLoadingAt = performance.now();
+          const stats = d?.frag?.stats;
+          const start = stats?.loading?.start ?? 0;
+          const end = stats?.loading?.end ?? 0;
+          const loadMs = end > start ? end - start : 0;
+          const bytes = stats?.loaded ?? 0;
+          if (loadMs > 5000) {
+            console.warn('[Player] Slow segment', {
+              at: Number(v.currentTime.toFixed(2)),
+              loadSec: Number((loadMs / 1000).toFixed(2)),
+              bytes,
+              mbps: loadMs > 0 && bytes > 0 ? Number(((bytes * 8) / loadMs / 1000).toFixed(2)) : undefined,
+            });
+          }
+        });
         
         hls.on(Hls.Events.FRAG_BUFFERED, () => {
           fragParseFails = 0;
           fragLoadFails = 0;
-          stallCount = 0;
         });
         v.addEventListener('seeking', () => {
           fragLoadFails = 0;
-          stallCount = 0;
+          // A seek is a deliberate fresh start; do not count pre-seek stalls.
+          stallEvents = [];
+          lastProgressAt = performance.now();
+          lastProgressTime = v.currentTime;
         }, { signal: ac.signal });
         v.addEventListener('timeupdate', () => {
-          if (!v.paused && v.readyState >= 3) {
-            stallCount = 0;
+          if (v.currentTime > lastProgressTime + 0.15) {
+            lastProgressTime = v.currentTime;
+            lastProgressAt = performance.now();
           }
         }, { signal: ac.signal });
 
@@ -531,13 +878,28 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
             reason: d.reason
           });
 
-          // Proactively handle buffer stalls (e.g. bufferStalledError / bufferSeekOverHole)
-          // instead of ignoring non-fatal stalls and letting the player sit frozen
-          if (d.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR || d.details === Hls.ErrorDetails.BUFFER_SEEK_OVER_HOLE) {
-            stallCount++;
-            console.warn(`[Player] Buffer stall detected (${stallCount}/5) at ${v.currentTime.toFixed(2)}s`);
-
-            // 1. Check for a micro buffer hole ahead and jump past it if < 1.5s
+          // bufferStalledError: nudge over micro-gap and immediately request quality drop
+          if (d.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+            try {
+              if (v.buffered && v.buffered.length > 0) {
+                const cur = v.currentTime;
+                for (let i = 0; i < v.buffered.length; i++) {
+                  const start = v.buffered.start(i);
+                  if (start > cur && (start - cur) <= 1.2) {
+                    console.log(`[Player] Buffer hole on stall detected (${(start - cur).toFixed(2)}s). Nudging currentTime from ${cur.toFixed(2)} to ${(start + 0.05).toFixed(2)}`);
+                    v.currentTime = start + 0.05;
+                    v.play().catch(() => {});
+                    break;
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn('[Player] Buffer inspection error:', err);
+            }
+            emergencyDownswitch('buffer_stalled_error');
+            return;
+          }
+          if (d.details === Hls.ErrorDetails.BUFFER_SEEK_OVER_HOLE) {
             try {
               if (v.buffered && v.buffered.length > 0) {
                 const cur = v.currentTime;
@@ -553,34 +915,6 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
             } catch (err) {
               console.warn('[Player] Buffer inspection error:', err);
             }
-
-            // 2. Wake up fragment loading immediately
-            try {
-              hls?.startLoad();
-            } catch (e) {}
-
-            // 3. If stalled repeatedly (2+ times), downshift quality level to alleviate bandwidth pressure
-            if (stallCount >= 2 && hls) {
-              if (hls.currentLevel > 0) {
-                console.log(`[Player] Repeated stalls, downshifting quality from level ${hls.currentLevel} to ${hls.currentLevel - 1}`);
-                hls.currentLevel = hls.currentLevel - 1;
-              } else if (hls.autoLevelEnabled && hls.nextLevel > 0) {
-                hls.currentLevel = Math.max(0, hls.nextLevel - 1);
-              }
-            }
-
-            // 4. If stalled persistently (5+ times without making progress), failover to alternative provider
-            if (stallCount >= 5) {
-              console.warn('[Player] Persistent buffer stalls reached threshold (5), failing over to alternative provider');
-              api.reportPlaybackFailure({
-                provider: source.provider,
-                sourceUrl: source.url,
-                failureType: 'http_timeout',
-                responseStatus: 0,
-                errorDetails: 'persistent_buffer_stalled',
-              }).catch(() => {});
-              fail('playback_failed', true);
-            }
             return;
           }
 
@@ -593,7 +927,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
             if (status === 0) {
               return;
             }
-            if (status === 403 || ++fragLoadFails >= 5) {
+            if (status === 403 || ++fragLoadFails >= 3) {
               console.log(`[Player] Fragment load failed (status: ${status}, count: ${fragLoadFails}), failing over`);
               api.reportPlaybackFailure({
                 provider: source.provider,
@@ -705,6 +1039,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
 
     return () => {
       dead = true;
+      if (watchdog !== undefined) window.clearInterval(watchdog);
+      if (autoCappedTimer) clearTimeout(autoCappedTimer);
       ac.abort();
       hls?.destroy();
       hlsRef.current = null;
@@ -944,6 +1280,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     setMenu(null);
     const hls = hlsRef.current;
     if (hls) {
+      hls.autoLevelCapping = -1;
       hls.currentLevel = lvlIdx;
     }
   }, []);
@@ -953,7 +1290,9 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       setMenu(null);
       return;
     }
-    setCurrentSourceIndex(idx);
+    const at = videoRef.current?.currentTime ?? 0;
+    if (at > 0.5) startRef.current = at;
+    setSourceSelection(idx);
     setMenu(null);
     setRetry((r) => r + 1);
   }, [currentSourceIndex]);
@@ -1062,8 +1401,10 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     if (next) {
       tried.add(next.url);
       const nextIdx = all.indexOf(next);
+      const at = videoRef.current?.currentTime ?? 0;
+      if (at > 0.5) startRef.current = at;
       setFailoverMessage('جاري تجهيز مصدر بديل...');
-      setCurrentSourceIndex(nextIdx >= 0 ? nextIdx : 0);
+      setSourceSelection(nextIdx >= 0 ? nextIdx : 0);
       setRetry(r => r + 1);
     }
   }, [streamingConfig, currentSource]);
@@ -1305,6 +1646,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
                 title={lang === 'ar' ? 'تغيير سيرفر البث المباشر' : 'Change streaming server'}
               >
                 <span>{currentSource.provider}</span>
+                {currentSource.quality && <span className="text-[10px] text-dust">{currentSource.quality}</span>}
                 {allSources.length > 1 && <span className="text-[10px] text-dust">({allSources.length})</span>}
               </button>
               {menu === 'source' && allSources.length > 0 && (
@@ -1316,7 +1658,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
                   items={allSources.map((s, idx) => ({
                     id: String(idx),
                     label: s.provider,
-                    hint: 'HLS (Direct Stream)',
+                    hint: s.quality ? `${s.quality} · HLS` : 'HLS',
                   }))}
                 />
               )}
@@ -1337,8 +1679,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
 
       {/* center indicators */}
       {flash && (
-        <div key={flash.n} className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center" onAnimationEnd={() => setFlash(null)}>
-          <div className="flex size-20 items-center justify-center rounded-full bg-black/60">
+        <div key={flash.n} className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center transition-opacity duration-300" onAnimationEnd={() => setFlash(null)}>
+          <div className="flex size-20 items-center justify-center rounded-full bg-black/60 backdrop-blur-sm shadow-xl transition-all">
             {flash.kind === 'play' && <Play className={`size-9 ${iconFlip}`} />}
             {flash.kind === 'pause' && <Pause className="size-9" />}
             {flash.kind === 'back' && <Skip dir="back" className="size-10" />}

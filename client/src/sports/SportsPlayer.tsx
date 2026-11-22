@@ -153,6 +153,15 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
     const recover = (reason: string) => {
       if (destroyed || !hls) return;
       console.warn('[SportsPlayer] Recovering stream:', reason);
+      if (currentLevel === -1 && hls.levels && hls.levels.length > 1) {
+        const curLvl = hls.currentLevel >= 0 ? hls.currentLevel : hls.loadLevel;
+        if (curLvl > 0) {
+          const nextLower = curLvl - 1;
+          console.warn(`[SportsPlayer] Adaptive downscale to level ${nextLower}`);
+          hls.nextLoadLevel = nextLower;
+          hls.autoLevelCapping = nextLower;
+        }
+      }
       try { hls.recoverMediaError(); } catch {}
       try { hls.startLoad(); } catch {}
     };
@@ -161,6 +170,8 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
+        capLevelToPlayerSize: true,
+        progressive: true,
         backBufferLength: 15,
         maxBufferLength: 30,
         maxMaxBufferLength: 60,
@@ -170,6 +181,9 @@ export function SportsPlayer({ channel, allChannels, onSelectChannel, onClose }:
         highBufferWatchdogPeriod: 2,
         nudgeOffset: 0.1,
         nudgeMaxRetry: 10,
+        abrBandWidthFactor: 0.75,
+        abrBandWidthUpFactor: 0.70,
+        maxStarvationDelay: 3,
         xhrSetup: (xhr) => {
           xhr.withCredentials = false;
         },

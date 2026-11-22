@@ -50,6 +50,16 @@ const BLOCKED_DOMAINS = [
   'exoclick.com',
   'trafficjunky.net',
   'tsyndicate.com',
+  'propellerads.com',
+  'admaven.com',
+  'clickadu.com',
+  'adcash.com',
+  'juicyads.com',
+  'exosrv.com',
+  'popmyads.com',
+  'hilltopads.com',
+  'monetag.com',
+  'richpush.co',
 ];
 
 export class StreamResolver {
@@ -324,11 +334,35 @@ export class StreamResolver {
     try {
       const browser = await this.getOrCreateBrowser();
       context = await browser.newContext({
-        viewport: { width: 800, height: 600 },
+        viewport: { width: 1280, height: 720 },
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         locale: 'en-US',
         timezoneId: 'America/New_York',
         ignoreHTTPSErrors: true,
+      });
+
+      // Advanced stealth init script to bypass bot-checks and anti-scraping
+      await context.addInitScript(() => {
+        try {
+          const win = globalThis as any;
+          Object.defineProperty(win.navigator || {}, 'webdriver', { get: () => undefined });
+          delete win.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+          delete win.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+          delete win.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+          delete win.$chrome_asyncScriptInfo;
+          delete win.$cdc_asdjflasutopfhvcZLmcfl_;
+          if (win.navigator) {
+            Object.defineProperty(win.navigator, 'plugins', {
+              get: () => [
+                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+              ],
+            });
+            Object.defineProperty(win.navigator, 'languages', {
+              get: () => ['en-US', 'en'],
+            });
+          }
+        } catch {}
       });
 
       let resolvedResult: { url: string; headers: Record<string, string>; provider: string } | null = null;
@@ -359,7 +393,7 @@ export class StreamResolver {
             };
             abortController.signal.addEventListener('abort', abortHandler, { once: true });
 
-            // Aggressive resource & ad blocking for ultra-fast load
+            // Resource & ad blocking: block heavy images/fonts/ads, but ALLOW stylesheets so players mount correctly
             await page.route('**/*', (route) => {
               if (abortController.signal.aborted) {
                 return route.abort().catch(() => {});
@@ -368,13 +402,18 @@ export class StreamResolver {
               const type = reqObj.resourceType();
               const url = reqObj.url();
 
-              // Abort heavy non-video assets
-              if (type === 'image' || type === 'font' || type === 'stylesheet' || (type === 'media' && !url.includes('.m3u8'))) {
+              // Abort heavy non-video assets (keep stylesheets so custom players don't crash)
+              if (type === 'image' || type === 'font') {
                 return route.abort();
               }
 
               // Abort ads and analytics
               if (BLOCKED_DOMAINS.some((domain) => url.includes(domain))) {
+                return route.abort();
+              }
+
+              // Abort obvious ad trackers / beacons
+              if (/[\b/._-](ads?|doubleclick|popads|vast|vpaid|beacon|analytics)[\b/._-]/i.test(url) && !url.includes('.m3u8')) {
                 return route.abort();
               }
 
@@ -387,6 +426,10 @@ export class StreamResolver {
             let capturedUrl: string | undefined;
             let capturedHeaders: Record<string, string> | undefined;
 
+            const isAdStream = (u: string) => {
+              return /[\b/._-](ads?|preroll|midroll|popads|vast|vpaid|beacon|track|syndication|telemetry)[\b/._-]/i.test(u);
+            };
+
             const streamPromise = new Promise<{ url: string; headers: Record<string, string> }>((resolve) => {
               if (!page) return;
 
@@ -395,7 +438,7 @@ export class StreamResolver {
                 const u = request.url();
                 const resType = request.resourceType();
                 const isThumb = u.includes('.vtt') || u.includes('.jpg') || u.includes('.png');
-                const isAdPing = u.includes('ping') || u.includes('doubleclick') || u.includes('analytics');
+                const isAdPing = isAdStream(u) || u.includes('ping') || u.includes('analytics');
 
                 const isM3u8 = (u.includes('.m3u8') || u.includes('/playlist/') || u.includes('.urlset')) && !isThumb && !isAdPing;
                 const isMedia = (resType === 'media' || u.includes('.mp4') || u.includes('.m3u8')) && (u.includes('.mp4') || u.includes('.m3u8')) && !isThumb && !isAdPing;
@@ -413,7 +456,7 @@ export class StreamResolver {
                 const cType = (res.headers()['content-type'] || '').toLowerCase();
                 const isMpeg = cType.includes('mpegurl') || cType.includes('application/x-mpegurl');
 
-                if (isMpeg && !capturedUrl) {
+                if (isMpeg && !isAdStream(u) && !capturedUrl) {
                   capturedUrl = u;
                   capturedHeaders = res.request().headers();
                   resolve({ url: u, headers: capturedHeaders });
@@ -429,29 +472,31 @@ export class StreamResolver {
               referer: target.referer,
             });
 
-            // Immediately trigger play on player button/overlay if present
-            await page.evaluate(() => {
-              const doc = (globalThis as any).document;
-              if (doc) {
-                const btn = doc.querySelector('button[aria-label*="Play"], .play-button, .vjs-big-play-button, video, div[class*="play"]');
-                if (btn && typeof btn.click === 'function') btn.click();
-              }
-            }).catch(() => {});
-
-            // Secondary synthetic play trigger after 600ms if stream not yet emitted
-            const deferredClick = setTimeout(async () => {
-              if (page && !page.isClosed() && !capturedUrl && !abortController.signal.aborted) {
-                try {
-                  await page.evaluate(() => {
+            // Trigger play across all nested frames (players often render in an iframe)
+            const triggerPlayInFrames = async () => {
+              if (!page || page.isClosed() || capturedUrl || abortController.signal.aborted) return;
+              for (const frame of page.frames()) {
+                await frame.evaluate(() => {
+                  try {
                     const doc = (globalThis as any).document;
-                    if (doc) {
-                      const btn = doc.querySelector('button[aria-label*="Play"], .play-button, .vjs-big-play-button, video, div[class*="play"]');
-                      if (btn && typeof btn.click === 'function') btn.click();
+                    if (!doc) return;
+                    const btn = doc.querySelector('button[aria-label*="Play"], .play-button, .vjs-big-play-button, video, div[class*="play"], #play, .play, .jw-display-icon-container, [data-plyr="play"]');
+                    if (btn && typeof btn.click === 'function') btn.click();
+                    const v = doc.querySelector('video');
+                    if (v) {
+                      v.muted = true;
+                      v.play().catch(() => {});
                     }
-                  }).catch(() => {});
-                } catch {}
+                  } catch {}
+                }).catch(() => {});
               }
-            }, 600);
+            };
+
+            await triggerPlayInFrames();
+
+            // Secondary synthetic play triggers after 500ms and 1200ms
+            const timer1 = setTimeout(triggerPlayInFrames, 500);
+            const timer2 = setTimeout(triggerPlayInFrames, 1200);
 
             // Wait for stream capture or batch timeout or abort
             const res = await Promise.race([
@@ -463,7 +508,8 @@ export class StreamResolver {
               }),
             ]);
 
-            clearTimeout(deferredClick);
+            clearTimeout(timer1);
+            clearTimeout(timer2);
 
             if (res && !abortController.signal.aborted) {
               return { ...res, provider: target.name };
@@ -546,6 +592,25 @@ export class StreamResolver {
       if (context) await context.close().catch(() => {});
     }
   }
+
+  /**
+   * Gracefully close the shared browser instance to prevent zombie processes.
+   */
+  public async close(): Promise<void> {
+    if (this.sharedBrowser) {
+      try {
+        await this.sharedBrowser.close();
+      } catch {
+        // ignore
+      }
+      this.sharedBrowser = null;
+    }
+  }
 }
 
 export const streamResolver = new StreamResolver();
+
+// Graceful cleanup of browser instance on server shutdown to avoid orphaned Chromium processes
+process.once('SIGINT', () => void streamResolver.close());
+process.once('SIGTERM', () => void streamResolver.close());
+process.once('beforeExit', () => void streamResolver.close());

@@ -11,12 +11,14 @@ import express, { type Request, type Response } from 'express';
 import { Readable } from 'node:stream';
 import { streamResolver, type ResolvedStream } from './stream-resolver';
 import { trailerSniffer } from './trailer-sniffer';
+import { getSegment, setSegment, SEGMENT_CACHE_MAX_ITEM_BYTES } from './segment-cache';
 
 export const streamProxyRouter = express.Router();
 
 function rewriteManifest(manifestText: string, baseUrl: string, streamId: string, serverOrigin = ''): string {
   const lines = manifestText.split('\n');
   const rewrittenLines: string[] = [];
+  const prefix = serverOrigin ? `${serverOrigin}/api/stream-proxy/segment` : '/api/stream-proxy/segment';
 
   for (let line of lines) {
     const trimmed = line.trim();
@@ -26,7 +28,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, streamId: string
       const rewrittenTag = trimmed.replace(/URI="([^"]+)"/g, (_match, uri) => {
         try {
           const absoluteUrl = new URL(uri, baseUrl).href;
-          const proxiedUrl = `${serverOrigin}/api/stream-proxy/segment?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}`;
+          const proxiedUrl = `${prefix}?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}`;
           return `URI="${proxiedUrl}"`;
         } catch {
           return `URI="${uri}"`;
@@ -45,7 +47,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, streamId: string
     // Rewrite media segment or sub-playlist URL
     try {
       const absoluteUrl = new URL(trimmed, baseUrl).href;
-      const proxiedUrl = `${serverOrigin}/api/stream-proxy/segment?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}`;
+      const proxiedUrl = `${prefix}?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}`;
       rewrittenLines.push(proxiedUrl);
     } catch {
       rewrittenLines.push(line);
@@ -239,7 +241,19 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
     return;
   }
 
+  const cacheKey = `${id}:${url}`;
+
   try {
+    const cached = req.headers.range ? undefined : getSegment(cacheKey);
+    if (cached) {
+      res.setHeader('Content-Type', cached.contentType);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.setHeader('Content-Length', String(cached.body.length));
+      res.send(cached.body);
+      return;
+    }
+
     const headers: Record<string, string> = {
       ...proxyHeaders(stream),
     };
@@ -287,14 +301,13 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
         url.includes('type=audio'));
 
     if (isPlaylist) {
-      const clone = upstream.clone();
       try {
-        const manifestText = await clone.text();
+        const manifestText = await upstream.text();
         // If it has #EXTM3U, rewrite it
         if (manifestText.includes('#EXTM3U')) {
-          const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
+          const hostHeader = req.get('x-forwarded-host') || req.get('host');
           const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
-          const serverOrigin = `${protoHeader}://${hostHeader}`;
+          const serverOrigin = hostHeader ? `${protoHeader}://${hostHeader}` : '';
           const rewritten = rewriteManifest(manifestText, url, stream.id, serverOrigin);
           res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
           res.setHeader('Access-Control-Allow-Origin', '*');
@@ -303,16 +316,17 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
           return;
         }
       } catch {
-        // If clone reading fails, fall through to binary streaming
+        // If text reading fails, fall through to binary streaming
       }
     }
 
-    // Forward content headers
+    // Forward content headers immediately for low Time-To-First-Byte (TTFB)
     res.setHeader('Content-Type', contentType);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
 
     const contentLength = upstream.headers.get('content-length');
+    const length = contentLength ? Number(contentLength) : 0;
     if (contentLength) res.setHeader('Content-Length', contentLength);
 
     const contentRange = upstream.headers.get('content-range');
@@ -321,17 +335,40 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
       res.setHeader('Content-Range', contentRange);
     }
 
-    // Stream the binary body with backpressure & socket teardown
     if (!upstream.body) {
       res.end();
       return;
     }
 
+    // Stream binary video segments directly to the response with backpressure.
+    // Simultaneously buffer chunks to populate the in-memory LRU cache so subsequent requests/rewinds hit RAM.
+    const canBuffer = !req.headers.range && (!length || length <= SEGMENT_CACHE_MAX_ITEM_BYTES);
     const nodeStream = Readable.fromWeb(upstream.body as any);
+    const chunks: Buffer[] = [];
+    let collectedBytes = 0;
+
+    nodeStream.on('data', (chunk: Buffer) => {
+      if (canBuffer && collectedBytes + chunk.length <= SEGMENT_CACHE_MAX_ITEM_BYTES) {
+        chunks.push(chunk);
+        collectedBytes += chunk.length;
+      }
+    });
+
+    nodeStream.on('end', () => {
+      if (canBuffer && chunks.length > 0 && collectedBytes <= SEGMENT_CACHE_MAX_ITEM_BYTES) {
+        try {
+          const body = Buffer.concat(chunks);
+          setSegment(cacheKey, body, contentType);
+        } catch {}
+      }
+    });
+
     nodeStream.on('error', () => {
       if (!res.writableEnded) res.end();
     });
+
     nodeStream.pipe(res);
+
     req.on('close', () => {
       nodeStream.destroy();
     });

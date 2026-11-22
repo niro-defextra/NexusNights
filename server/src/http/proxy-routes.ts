@@ -5,6 +5,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { isSafePublicUrl } from '../util/ssrf';
 
 export function createProxyRoutes() {
   const router = Router();
@@ -167,15 +168,8 @@ export function createProxyRoutes() {
   router.get('/embed', (req: Request, res: Response) => {
     const url = req.query.url as string | undefined;
 
-    if (!url) {
-      return res.status(400).json({ error: 'Missing url parameter' });
-    }
-
-    // Validate URL
-    try {
-      new URL(url);
-    } catch {
-      return res.status(400).json({ error: 'Invalid URL' });
+    if (!url || !isSafePublicUrl(url)) {
+      return res.status(400).json({ error: 'Invalid or forbidden URL parameter' });
     }
 
     // Return HTML page with iframe

@@ -143,6 +143,13 @@ export interface PlaybackSourcePublic {
   provider: string;
   audioTracks?: Array<{ language: string; label: string }>;
   embedUrl?: string; // Present when type === 'embed'
+  /** Stable provider/source id when the backend includes it. */
+  id?: string;
+  /** True when the source still needs a native-sniffer resolution. */
+  isEmbed?: boolean;
+  /** Optional bitrate/resolution metadata for source selection. */
+  bandwidth?: number;
+  height?: number;
 }
 
 export interface PlaybackSubtitlePublic {

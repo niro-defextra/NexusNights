@@ -29,6 +29,7 @@ import { hianimeResolver } from '../streaming/hianime-resolver';
 import { aniSkipService } from '../streaming/aniskip-service';
 import { skipSegmentsService, mergeSkipSegments } from '../streaming/skip-segments-service';
 import { trailerSniffer } from '../streaming/trailer-sniffer';
+import { isSafePublicUrl } from '../util/ssrf';
 
 const wrap = (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler => (req, res, next) => {
   fn(req, res, next).catch(next);
@@ -287,7 +288,9 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
    */
   router.get('/subtitles/proxy', assetLimiter, wrap(async (req, res) => {
     const targetUrl = req.query.url as string;
-    if (!targetUrl) return res.status(400).send('Missing url parameter');
+    if (!targetUrl || !isSafePublicUrl(targetUrl)) {
+      return res.status(400).send('Invalid or forbidden url parameter');
+    }
 
     try {
       let referer = '';
@@ -1929,9 +1932,9 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
 
   /**
    * POST /api/streaming/providers/:id/toggle
-   * Enable or disable a streaming provider (state is persisted)
+   * Enable or disable a streaming provider (state is persisted, requires admin)
    */
-  router.post('/streaming/providers/:id/toggle', apiLimiter, express.json(), (req, res) => {
+  router.post('/streaming/providers/:id/toggle', apiLimiter, requireAdmin, express.json(), (req, res) => {
     const { id } = req.params;
     const adapter = providerRegistry.get(id);
     if (!adapter) {
@@ -1953,9 +1956,9 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
 
   /**
    * POST /api/streaming/providers/:id/test
-   * Run a live resolution test for a provider
+   * Run a live resolution test for a provider (requires admin)
    */
-  router.post('/streaming/providers/:id/test', apiLimiter, express.json(), wrap(async (req, res) => {
+  router.post('/streaming/providers/:id/test', apiLimiter, requireAdmin, express.json(), wrap(async (req, res) => {
     const { id } = req.params;
     const adapter = providerRegistry.get(id);
     if (!adapter) {
@@ -1979,9 +1982,9 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
 
   /**
    * POST /api/streaming/providers/reset-cooldowns
-   * Reset all provider cooldowns and failure history
+   * Reset all provider cooldowns and failure history (requires admin)
    */
-  router.post('/streaming/providers/reset-cooldowns', apiLimiter, (_req, res) => {
+  router.post('/streaming/providers/reset-cooldowns', apiLimiter, requireAdmin, (_req, res) => {
     const { providerHealth } = require('../streaming/provider-health');
     providerHealth.resetAllCooldowns();
     res.json({
@@ -2005,6 +2008,11 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
     const episode = req.body?.episode ? parseInt(req.body.episode, 10) : undefined;
     const provider = req.body?.provider ? String(req.body.provider).replace(/\s*\([^)]*\)/g, '').trim() : undefined;
     let targetUrl = (req.body?.targetUrl || req.body?.embedUrl) ? String(req.body.targetUrl || req.body.embedUrl) : undefined;
+
+    // Guard against SSRF / protocol smuggling in targetUrl
+    if (targetUrl && !isSafePublicUrl(targetUrl)) {
+      return res.status(400).json({ error: 'invalid_target_url', message: 'Target URL is not an allowed public HTTP(S) address' });
+    }
 
     // Fallback: If targetUrl is missing but provider is Arabic, resolve targetUrl via ArabAdapter
     if (!targetUrl && provider && /arab|moviz|seed/i.test(provider)) {

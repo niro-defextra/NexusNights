@@ -13,17 +13,71 @@ import { attachStreamingRoutes } from './streaming-routes';
 import { createProxyRoutes } from './proxy-routes';
 import { ROOT } from '../config';
 
+function isOriginTrusted(origin: string, hostHeader?: string): boolean {
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+    const hostWithPort = parsed.host.toLowerCase();
+
+    // 1. Same host as incoming request Host header
+    if (hostHeader) {
+      const incomingHost = hostHeader.toLowerCase();
+      const incomingHostname = incomingHost.split(':')[0];
+      if (hostWithPort === incomingHost || hostname === incomingHostname) {
+        return true;
+      }
+    }
+
+    // 2. Localhost & Loopback development
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
+      return true;
+    }
+
+    // 3. Mobile / Hybrid WebViews (Capacitor, Ionic, Tauri)
+    if (parsed.protocol === 'capacitor:' || parsed.protocol === 'ionic:' || parsed.protocol === 'tauri:') {
+      return true;
+    }
+
+    // 4. Discord Activities
+    if (hostname.endsWith('.discordsays.com')) {
+      return true;
+    }
+
+    // 5. Cloudflare tunnels for development/previews
+    if (hostname.endsWith('.trycloudflare.com')) {
+      return true;
+    }
+
+    // 6. Explicitly configured ALLOWED_ORIGINS env variable
+    if (process.env.ALLOWED_ORIGINS) {
+      const allowed = process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim().toLowerCase());
+      if (allowed.includes(origin.toLowerCase()) || allowed.includes(hostname) || allowed.includes(hostWithPort)) {
+        return true;
+      }
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function createApp(svc: LibraryService) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', svc.cfg.trustProxy);
 
-  // CORS support for mobile applications (Capacitor) and cross-origin clients
+  // Hardened CORS support: reflect origin + credentials ONLY for trusted origins (Capacitor, Discord, local, host)
+  // Untrusted cross-origins receive public '*' without credentials to prevent credential/session theft.
   app.use((req, res, next) => {
     const origin = req.headers.origin;
     if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      if (isOriginTrusted(origin, req.headers.host)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+      } else {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+      }
     } else {
       res.setHeader('Access-Control-Allow-Origin', '*');
     }
