@@ -1098,6 +1098,61 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     setCountdown(null);
   }, [media.id]);
 
+  // ── Universal Playback Telemetry Heartbeat ─────────────────────────────────
+  useEffect(() => {
+    let lastReport = 0;
+    const sendTelemetry = (completed = false) => {
+      const v = videoRef.current;
+      if (!v) return;
+      const cur = v.currentTime;
+      const dur = effDuration();
+      if (cur < 2 && !completed) return;
+
+      const tmdbId = (media as any).tmdbId ?? (media.playback as any)?.tmdbId;
+      if (!tmdbId && !media.id) return;
+
+      const providerName = currentSource?.provider || 'Aether';
+      const isSeries = media.season !== undefined && media.season !== null;
+
+      fetch(u('/api/telemetry/playback'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(localStorage.getItem('nexusnight_token') ? { Authorization: `Bearer ${localStorage.getItem('nexusnight_token')}` } : {}),
+        },
+        body: JSON.stringify({
+          tmdbId: tmdbId || 1,
+          kind: isSeries ? 'series' : 'movie',
+          title: title || 'Title',
+          season: media.season ?? undefined,
+          episode: media.episode ?? undefined,
+          posterUrl: (media as any).posterUrl || undefined,
+          provider: providerName,
+          currentTime: Math.floor(cur),
+          duration: Math.floor(dur),
+          completed,
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+
+    const interval = setInterval(() => {
+      const v = videoRef.current;
+      if (v && !v.paused && !v.ended) {
+        const now = Date.now();
+        if (now - lastReport >= 15000) {
+          lastReport = now;
+          sendTelemetry(false);
+        }
+      }
+    }, 5000);
+
+    return () => {
+      clearInterval(interval);
+      sendTelemetry(false);
+    };
+  }, [media.id, (media as any).tmdbId, media.season, media.episode, title, currentSourceIndex]);
+
   // periodic progress save
   useEffect(() => {
     const id = setInterval(() => {

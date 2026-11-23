@@ -55,3 +55,8 @@ export function setSegment(key: string, body: Buffer, contentType: string): void
 export function segmentCacheStats(): { entries: number; bytes: number; maxBytes: number } {
   return { entries: cache.size, bytes: cacheBytes, maxBytes: SEGMENT_CACHE_MAX_BYTES };
 }
+
+export function clearSegmentCache(): void {
+  cache.clear();
+  cacheBytes = 0;
+}

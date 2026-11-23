@@ -18,7 +18,9 @@ import type { PlaybackConfigPublic, PlaybackSourcePublic, GlobalHomeResponse, Gl
 import { DiscoveryPresenter } from '../tmdb/discovery-presenter';
 import { selectBestLogo } from '../metadata/tmdb';
 import { streamResolver } from '../streaming/stream-resolver';
-import { streamProxyRouter } from '../streaming/stream-proxy';
+import { streamProxyRouter, clearStreamProxyCache } from '../streaming/stream-proxy';
+import { clearSegmentCache, segmentCacheStats } from '../streaming/segment-cache';
+import { roomRegistry } from '../realtime/room-registry';
 import { providerStreamProxyRouter, registerProviderStream } from '../streaming/provider-stream-proxy';
 import { sportsRouter } from '../streaming/sports-resolver';
 import { analyticsTracker } from '../analytics/tracker';
@@ -151,17 +153,33 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
   // endpoint can never be hit anonymously — even through a public tunnel.
   const adminToken = cfg.adminToken ?? randomBytes(16).toString('hex');
   const requireAdmin: RequestHandler = (req, res, next) => {
-    const header = req.get('authorization')?.replace(/^Bearer\s+/i, '') ?? req.get('x-admin-token') ?? '';
-    const a = Buffer.from(header);
-    const b = Buffer.from(adminToken);
-    if (a.length === b.length && timingSafeEqual(a, b)) return next();
-    res.status(401).json({ error: 'unauthorized' });
+    // 1. Check direct admin token (via Header or Query parameter)
+    const rawHeader = req.get('x-admin-token') ?? req.get('authorization')?.replace(/^Bearer\s+/i, '') ?? (req.query.adminToken as string) ?? '';
+    if (rawHeader) {
+      const a = Buffer.from(rawHeader);
+      const b = Buffer.from(adminToken);
+      if (a.length === b.length && timingSafeEqual(a, b)) return next();
+    }
+
+    // 2. Check Discord Admin session (logged in user matches ADMIN_DISCORD_ID)
+    if (cfg.adminDiscordId && rawHeader) {
+      try {
+        const u = deps.sessions.verifyToken(rawHeader);
+        if (u.userId === cfg.adminDiscordId || u.id === cfg.adminDiscordId) {
+          return next();
+        }
+      } catch {
+        // invalid session token
+      }
+    }
+
+    res.status(401).json({ error: 'unauthorized', message: 'Admin authentication required' });
   };
 
   const assetLimiter = rateLimit({ windowMs: 60_000, limit: 2000, standardHeaders: true, legacyHeaders: false });
   const apiLimiter = rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: true, legacyHeaders: false });
   const tokenLimiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: true, legacyHeaders: false });
-  const adminLimiter = rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
+  const adminLimiter = rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: true, legacyHeaders: false });
 
   // ── static-ish assets (cached hard, generous limit) ─────────────────────────
   router.get('/images/:kind(poster|backdrop|still)/:id', assetLimiter, wrap(async (req, res) => {
@@ -1735,18 +1753,48 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
    * Returns 200 { ok: true } on success, 401 on failure.
    */
   router.post('/admin/verify', adminLimiter, express.json(), requireAdmin, (_req, res) => {
-    res.json({ ok: true });
+    res.json({ ok: true, admin: true });
+  });
+
+  /**
+   * POST /api/admin/clear-cache
+   * Clears segment cache, stream proxy cache, and resolver cache
+   */
+  router.post('/admin/clear-cache', adminLimiter, requireAdmin, (_req, res) => {
+    clearSegmentCache();
+    clearStreamProxyCache();
+    streamResolver.clearCache();
+    res.json({ ok: true, message: 'All stream and segment caches cleared successfully' });
+  });
+
+  /**
+   * POST /api/admin/rooms/:id/close
+   * Terminate any active watch party room
+   */
+  router.post('/admin/rooms/:id/close', adminLimiter, requireAdmin, (req, res) => {
+    const { id } = req.params;
+    const closed = roomRegistry.closeRoom(id);
+    res.json({ ok: closed });
+  });
+
+  /**
+   * POST /api/admin/telemetry/reset
+   * Reset all telemetry and analytics data
+   */
+  router.post('/admin/telemetry/reset', adminLimiter, requireAdmin, (_req, res) => {
+    analyticsTracker.clearTelemetry();
+    res.json({ ok: true, message: 'Telemetry data reset successfully' });
   });
 
   /**
    * GET /api/admin/stats
-   * Dashboard statistics — library counts, active rooms, recent sessions.
+   * Super Ultra Advanced dashboard statistics — telemetry, live watchers, top movies/shows, search queries, providers, vitals.
    */
-  router.get('/admin/stats', adminLimiter, requireAdmin, (req, res) => {
-    // Get analytics data
+  router.get('/admin/stats', adminLimiter, requireAdmin, (_req, res) => {
+    // 1. Analytics & Telemetry Engine
     const analytics = analyticsTracker.getStats();
-    
-    // Get provider health stats
+
+    // 2. Provider health & statuses
     const providerStats = providerRegistry.getAll().map((p) => ({
       id: p.id,
       name: p.name,
@@ -1756,94 +1804,102 @@ export function createRoutes(svc: LibraryService, deps: { sessions: SessionManag
       inCooldown: providerHealth.isProviderInCooldown(p.id),
       totalAttempts: providerHealth.getAttempts(p.id),
     }));
-    
-    // ── Library Stats ────────────────────────────────────────────────────────
+
+    // 3. Library Stats
     const allMedia = Array.from(store.media.values());
     const titles = Array.from(store.titles.values());
     const movies = titles.filter((t) => t.kind === 'movie');
     const episodes = allMedia.filter((m) => store.titles.get(m.titleId)?.kind === 'series');
 
-    // Build "most watched" from progress store if available
-    const progressData = deps.progress.getAll();
-    const watchCounts: Record<string, { title: string; kind: string; watchCount: number; totalWatchTime: number; posterUrl?: string }> = {};
-    for (const [_userId, entries] of Object.entries(progressData)) {
-      for (const [mediaId, entry] of Object.entries(entries as Record<string, { t: number; d?: number }>)) {
-        const m = store.media.get(mediaId);
-        if (!m) continue;
-        const title = store.titles.get(m.titleId);
-        if (!watchCounts[mediaId]) {
-          watchCounts[mediaId] = {
-            title: title ? present.titleName(title, 'en') : (m.titleHint ?? mediaId),
-            kind: title?.kind === 'movie' ? 'movie' : 'series',
-            watchCount: 0,
-            totalWatchTime: 0,
-            posterUrl: (title && present.posterUrl(title)) ?? undefined,
-          };
-        }
-        watchCounts[mediaId].watchCount += 1;
-        watchCounts[mediaId].totalWatchTime += (entry as any).t ?? 0;
-      }
-    }
-    const mostWatched = Object.entries(watchCounts)
-      .map(([id, v]) => ({ id, ...v }))
-      .sort((a, b) => b.watchCount - a.watchCount)
-      .slice(0, 20);
+    // 4. Watch Party Rooms
+    const allRooms = roomRegistry.getAllRooms();
 
-    // Merge with streaming analytics
-    const topStreaming = analytics.topStreaming.map((s) => ({
-      id: s.kind === 'movie' ? `streaming-movie-${s.tmdbId}` : `streaming-tv-${s.tmdbId}-${s.season}-${s.episode}`,
-      title: s.season && s.episode ? `${s.title} S${s.season}E${s.episode}` : s.title,
-      kind: s.kind,
-      watchCount: s.watchCount,
-      totalWatchTime: 0,
-      posterUrl: undefined,
-    }));
-
-    // Total watch time across all users & media
-    const totalWatchTime = Object.values(watchCounts).reduce((sum, v) => sum + v.totalWatchTime, 0);
-
-    // Count unique users from progress + analytics
-    const progressUsers = Object.keys(progressData).length;
-    const totalUsers = Math.max(progressUsers, analytics.totalUsers);
-
-    // ── Room Stats (from realtime hub) ───────────────────────────────────────
-    const roomStats = (deps as any).getRoomStats?.() ?? { activeRooms: 0, totalRooms: 0 };
-
-    // ── Recent Activity ──────────────────────────────────────────────────────
-    const recentRaw = deps.progress.getRecentActivity(20);
-    const recentActivity = recentRaw.map((e) => {
-      const m = store.media.get(e.mediaId);
-      const titleObj = m ? store.titles.get(m.titleId) : undefined;
-      const label = titleObj ? present.titleName(titleObj, 'en') : e.mediaId;
-      const pct = Math.round(e.progress * 100);
-      return {
-        userId: e.userId.slice(0, 8),
-        userName: `User ${e.userId.slice(0, 4)}`,
-        action: `watched "${label}" — ${pct}% (via ${e.provider})`,
-        timestamp: e.at,
-      };
-    });
+    // 5. Streaming Engine & Caches
+    const streamStats = streamResolver.getStats();
+    const segStats = segmentCacheStats();
 
     res.json({
-      totalUsers,
-      activeSessions: analytics.activeSessions,
-      totalWatchTime,
-      mostWatchedContent: [...topStreaming, ...mostWatched].slice(0, 20),
-      trafficSources: analytics.trafficSources,
-      recentActivity,
-      activeRooms: roomStats.activeRooms,
-      totalRooms: roomStats.totalRooms,
+      ...analytics,
+      providers: providerStats,
+      rooms: allRooms,
+      activeRooms: allRooms.length,
+      totalRooms: allRooms.length,
       library: {
         movies: movies.length,
         episodes: episodes.length,
         total: allMedia.length,
       },
       streaming: {
-        activeBrowserSessions: streamResolver.getActiveBrowserCount(),
-        maxBrowserSessions: 3,
+        activeBrowserSessions: streamStats.activeBrowsers,
+        maxBrowserSessions: streamStats.maxBrowsers,
+        cachedStreams: streamStats.cachedStreams,
+        pendingResolutions: streamStats.pendingResolutions,
+        segmentCache: segStats,
       },
-      providers: providerStats,
     });
+  });
+
+  // ── Universal Telemetry Endpoints ──────────────────────────────────────────
+  /**
+   * POST /api/telemetry/playback
+   * Universal playback telemetry ping (called during playback by any client)
+   */
+  router.post('/telemetry/playback', apiLimiter, express.json(), (req, res) => {
+    const clientIP = req.ip || req.socket.remoteAddress || '127.0.0.1';
+    const userAgent = req.get('user-agent') || '';
+    const authHeader = req.get('authorization')?.replace(/^Bearer\s+/i, '');
+    let userId: string | undefined;
+    let userName: string | undefined;
+    if (authHeader) {
+      try {
+        const u = deps.sessions.verifyToken(authHeader);
+        userId = u.userId;
+        userName = u.globalName || u.username;
+      } catch {}
+    }
+
+    const { tmdbId, kind, title, season, episode, posterUrl, provider, currentTime, duration, completed } = req.body || {};
+    if (!tmdbId || !title) {
+      return res.status(400).json({ error: 'missing_fields' });
+    }
+
+    analyticsTracker.trackPlayback({
+      userId,
+      userName,
+      userIP: clientIP,
+      userAgent,
+      headers: req.headers,
+      tmdbId: Number(tmdbId),
+      kind: kind === 'series' ? 'series' : 'movie',
+      title: String(title),
+      season: season ? Number(season) : undefined,
+      episode: episode ? Number(episode) : undefined,
+      posterUrl: posterUrl ? String(posterUrl) : undefined,
+      provider: provider ? String(provider) : undefined,
+      currentTime: Number(currentTime) || 0,
+      duration: Number(duration) || 0,
+      completed: Boolean(completed),
+    });
+
+    res.json({ ok: true });
+  });
+
+  /**
+   * POST /api/telemetry/search
+   * Collect search telemetry to know what users are searching for
+   */
+  router.post('/telemetry/search', apiLimiter, express.json(), (req, res) => {
+    const clientIP = req.ip || req.socket.remoteAddress || '127.0.0.1';
+    const { query, resultsCount } = req.body || {};
+    if (query && typeof query === 'string') {
+      analyticsTracker.trackSearch({
+        query,
+        resultsCount: Number(resultsCount) || 0,
+        ip: clientIP,
+        headers: req.headers,
+      });
+    }
+    res.json({ ok: true });
   });
 
   // ── Provider Health Reporting ──────────────────────────────────────────────

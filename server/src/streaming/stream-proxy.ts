@@ -99,6 +99,10 @@ function isTokenExpired(status: number): boolean {
 // Micro-cache for master playlists (3 seconds) to handle concurrent watchers in Discord watch parties
 const masterPlaylistCache = new Map<string, { text: string; expiresAt: number }>();
 
+export function clearStreamProxyCache(): void {
+  masterPlaylistCache.clear();
+}
+
 /**
  * GET /api/stream-proxy/master/:id.m3u8
  * Fetches and rewrites the master playlist.

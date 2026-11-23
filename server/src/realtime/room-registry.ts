@@ -119,6 +119,10 @@ class RoomRegistryStore {
   listPublicRooms(): RoomMeta[] {
     return Array.from(this.rooms.values()).filter((r) => r.isPublic);
   }
+
+  getAllRooms(): RoomMeta[] {
+    return Array.from(this.rooms.values());
+  }
 }
 
 export const roomRegistry = new RoomRegistryStore();

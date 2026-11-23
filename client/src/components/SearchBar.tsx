@@ -133,6 +133,15 @@ export function SearchBar({ autoFocus = false, onClose, className = '' }: Search
       combined.sort((a, b) => b.vote_average - a.vote_average);
 
       setResults(combined.slice(0, 8));
+
+      // Record search query in analytics telemetry
+      if (searchQuery.trim().length >= 2) {
+        fetch(u('/api/telemetry/search'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: searchQuery.trim(), resultsCount: combined.length }),
+        }).catch(() => {});
+      }
       setSelectedIndex(-1);
       setShowResults(true);
       setLoading(false);

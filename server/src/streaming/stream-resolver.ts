@@ -606,6 +606,19 @@ export class StreamResolver {
       this.sharedBrowser = null;
     }
   }
+
+  public clearCache(): void {
+    this.cache.clear();
+  }
+
+  public getStats() {
+    return {
+      activeBrowsers: this.activeBrowsers,
+      maxBrowsers: this.MAX_CONCURRENT_BROWSERS,
+      cachedStreams: this.cache.size,
+      pendingResolutions: this.pending.size,
+    };
+  }
 }
 
 export const streamResolver = new StreamResolver();
