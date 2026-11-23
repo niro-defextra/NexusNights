@@ -113,6 +113,9 @@ export function attachRealtime(server: http.Server, svc: LibraryService, session
       if (meta?.mediaId) {
         room.state.mediaId = meta.mediaId;
       }
+      if (roomId.startsWith('dc-')) {
+        room.mode = 'everyone';
+      }
       rooms.set(roomId, room);
     }
     clearTimeout(emptyTimers.get(roomId));

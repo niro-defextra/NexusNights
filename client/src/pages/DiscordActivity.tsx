@@ -12,8 +12,8 @@ import type {
   EpisodeDetail 
 } from '../api-types';
 import { 
-  Discord, Play, Users, ChatBubble, Globe, Star, Spinner, 
-  Check, Copy, Crown, Zap, Search, Film, Tv, Send, X, MessageCircle, Sigil
+  Discord, Play, Users, Globe, Star, Spinner, 
+  Check, Copy, Crown, Zap, Search, Film, Tv, X, Sigil, Volume
 } from '../components/Icons';
 import { Avatar } from '../components/Avatar';
 import { Player, type PlayerHandle } from '../player/Player';
@@ -32,16 +32,14 @@ export function DiscordActivity() {
   // users in the same voice channel land in the same watch-party room.
   useEffect(() => {
     if (!discord.isReady || !discord.channelId) return;
-    // If we're already connected to a room, don't re-join
     if (room.active && room.roomId) return;
 
     const roomId = `dc-${discord.channelId}`;
     const hash = window.location.hash;
-    // Only set if the hash doesn't already include a room param
     if (!hash.includes('room=')) {
       const separator = hash.includes('?') ? '&' : '?';
       window.location.hash = `${hash}${separator}room=${encodeURIComponent(roomId)}`;
-      console.log('[DiscordActivity] Auto-joined room:', roomId);
+      console.log('[DiscordActivity] Auto-joined voice channel room:', roomId);
     }
   }, [discord.isReady, discord.channelId, room.active, room.roomId]);
 
@@ -50,8 +48,7 @@ export function DiscordActivity() {
   const [searchResults, setSearchResults] = useState<GlobalTitleCard[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [chatOpen, setChatOpen] = useState(true);
-  
+
   // Media & catalog state
   const [catalog, setCatalog] = useState<{ hero: GlobalTitleCard | null; titles: GlobalTitleCard[] }>({
     hero: null,
@@ -73,9 +70,23 @@ export function DiscordActivity() {
   const [streamingConfig, setStreamingConfig] = useState<PlaybackConfigPublic | null>(null);
   const [skipTimings, setSkipTimings] = useState<AniSkipTimingsPublic | null>(null);
   const [playbackLoading, setPlaybackLoading] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+
   const playerHandle = useRef<PlayerHandle>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [needsGesture, setNeedsGesture] = useState(false);
+
+  // Floating live reactions
+  const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; emoji: string; x: number }>>([]);
+
+  // Room control permission: in Discord voice rooms, default to collaborative
+  const canControlPlayback = useMemo(() => {
+    if (!room.active) return true;
+    if (room.isHost) return true;
+    if (room.room?.mode === 'everyone') return true;
+    return room.canControl;
+  }, [room.active, room.isHost, room.room?.mode, room.canControl]);
 
   // ── Room ↔ Player sync (keeps player in step with room state) ─────────────
   useRoomSync({
@@ -87,18 +98,15 @@ export function DiscordActivity() {
   });
 
   // Reset player ready state when media changes
-  useEffect(() => { setPlayerReady(false); }, [activeMediaId]);
-
-  // Chat message state
-  const [chatInput, setChatInput] = useState('');
-  const chatScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { 
+    setPlayerReady(false);
+    setNeedsGesture(false);
+  }, [activeMediaId]);
 
   // ── Auto switch to watch tab when media is selected in room ───────────────
   useEffect(() => {
     if (activeMediaId) {
       setActiveTab('watch');
-    } else {
-      setActiveTab('browse');
     }
   }, [activeMediaId]);
 
@@ -109,13 +117,14 @@ export function DiscordActivity() {
       const details = mediaDetail.kind === 'series' 
         ? `${title} - S${mediaDetail.season}E${mediaDetail.episode}`
         : title;
-      const state = room.room?.members.length 
-        ? `${t('with')} ${room.room.members.length} ${room.room.members.length === 1 ? t('friend') : t('friends')}`
-        : t('watchingAlone');
+      const count = room.room?.members.length || 1;
+      const state = lang === 'ar'
+        ? (count > 1 ? `مع ${count} أصدقاء في الغرفة الصوتية` : 'مشاهدة فردية')
+        : (count > 1 ? `With ${count} friends in voice` : 'Watching alone');
       
       void discord.updateActivity(details, state);
     }
-  }, [discord.isReady, mediaDetail, room.room?.members.length]);
+  }, [discord.isReady, mediaDetail, room.room?.members.length, lang]);
 
   // ── Load Catalog from Discovery ───────────────────────────────────────────
   useEffect(() => {
@@ -210,11 +219,13 @@ export function DiscordActivity() {
       setMediaDetail(null);
       setStreamingConfig(null);
       setSkipTimings(null);
+      setPlaybackError(null);
       return;
     }
 
     let cancel = false;
     setPlaybackLoading(true);
+    setPlaybackError(null);
 
     const movieMatch = activeMediaId.match(/^streaming-movie-(\d+)$/);
     const tvMatch = activeMediaId.match(/^streaming-tv-(\d+)-(\d+)-(\d+)$/);
@@ -284,24 +295,34 @@ export function DiscordActivity() {
           setMediaDetail(mockDetail);
           setPlaybackLoading(false);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('[DiscordActivity] Error fetching playback:', err);
         if (!cancel) {
           setPlaybackLoading(false);
           room.setBuffering('load', false);
-          room.toast(lang === 'ar' ? 'فشل تحميل روابط البث المباشر' : 'Failed to load streaming playback');
+          setPlaybackError(err?.message || (lang === 'ar' ? 'فشل تحميل روابط البث المباشر' : 'Failed to load streaming playback'));
         }
       }
     };
 
     void loadPlayback();
     return () => { cancel = true; };
-  }, [activeMediaId, lang]);
+  }, [activeMediaId, lang, loadAttempt]);
 
-  // ── Auto scroll chat ──────────────────────────────────────────────────────
+  // ── Sync real-time floating reactions from room members ───────────────────
   useEffect(() => {
-    chatScrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [room.chat]);
+    if (!room.reactions.length) return;
+    const latest = room.reactions[room.reactions.length - 1];
+    const id = `${latest.id}-${Date.now()}`;
+    const x = Math.floor(Math.random() * 60) + 20; // 20% to 80% horizontal range
+    setFloatingReactions((prev) => [...prev.slice(-12), { id, emoji: latest.emoji, x }]);
+
+    const timer = setTimeout(() => {
+      setFloatingReactions((prev) => prev.filter((r) => r.id !== id));
+    }, 2400);
+
+    return () => clearTimeout(timer);
+  }, [room.reactions]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleSelectMedia = async (item: GlobalTitleCard) => {
@@ -316,11 +337,12 @@ export function DiscordActivity() {
 
   const playMediaInVoice = async (mediaId: string) => {
     if (room.active) {
-      if (!room.canControl && !room.isHost) {
+      if (!canControlPlayback) {
         room.toast(t('onlyHost'));
         return;
       }
       setPlaybackLoading(true);
+      setPlaybackError(null);
       setMediaDetail(null);
       setStreamingConfig(null);
       setSkipTimings(null);
@@ -333,13 +355,11 @@ export function DiscordActivity() {
         return;
       }
     } else {
-      // No active room → join the Discord-channel-based room first, then select media.
       const channelRoom = discord.channelId ? `dc-${discord.channelId}` : `dc-voice`;
       const currentHash = window.location.hash.replace(/[?&]room=[^&]*/g, '');
       const sep = currentHash.includes('?') ? '&' : '?';
       window.location.hash = `${currentHash}${sep}room=${encodeURIComponent(channelRoom)}`;
 
-      // Wait for the room connection to establish, then select media.
       const waitAndSelect = () => {
         const check = setInterval(() => {
           if (room.active) {
@@ -347,7 +367,6 @@ export function DiscordActivity() {
             void room.send({ type: 'select', mediaId, position: 0 });
           }
         }, 200);
-        // Safety timeout: stop checking after 10 seconds
         setTimeout(() => clearInterval(check), 10_000);
       };
       waitAndSelect();
@@ -361,14 +380,6 @@ export function DiscordActivity() {
     void navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
-  };
-
-  const handleSendChat = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const txt = chatInput.trim();
-    if (!txt) return;
-    void room.sendChat(txt);
-    setChatInput('');
   };
 
   const filteredTitles = useMemo(() => {
@@ -394,7 +405,7 @@ export function DiscordActivity() {
           </div>
           <Spinner className="size-8 text-gilt animate-spin" />
           <p className="text-sm font-medium text-dust animate-pulse">
-            {lang === 'ar' ? 'جاري الاتصال بـ Discord...' : 'Connecting to Discord...'}
+            {lang === 'ar' ? 'جاري الاتصال بـ Discord والتهيئة...' : 'Connecting to Discord and initializing...'}
           </p>
         </div>
       </div>
@@ -417,14 +428,14 @@ export function DiscordActivity() {
           </h2>
           <p className="text-sm text-dust leading-relaxed">
             {lang === 'ar' 
-              ? 'تأكد من أنك تشغل التطبيق من داخل Discord Activity. يمكنك أيضاً استخدام الموقع الرئيسي للمشاهدة المتزامنة.'
-              : 'Make sure you\'re running this from within a Discord Activity. You can also use the main site for watch parties.'}
+              ? 'تأكد من تشغيل هذا التطبيق من داخل Discord Activity في قناة صوتية. يمكنك أيضاً استخدام الموقع مباشرة للمشاهدة مع أصدقائك.'
+              : 'Make sure you are launching this inside a Discord Voice Channel Activity. You can also use the main site for watch parties.'}
           </p>
           <button
             onClick={() => window.location.hash = '#/'}
             className="mt-2 flex items-center gap-2 rounded-xl bg-gradient-to-r from-blood to-blood-hot px-5 py-2.5 font-display text-sm font-bold text-white shadow-[0_0_20px_rgba(186,24,27,0.4)] transition-all hover:scale-105 active:scale-95"
           >
-            {lang === 'ar' ? 'العودة إلى الصفحة الرئيسية' : 'Go to Main Site'}
+            {lang === 'ar' ? 'الذهاب إلى الموقع الرئيسي' : 'Go to Main Website'}
           </button>
         </div>
       </div>
@@ -441,23 +452,27 @@ export function DiscordActivity() {
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <div className="group flex items-center gap-2" aria-label="NexusNight">
             <Sigil className="size-6 sm:size-7 text-blood-hot transition-transform duration-500 group-hover:rotate-180 shrink-0" />
-            <span lang="en" dir="ltr" className="font-display text-[1.25rem] sm:text-[1.4rem] font-extrabold tracking-[0.02em] text-bone">
+            <span lang="en" dir="ltr" className="font-display text-[1.2rem] sm:text-[1.35rem] font-extrabold tracking-[0.02em] text-bone">
               <span className="text-blood-hot">NEXUS</span>
               <span className="text-gilt">NIGHT</span>
             </span>
           </div>
 
           <span className="hidden sm:inline-block rounded-full border border-gilt/30 bg-gilt/10 px-2.5 py-0.5 text-[0.65rem] font-bold tracking-wider text-gilt uppercase">
-            Discord Activity
+            {lang === 'ar' ? 'جلسة مشاهدة ديسكورد' : 'Discord Activity'}
           </span>
 
           <div className="hidden md:flex items-center gap-1.5 text-xs text-dust">
             <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="truncate">{room.roomId ? `Voice: ${room.roomId}` : t('voiceConnected')}</span>
+            <span className="truncate">
+              {room.roomId 
+                ? (lang === 'ar' ? `متصل بالغرفة: ${room.roomId}` : `Voice: ${room.roomId}`) 
+                : (lang === 'ar' ? 'متصل بالصوت' : 'Voice Connected')}
+            </span>
           </div>
         </div>
 
-        {/* Navigation Tabs (Compact, NexusNight Themed - Crimson Active Ground) */}
+        {/* Navigation Tabs (Watch Party / Browse / Voice Members) */}
         <nav className="flex items-center gap-1 rounded-xl bg-crypt/90 p-1 border border-white/10 shadow-inner">
           <button
             onClick={() => setActiveTab('watch')}
@@ -466,10 +481,10 @@ export function DiscordActivity() {
                 ? 'bg-blood text-white shadow-[0_0_14px_rgba(179,32,47,0.45)]'
                 : 'text-dust hover:bg-white/5 hover:text-bone'
             }`}
-            title={t('discordNowPlaying')}
+            title={lang === 'ar' ? 'غرفة المشاهدة الحالية' : 'Watch Party'}
           >
             <Play className="size-3.5 fill-current shrink-0" />
-            <span className="hidden sm:inline">{t('discordNowPlaying')}</span>
+            <span className="hidden sm:inline">{lang === 'ar' ? 'المشاهدة' : 'Watch Party'}</span>
             {activeMediaId && <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />}
           </button>
 
@@ -480,10 +495,10 @@ export function DiscordActivity() {
                 ? 'bg-blood text-white shadow-[0_0_14px_rgba(179,32,47,0.45)]'
                 : 'text-dust hover:bg-white/5 hover:text-bone'
             }`}
-            title={t('discordBrowseMedia')}
+            title={lang === 'ar' ? 'تصفح الأفلام والمسلسلات' : 'Browse Catalog'}
           >
             <Film className="size-3.5 shrink-0" />
-            <span className="hidden sm:inline">{t('discordBrowseMedia')}</span>
+            <span className="hidden sm:inline">{lang === 'ar' ? 'تصفح المحتوى' : 'Browse'}</span>
           </button>
 
           <button
@@ -493,45 +508,34 @@ export function DiscordActivity() {
                 ? 'bg-blood text-white shadow-[0_0_14px_rgba(179,32,47,0.45)]'
                 : 'text-dust hover:bg-white/5 hover:text-bone'
             }`}
-            title={t('discordRoomMembers')}
+            title={lang === 'ar' ? 'أعضاء القناة الصوتية' : 'Voice Members'}
           >
             <Users className="size-3.5 shrink-0" />
-            <span className="text-[11px] font-bold">{room.room?.members.length || 1}</span>
+            <span className="hidden sm:inline">{lang === 'ar' ? 'الأعضاء' : 'Members'}</span>
+            <span className="text-[11px] font-bold bg-white/10 px-1.5 py-0.2 rounded-md">
+              {room.room?.members.length || 1}
+            </span>
           </button>
         </nav>
 
-        {/* Right Tools: Chat Toggle, Share Link, Language, Avatar */}
+        {/* Right Tools: Share Link, Language Switcher, User Avatar */}
         <div className="flex items-center gap-2">
-          {activeTab === 'watch' && (
-            <button
-              onClick={() => setChatOpen(!chatOpen)}
-              className={`flex size-8 items-center justify-center rounded-xl border transition-colors md:hidden ${
-                chatOpen 
-                  ? 'border-gilt/40 bg-gilt/15 text-gilt' 
-                  : 'border-white/10 bg-white/5 text-dust hover:text-bone'
-              }`}
-              title={t('chat')}
-            >
-              <ChatBubble className="size-4" />
-            </button>
-          )}
-
           <button
             onClick={handleCopyLink}
-            className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-bone transition-colors hover:border-gilt/40 hover:bg-gilt/10"
-            title={t('inviteVoiceFriends')}
+            className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-bone transition-colors hover:border-gilt/40 hover:bg-gilt/10"
+            title={lang === 'ar' ? 'نسخ رابط الغرفة لدعوة الأصدقاء' : 'Copy Room Link'}
           >
             {copied ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5 text-gilt" />}
-            <span className="hidden sm:inline">{copied ? (lang === 'ar' ? 'تم النسخ!' : 'Copied!') : t('inviteVoiceFriends')}</span>
+            <span className="hidden sm:inline">{copied ? (lang === 'ar' ? 'تم النسخ!' : 'Copied!') : (lang === 'ar' ? 'نسخ الرابط' : 'Invite')}</span>
           </button>
 
           <button
             onClick={toggle}
-            className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-dust transition-colors hover:border-gilt/40 hover:text-bone"
-            title={t('language')}
+            className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-dust transition-colors hover:border-gilt/40 hover:text-bone"
+            title={lang === 'ar' ? 'Switch to English' : 'التحويل للعربية'}
           >
             <Globe className="size-3.5 text-gilt" />
-            <span className="hidden sm:inline">{lang === 'ar' ? 'English' : 'العربية'}</span>
+            <span className="font-semibold">{lang === 'ar' ? 'English' : 'العربية'}</span>
           </button>
 
           {auth.user ? (
@@ -544,215 +548,201 @@ export function DiscordActivity() {
         </div>
       </header>
 
-      {/* ── Main View Content ── */}
+      {/* ── Main View Content (Full Width & Height, 100% Immersive) ── */}
       <div className="flex flex-1 overflow-hidden relative">
-        {/* ── TAB 1: WATCH PARTY PLAYER ── */}
+        {/* ── TAB 1: WATCH PARTY PLAYER (100% FULL SCREEN WIDTH) ── */}
         {activeTab === 'watch' && (
-          <div className="flex flex-1 flex-col md:flex-row overflow-hidden relative">
-            {/* Main Player Area */}
-            <div className="flex flex-1 flex-col overflow-y-auto bg-black">
-              {playbackLoading ? (
-                <div className="flex flex-1 min-h-[300px] flex-col items-center justify-center gap-3 p-6">
-                  <Spinner className="size-10 text-gilt animate-spin" />
-                  <p className="text-xs sm:text-sm font-medium text-dust animate-pulse">
-                    {t('nativeStreamLoading')}
+          <div className="flex flex-1 flex-col overflow-hidden relative bg-black">
+            {/* Playback Loading Skeleton */}
+            {playbackLoading ? (
+              <div className="flex flex-1 min-h-[300px] flex-col items-center justify-center gap-4 p-6 text-center">
+                <Spinner className="size-12 text-gilt animate-spin" />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-bone animate-pulse">
+                    {lang === 'ar' ? 'جاري تجهيز سيرفر البث والترجمات...' : 'Preparing stream sources & subtitles...'}
+                  </p>
+                  <p className="text-xs text-dust">
+                    {lang === 'ar' ? 'يتم الاتصال بأسرع سيرفر متوفر بدون إعلانات' : 'Connecting to the fastest available ad-free provider'}
                   </p>
                 </div>
-              ) : mediaDetail && streamingConfig ? (
-                <div className="relative flex-1 min-h-[220px] sm:min-h-[360px] bg-black flex flex-col justify-center">
-                  <Player
-                    key={activeMediaId || mediaDetail.id}
-                    ref={playerHandle}
-                    media={mediaDetail}
-                    streamingConfig={streamingConfig}
-                    skipTimings={skipTimings}
-                    title={mediaDetail.titleName || mediaDetail.title}
-                    autoPlay
-                    controlled={room.active}
-                    canControl={room.canControl}
-                    intentPlaying={!!room.state?.playing}
-                    holdLabel={room.active && room.state?.hold && room.waitingFor.length
-                      ? (() => {
-                          const myName = room.me?.name || auth.user?.username;
-                          const others = room.waitingFor.filter((n) => n !== myName);
-                          return others.length > 0 ? t('waitingFor', { names: others.join(', ') }) : null;
-                        })()
-                      : null}
-                    onDisabledControlClick={() => room.toast(t('onlyHost'))}
-                    onBuffering={(k, v) => room.setBuffering(k, v)}
-                    onReady={() => { setPlayerReady(true); room.setBuffering('load', false); }}
-                    onUserPlay={(t) => room.canControl && void room.send({ type: 'play', position: t })}
-                    onUserPause={(t) => room.canControl && void room.send({ type: 'pause', position: t })}
-                    onUserSeek={(t) => room.canControl && void room.send({ type: 'seek', position: t })}
-                    onSubtitleChange={(subId) => room.canControl && void room.send({ type: 'subtitle', subtitleId: subId })}
-                    onAudioChange={(trackIdx) => room.canControl && void room.send({ type: 'audio', audioTrack: trackIdx })}
-                    onSpeedChange={(rate) => room.canControl && void room.send({ type: 'speed', playbackRate: rate })}
-                    hasNext={false}
-                    onBack={() => {
-                      if (room.isHost || room.canControl) {
-                        void room.send({ type: 'clear' });
-                      }
-                      setActiveTab('browse');
-                    }}
-                    onNext={() => {}}
-                  />
-                  {/* Autoplay blocked gesture overlay */}
-                  {needsGesture && (
-                    <button
-                      onClick={() => {
-                        playerHandle.current?.play().then(() => setNeedsGesture(false)).catch(() => {});
-                      }}
-                      className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-                    >
-                      <div className="flex flex-col items-center gap-3">
-                        <div className="size-16 rounded-full bg-gradient-to-r from-blood to-blood-hot flex items-center justify-center shadow-[0_0_30px_rgba(186,24,27,0.5)]">
-                          <Play className="size-7 fill-white text-white ms-1" />
-                        </div>
-                        <span className="text-sm font-bold text-bone">
-                          {lang === 'ar' ? 'اضغط للتشغيل' : 'Tap to Play'}
-                        </span>
-                      </div>
-                    </button>
-                  )}
+              </div>
+            ) : playbackError ? (
+              /* Playback Error Screen */
+              <div className="flex flex-1 min-h-[300px] flex-col items-center justify-center gap-4 p-6 text-center">
+                <div className="size-16 rounded-2xl bg-blood/20 border border-blood/40 flex items-center justify-center text-blood-hot">
+                  <X className="size-8" />
                 </div>
-              ) : (
-                <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
-                  <div className="size-16 rounded-2xl bg-crypt/80 flex items-center justify-center text-gilt mb-3 shadow-inner border border-gilt/20">
-                    <Film className="size-8" />
-                  </div>
-                  <h2 className="font-display text-lg font-bold text-bone mb-1">{t('noVoiceRoomSelected')}</h2>
-                  <p className="text-xs text-dust max-w-sm mb-5 leading-relaxed">{t('discordActivityHint')}</p>
+                <div className="max-w-md space-y-1">
+                  <h3 className="text-base font-bold text-bone">
+                    {lang === 'ar' ? 'تعذر تشغيل هذا المصدر' : 'Failed to Load Playback'}
+                  </h3>
+                  <p className="text-xs text-dust leading-relaxed">
+                    {playbackError}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 mt-2">
                   <button
-                    onClick={() => setActiveTab('browse')}
-                    className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-blood to-blood-hot px-5 py-2.5 font-display text-xs font-bold text-white shadow-[0_0_20px_rgba(186,24,27,0.4)] transition-all hover:scale-105 active:scale-95"
+                    onClick={() => setLoadAttempt((prev) => prev + 1)}
+                    className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-blood to-blood-hot px-5 py-2 font-display text-xs font-bold text-white shadow-[0_0_15px_rgba(186,24,27,0.4)] transition hover:scale-105 active:scale-95"
                   >
                     <Play className="size-3.5 fill-current" />
-                    <span>{t('discordBrowseMedia')}</span>
+                    <span>{lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('browse')}
+                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-bone hover:bg-white/10"
+                  >
+                    {lang === 'ar' ? 'اختيار عمل آخر' : 'Choose Another Title'}
                   </button>
                 </div>
-              )}
+              </div>
+            ) : mediaDetail ? (
+              /* Video Player Container */
+              <div className="relative flex-1 min-h-0 bg-black flex flex-col justify-center overflow-hidden">
+                <Player
+                  key={activeMediaId || mediaDetail.id}
+                  ref={playerHandle}
+                  media={mediaDetail}
+                  streamingConfig={streamingConfig}
+                  skipTimings={skipTimings}
+                  title={mediaDetail.titleName || mediaDetail.title}
+                  autoPlay
+                  embedded={true}
+                  controlled={room.active}
+                  canControl={canControlPlayback}
+                  intentPlaying={!!room.state?.playing}
+                  holdLabel={room.active && room.state?.hold && room.waitingFor.length
+                    ? (() => {
+                        const myName = room.me?.name || auth.user?.username;
+                        const others = room.waitingFor.filter((n) => n !== myName);
+                        return others.length > 0 
+                          ? (lang === 'ar' ? `في انتظار: ${others.join('، ')}...` : `Waiting for ${others.join(', ')}...`)
+                          : null;
+                      })()
+                    : null}
+                  onDisabledControlClick={() => room.toast(t('onlyHost'))}
+                  onBuffering={(k, v) => room.setBuffering(k, v)}
+                  onReady={() => { setPlayerReady(true); room.setBuffering('load', false); }}
+                  onUserPlay={(time) => canControlPlayback && void room.send({ type: 'play', position: time })}
+                  onUserPause={(time) => canControlPlayback && void room.send({ type: 'pause', position: time })}
+                  onUserSeek={(time) => canControlPlayback && void room.send({ type: 'seek', position: time })}
+                  onSubtitleChange={(subId) => canControlPlayback && void room.send({ type: 'subtitle', subtitleId: subId })}
+                  onAudioChange={(trackIdx) => canControlPlayback && void room.send({ type: 'audio', audioTrack: trackIdx })}
+                  onSpeedChange={(rate) => canControlPlayback && void room.send({ type: 'speed', playbackRate: rate })}
+                  hasNext={false}
+                  onBack={() => {
+                    if (room.isHost || canControlPlayback) {
+                      void room.send({ type: 'clear' });
+                    }
+                    setActiveTab('browse');
+                  }}
+                  onNext={() => {}}
+                />
 
-              {/* Media Title & Reaction Bar */}
-              {mediaDetail && (
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-crypt/90 px-4 py-3">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate font-display text-xs sm:text-sm font-bold text-bone">{mediaDetail.titleName || mediaDetail.title}</h3>
-                    <p className="text-[11px] text-emerald-400 flex items-center gap-1 font-medium mt-0.5">
-                      <Zap className="size-3 text-gilt fill-gilt" />
-                      <span>{t('nativeStreamActive')} (1080p Ad-Free)</span>
-                    </p>
-                  </div>
+                {/* Autoplay blocked / User gesture overlay */}
+                {needsGesture && (
+                  <button
+                    onClick={() => {
+                      playerHandle.current?.play().then(() => setNeedsGesture(false)).catch(() => {});
+                    }}
+                    className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 backdrop-blur-sm transition-all"
+                  >
+                    <div className="flex flex-col items-center gap-3 p-6 rounded-2xl bg-crypt/90 border border-blood/50 shadow-[0_0_40px_rgba(186,24,27,0.35)] animate-scale">
+                      <div className="size-16 sm:size-20 rounded-full bg-gradient-to-r from-blood to-blood-hot flex items-center justify-center shadow-[0_0_30px_rgba(186,24,27,0.6)]">
+                        <Play className="size-8 sm:size-10 fill-white text-white ms-1" />
+                      </div>
+                      <div className="text-center">
+                        <span className="text-sm sm:text-base font-bold text-bone block">
+                          {lang === 'ar' ? 'اضغط للمشاهدة مع الصوت' : 'Click to Play with Audio'}
+                        </span>
+                        <span className="text-xs text-dust block mt-0.5">
+                          {lang === 'ar' ? 'انقر لتفعيل الصوت ومزامنة البث المباشر' : 'Tap to start synchronized audio & video'}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                )}
 
-                  {/* Stop playback button for host/controller */}
-                  {(room.isHost || room.canControl) && (
-                    <button
-                      onClick={() => {
-                        void room.send({ type: 'clear' });
-                        setActiveTab('browse');
-                      }}
-                      className="flex items-center gap-1.5 rounded-xl border border-blood/40 bg-blood/10 px-3 py-1.5 text-xs font-semibold text-blood-hot hover:bg-blood/20 transition active:scale-95"
-                      title={lang === 'ar' ? 'إنهاء العرض الحالي وخروج الجميع إلى القائمة' : 'Stop current playback and return everyone to browse'}
+                {/* Floating Real-Time Reaction Overlay */}
+                <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+                  {floatingReactions.map((r) => (
+                    <div
+                      key={r.id}
+                      style={{ left: `${r.x}%` }}
+                      className="absolute bottom-16 text-3xl sm:text-4xl animate-float-up opacity-90 filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]"
                     >
-                      <X className="size-3.5" />
-                      <span>{lang === 'ar' ? 'إنهاء العرض للجميع' : 'Stop Playback'}</span>
-                    </button>
-                  )}
-
-                  {/* Reaction Quick Bar */}
-                  <div className="flex items-center gap-1 bg-ink/80 p-1 rounded-xl border border-white/10 shadow-inner">
-                    {EMOJIS.slice(0, 6).map((emoji) => (
-                      <button
-                        key={emoji}
-                        onClick={() => room.react(emoji)}
-                        className="size-7 sm:size-8 rounded-lg text-sm sm:text-base transition-transform hover:scale-125 hover:bg-white/10 active:scale-90 flex items-center justify-center"
-                        title={emoji}
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
+                      {r.emoji}
+                    </div>
+                  ))}
                 </div>
-              )}
-            </div>
-
-            {/* Live Chat Panel (Collapsible Drawer on Mobile, Sidebar on Desktop) */}
-            <aside
-              className={`
-                border-white/10 bg-crypt/95 flex flex-col transition-all duration-300
-                md:w-72 lg:w-80 md:border-s md:relative md:flex
-                ${chatOpen ? 'h-64 md:h-full border-t md:border-t-0' : 'hidden md:flex'}
-              `}
-            >
-              <div className="flex h-11 shrink-0 items-center justify-between border-b border-white/10 px-3.5 font-semibold text-xs text-bone">
-                <div className="flex items-center gap-1.5">
-                  <ChatBubble className="size-3.5 text-gilt" />
-                  <span>{t('liveChat')}</span>
+              </div>
+            ) : (
+              /* Empty State (When no media is playing) */
+              <div className="flex flex-1 flex-col items-center justify-center p-6 text-center max-w-lg mx-auto">
+                <div className="size-20 rounded-3xl bg-crypt/80 flex items-center justify-center text-gilt mb-4 shadow-2xl border border-gilt/20">
+                  <Film className="size-10" />
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-dust">{room.chat.length} msgs</span>
-                  <button 
-                    onClick={() => setChatOpen(false)}
-                    className="md:hidden size-6 flex items-center justify-center rounded text-dust hover:text-bone"
+                <h2 className="font-display text-lg sm:text-xl font-bold text-bone mb-2">
+                  {lang === 'ar' ? 'جاهزون للمشاهدة مع الأصدقاء؟' : 'Ready to watch together?'}
+                </h2>
+                <p className="text-xs sm:text-sm text-dust mb-6 leading-relaxed">
+                  {lang === 'ar'
+                    ? 'اختر فيلماً أو مسلسلاً من القائمة لبدء البث المباشر فوراً لجميع المتواجدين في القناة الصوتية!'
+                    : 'Pick a movie or TV show from the catalog to stream instantly for everyone in this Discord voice channel!'}
+                </p>
+                <button
+                  onClick={() => setActiveTab('browse')}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-blood to-blood-hot px-6 py-3 font-display text-sm font-bold text-white shadow-[0_0_24px_rgba(186,24,27,0.45)] transition-all hover:scale-105 active:scale-95"
+                >
+                  <Play className="size-4 fill-current" />
+                  <span>{lang === 'ar' ? '🍿 تصفح الأفلام والمسلسلات' : '🍿 Browse Movies & Shows'}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Media Information & Live Reaction Bar */}
+            {mediaDetail && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-crypt/90 px-4 py-3 select-none">
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate font-display text-xs sm:text-sm font-bold text-bone">
+                    {mediaDetail.titleName || mediaDetail.title}
+                  </h3>
+                  <p className="text-[11px] text-emerald-400 flex items-center gap-1.5 font-medium mt-0.5">
+                    <Zap className="size-3 text-gilt fill-gilt" />
+                    <span>{lang === 'ar' ? 'بث فائق الجودة 1080p خالي من الإعلانات' : '1080p Ad-Free Native Stream'}</span>
+                  </p>
+                </div>
+
+                {/* Stop playback button for host/controller */}
+                {canControlPlayback && (
+                  <button
+                    onClick={() => {
+                      void room.send({ type: 'clear' });
+                      setActiveTab('browse');
+                    }}
+                    className="flex items-center gap-1.5 rounded-xl border border-blood/40 bg-blood/10 px-3 py-1.5 text-xs font-semibold text-blood-hot hover:bg-blood/20 transition active:scale-95"
+                    title={lang === 'ar' ? 'إنهاء العرض الحالي وخروج الجميع إلى القائمة' : 'Stop current playback and return everyone to browse'}
                   >
                     <X className="size-3.5" />
+                    <span>{lang === 'ar' ? 'إنهاء العرض للجميع' : 'Stop Playback'}</span>
                   </button>
-                </div>
-              </div>
-
-              {/* Chat Message Feed */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-                {room.chat.length === 0 ? (
-                  <div className="flex h-full flex-col items-center justify-center text-center p-3 text-dust">
-                    <MessageCircle className="size-6 text-dust/40 mb-1.5" />
-                    <p className="text-[11px] font-semibold text-bone">{t('popcornReady')}</p>
-                    <p className="text-[10px] text-dust/70 mt-0.5">{lang === 'ar' ? 'أرسل رسالة أو تفاعل مع أصدقائك في المشاهدة!' : 'Send a reaction or message to your friends watching with you!'}</p>
-                  </div>
-                ) : (
-                  room.chat.map((msg) => {
-                    const isMe = msg.userId === room.me?.id;
-                    return (
-                      <div key={msg.id} className={`flex items-start gap-2 ${isMe ? 'flex-row-reverse text-right' : ''}`}>
-                        <Avatar user={{ id: msg.userId, name: msg.name, avatar: msg.avatar }} size={24} />
-                        <div className="min-w-0 max-w-[80%]">
-                          <div className={`flex items-baseline gap-1.5 mb-0.5 ${isMe ? 'justify-end' : ''}`}>
-                            <span className="text-[11px] font-bold text-gilt truncate">{msg.name}</span>
-                            <span className="text-[9px] text-dust/60">
-                              {new Date(msg.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                          <div className={`rounded-xl px-2.5 py-1 text-xs break-words leading-relaxed ${
-                            isMe ? 'bg-gilt text-ink font-medium shadow-sm' : 'bg-white/10 text-bone'
-                          }`}>
-                            {msg.text}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
                 )}
-                <div ref={chatScrollRef} />
-              </div>
 
-              {/* Chat Input */}
-              <form onSubmit={handleSendChat} className="p-2 border-t border-white/10 bg-ink/90">
-                <div className="relative flex items-center">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder={t('saySomethingInLobby')}
-                    className="w-full rounded-xl border border-white/10 bg-ink py-2 ps-3 pe-8 text-xs text-bone placeholder:text-dust/60 focus:border-gilt/50 focus:outline-none"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!chatInput.trim()}
-                    className="absolute end-1.5 flex size-6 items-center justify-center rounded-lg text-gilt hover:bg-gilt/15 disabled:opacity-30 transition"
-                  >
-                    <Send className="size-3" />
-                  </button>
+                {/* Real-time Emoji Reaction Quick Bar */}
+                <div className="flex items-center gap-1 bg-ink/80 p-1 rounded-xl border border-white/10 shadow-inner">
+                  {EMOJIS.slice(0, 6).map((emoji) => (
+                    <button
+                      key={emoji}
+                      onClick={() => room.react(emoji)}
+                      className="size-7 sm:size-8 rounded-lg text-sm sm:text-base transition-transform hover:scale-125 hover:bg-white/10 active:scale-90 flex items-center justify-center"
+                      title={emoji}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
                 </div>
-              </form>
-            </aside>
+              </div>
+            )}
           </div>
         )}
 
@@ -767,7 +757,7 @@ export function DiscordActivity() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={t('searchShowsOrMovies')}
+                  placeholder={lang === 'ar' ? 'ابحث عن أفلام، مسلسلات، أنمي...' : 'Search movies, TV shows, anime...'}
                   className="w-full rounded-xl bg-crypt/90 py-2.5 ps-10 pe-4 text-xs font-medium text-bone placeholder:text-dust/60 border border-white/10 focus:border-gilt/50 focus:outline-none transition-colors shadow-sm"
                 />
                 {isSearching && (
@@ -775,32 +765,32 @@ export function DiscordActivity() {
                 )}
               </div>
 
-              {/* Filter Chips (Unified Crimson Ground) */}
+              {/* Filter Chips */}
               <div className="flex items-center gap-1 rounded-xl bg-crypt/90 p-1 border border-white/10 self-stretch sm:self-auto justify-center">
                 {(['all', 'movie', 'series'] as const).map((k) => (
                   <button
                     key={k}
                     onClick={() => setFilterKind(k)}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all duration-200 ${
+                    className={`rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all duration-200 ${
                       filterKind === k
                         ? 'bg-blood text-white shadow-[0_0_12px_rgba(179,32,47,0.4)]'
                         : 'text-dust hover:bg-white/5 hover:text-bone'
                     }`}
                   >
-                    {k === 'all' ? (lang === 'ar' ? 'الكل' : 'All') : k === 'movie' ? t('movie') : t('series')}
+                    {k === 'all' ? (lang === 'ar' ? 'الكل' : 'All') : k === 'movie' ? (lang === 'ar' ? 'أفلام' : 'Movies') : (lang === 'ar' ? 'مسلسلات' : 'TV Shows')}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Catalog Grid with TV-grade Card Lift & Ambient Specular Rim */}
+            {/* Catalog Grid */}
             {catalogLoading ? (
               <div className="flex flex-1 items-center justify-center p-12">
                 <Spinner className="size-8 text-gilt animate-spin" />
               </div>
             ) : filteredTitles.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center p-10 text-center text-dust">
-                <Film className="size-9 mb-2 opacity-40 text-gilt" />
+                <Film className="size-10 mb-2 opacity-40 text-gilt" />
                 <p className="text-xs sm:text-sm font-semibold text-bone">{t('notFound')}</p>
                 <p className="text-[11px] text-dust/70">{t('notFoundHint')}</p>
               </div>
@@ -828,7 +818,7 @@ export function DiscordActivity() {
 
                       {/* Kind Badge */}
                       <span className="absolute top-1.5 start-1.5 rounded-md bg-ink/80 border border-white/10 px-1.5 py-0.5 text-[9px] font-bold text-bone uppercase backdrop-blur-md">
-                        {title.kind === 'series' ? 'TV' : 'MOVIE'}
+                        {title.kind === 'series' ? (lang === 'ar' ? 'مسلسل' : 'TV') : (lang === 'ar' ? 'فيلم' : 'MOVIE')}
                       </span>
 
                       {/* Rating */}
@@ -849,10 +839,10 @@ export function DiscordActivity() {
                     {/* Stream in Voice Button */}
                     <button
                       onClick={() => handleSelectMedia(title)}
-                      className="mt-auto flex w-full items-center justify-center gap-1 rounded-xl bg-gradient-to-r from-blood to-blood-hot py-2 text-xs font-bold text-white shadow-[0_0_15px_rgba(186,24,27,0.35)] transition-all hover:scale-[1.02] active:scale-95"
+                      className="mt-auto flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-blood to-blood-hot py-2 text-xs font-bold text-white shadow-[0_0_15px_rgba(186,24,27,0.35)] transition-all hover:scale-[1.02] active:scale-95"
                     >
                       <Play className="size-3 fill-current" />
-                      <span>{title.kind === 'series' ? (lang === 'ar' ? 'اختر حلقة' : 'Pick Episode') : t('streamInVoice')}</span>
+                      <span>{title.kind === 'series' ? (lang === 'ar' ? 'اختر حلقة' : 'Pick Episode') : (lang === 'ar' ? 'تشغيل في الصوت' : 'Stream in Voice')}</span>
                     </button>
                   </div>
                 ))}
@@ -864,9 +854,27 @@ export function DiscordActivity() {
         {/* ── TAB 3: VOICE ROOM MEMBERS ── */}
         {activeTab === 'members' && (
           <div className="flex flex-1 flex-col p-4 sm:p-6 max-w-xl mx-auto w-full overflow-y-auto">
-            <h2 className="font-display text-base sm:text-lg font-bold text-bone mb-1">{t('discordRoomMembers')}</h2>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="font-display text-base sm:text-lg font-bold text-bone">
+                {lang === 'ar' ? 'أعضاء المشاهدة في القناة الصوتية' : 'Voice Watch Party Members'}
+              </h2>
+              {room.isHost && (
+                <button
+                  onClick={() => room.setMode(room.room?.mode === 'everyone' ? 'host' : 'everyone')}
+                  className="rounded-xl border border-gilt/30 bg-gilt/10 px-3 py-1 text-xs font-bold text-gilt hover:bg-gilt/20 transition"
+                  title={lang === 'ar' ? 'تغيير وضع التحكم في المشغل' : 'Change playback control permissions'}
+                >
+                  {room.room?.mode === 'everyone'
+                    ? (lang === 'ar' ? 'وضع التحكم: الجميع' : 'Control: Everyone')
+                    : (lang === 'ar' ? 'وضع التحكم: المضيف فقط' : 'Control: Host Only')}
+                </button>
+              )}
+            </div>
+
             <p className="text-xs text-dust mb-4 leading-relaxed">
-              {lang === 'ar' ? 'الأصدقاء المتواجدون حالياً في هذه الغرفة للمشاهدة المتزامنة معًا.' : 'Friends currently connected to this Voice Watch Party room.'}
+              {lang === 'ar' 
+                ? 'جميع الأصدقاء المتواجدون معك الآن في القناة الصوتية يتم مزامنة البث معهم تلقائياً بدقة 100%.' 
+                : 'All friends currently with you in this Discord voice channel are automatically synchronized.'}
             </p>
 
             <div className="rounded-2xl bg-crypt/90 border border-white/10 divide-y divide-white/10 overflow-hidden shadow-xl backdrop-blur-md">
@@ -874,24 +882,26 @@ export function DiscordActivity() {
                 room.room.members.map((member) => (
                   <div key={member.id} className="flex items-center justify-between p-3.5">
                     <div className="flex items-center gap-3">
-                      <Avatar user={member} size={32} />
+                      <Avatar user={member} size={34} />
                       <div>
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs sm:text-sm font-bold text-bone">{member.name}</span>
                           {member.isHost && (
                             <span className="flex items-center gap-0.5 rounded-full bg-gilt/15 border border-gilt/40 px-2 py-0.5 text-[9px] font-bold text-gilt">
                               <Crown className="size-2.5" />
-                              <span>{t('host')}</span>
+                              <span>{lang === 'ar' ? 'المضيف' : 'Host'}</span>
                             </span>
                           )}
                           {member.id === room.me?.id && (
                             <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-semibold text-dust">
-                              {t('you')}
+                              {lang === 'ar' ? 'أنت' : 'You'}
                             </span>
                           )}
                         </div>
                         <p className="text-[11px] text-dust mt-0.5">
-                          {member.canControl ? (lang === 'ar' ? 'يتحكم في المشغل' : 'Can control playback') : t('viewer')}
+                          {member.canControl 
+                            ? (lang === 'ar' ? 'يتحكم في المشغل' : 'Can control playback') 
+                            : (lang === 'ar' ? 'مشاهد' : 'Viewer')}
                         </p>
                       </div>
                     </div>
@@ -903,7 +913,7 @@ export function DiscordActivity() {
                           onClick={() => room.act(member.canControl ? 'control:revoke' : 'control:grant', member.id)}
                           className="rounded-xl border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-semibold text-bone hover:border-gilt/40 hover:bg-gilt/15 hover:text-gilt transition"
                         >
-                          {member.canControl ? t('revoke') : t('grant')}
+                          {member.canControl ? (lang === 'ar' ? 'سحب التحكم' : 'Revoke') : (lang === 'ar' ? 'منح التحكم' : 'Grant')}
                         </button>
                       </div>
                     )}
@@ -912,7 +922,7 @@ export function DiscordActivity() {
               ) : (
                 <div className="p-8 text-center text-dust">
                   <Users className="size-8 mx-auto mb-2 opacity-50 text-gilt" />
-                  <p className="text-xs">{t('popcornReady')}</p>
+                  <p className="text-xs">{lang === 'ar' ? 'في انتظار انضمام الأصدقاء من القناة الصوتية...' : 'Waiting for voice channel members to join...'}</p>
                 </div>
               )}
             </div>
@@ -930,7 +940,7 @@ export function DiscordActivity() {
                     {selectedShow.title}
                   </h3>
                   <p className="text-[11px] text-dust">
-                    {lang === 'ar' ? 'اختر الموسم والحلقة للبث في القناة الصوتية' : 'Select season & episode to stream in voice'}
+                    {lang === 'ar' ? 'اختر الموسم والحلقة للبث المباشر في القناة الصوتية' : 'Select season & episode to stream in voice'}
                   </p>
                 </div>
                 <button
@@ -956,7 +966,7 @@ export function DiscordActivity() {
                             : 'bg-white/5 text-dust hover:bg-white/10 hover:text-bone'
                         }`}
                       >
-                        {t('season', { n: s.seasonNumber })}
+                        {lang === 'ar' ? `الموسم ${s.seasonNumber}` : `Season ${s.seasonNumber}`}
                       </button>
                     ))}
                 </div>
@@ -989,14 +999,14 @@ export function DiscordActivity() {
                         className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-blood to-blood-hot px-3.5 py-1.5 text-xs font-bold text-white shadow-[0_0_12px_rgba(186,24,27,0.3)] hover:scale-105 active:scale-95 shrink-0 transition"
                       >
                         <Play className="size-3 fill-current" />
-                        <span>{t('play')}</span>
+                        <span>{lang === 'ar' ? 'تشغيل' : 'Play'}</span>
                       </button>
                     </div>
                   ))
                 ) : (
                   <div className="p-8 text-center text-dust">
                     <Tv className="size-7 mx-auto mb-2 opacity-50 text-gilt" />
-                    <p className="text-xs">No episodes found for this season.</p>
+                    <p className="text-xs">{lang === 'ar' ? 'لا توجد حلقات متاحة لهذا الموسم حالياً' : 'No episodes found for this season.'}</p>
                   </div>
                 )}
               </div>

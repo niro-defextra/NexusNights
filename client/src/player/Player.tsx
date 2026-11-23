@@ -43,6 +43,7 @@ interface Props {
   canControl?: boolean;
   onDisabledControlClick?: () => void;
   theatreMode?: boolean;
+  embedded?: boolean;
   hasNext: boolean;
   onBack: () => void;
   onNext: () => void;
@@ -84,7 +85,7 @@ const put = (k: string, v: string) => { try { localStorage.setItem(k, v); } catc
 const sleep = (ms: number, s: AbortSignal) => new Promise<void>((res) => { const t = setTimeout(res, ms); s.addEventListener('abort', () => { clearTimeout(t); res(); }, { once: true }); });
 
 export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref) {
-  const { media, title, subtitle, startAt = 0, autoPlay = true, controlled = false, canControl = true, onDisabledControlClick, theatreMode = false, hasNext, onBack, onNext, onEnded, onProgress, onUserPlay, onUserPause, onUserSeek, onSubtitleChange, onAudioChange, onSpeedChange, intentPlaying, onReady, onBuffering, holdLabel, hideSpeed, overlay, extraControls } = props;
+  const { media, title, subtitle, startAt = 0, autoPlay = true, controlled = false, canControl = true, onDisabledControlClick, theatreMode = false, embedded = false, hasNext, onBack, onNext, onEnded, onProgress, onUserPlay, onUserPause, onUserSeek, onSubtitleChange, onAudioChange, onSpeedChange, intentPlaying, onReady, onBuffering, holdLabel, hideSpeed, overlay, extraControls } = props;
   const { streamingConfig, streamingLoading, streamingError, skipTimings } = props;
   const { t, lang } = useI18n();
 
@@ -330,7 +331,14 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       setPhase('ready');
       setFailoverMessage(null);
       cb.current.onReady?.();
-      if (autoPlay) v.play().catch(() => { /* autoplay blocked → user presses play */ });
+      if (autoPlay) {
+        v.play().catch(() => {
+          // If unmuted autoplay is rejected by browser policy (common in iframes), fallback to muted autoplay
+          v.muted = true;
+          setMuted(true);
+          v.play().catch(() => { /* user interaction required */ });
+        });
+      }
     };
 
     (async () => {
@@ -1374,7 +1382,12 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     setTime(x);
   }, [maxSeek]);
 
-  const userPlay = () => { const v = videoRef.current!; if (!controlled) v.play().catch(() => {}); onUserPlay?.(v.currentTime); doFlash('play'); };
+  const userPlay = () => {
+    const v = videoRef.current!;
+    v.play().catch(() => {});
+    onUserPlay?.(v.currentTime);
+    doFlash('play');
+  };
   const userPause = () => { const v = videoRef.current!; if (!controlled) v.pause(); onUserPause?.(v.currentTime); doFlash('pause'); };
   const togglePlay = () => ((intentPlaying ?? !videoRef.current!.paused) ? userPause() : userPlay());
   const userSeek = (tt: number) => {
@@ -1465,7 +1478,20 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
   }, [streamingConfig, currentSource]);
 
   useImperativeHandle(ref, () => ({
-    play: async () => { if (videoRef.current) await videoRef.current.play(); },
+    play: async () => {
+      const v = videoRef.current;
+      if (!v) return;
+      try {
+        await v.play();
+      } catch (err: any) {
+        if (err?.name === 'NotAllowedError') {
+          // Fallback to muted playback on iframe autoplay restrictions
+          v.muted = true;
+          setMuted(true);
+          await v.play().catch(() => {});
+        }
+      }
+    },
     pause: () => { if (videoRef.current) videoRef.current.pause(); },
     seek: (tt) => {
       seekTo(tt);
@@ -1657,7 +1683,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
       ref={rootRef}
       onPointerMove={poke}
       onPointerDown={(e) => { pointerType.current = e.pointerType; poke(); }}
-      className={`@container ${theatreMode ? 'relative size-full' : 'fixed inset-0'} select-none overflow-hidden bg-black text-bone ${!showUi ? 'cursor-none' : ''}`}
+      className={`@container ${theatreMode || embedded ? 'relative size-full' : 'fixed inset-0'} select-none overflow-hidden bg-black text-bone ${!showUi ? 'cursor-none' : ''}`}
     >
       {theatreMode && !canControl && (
         <div
