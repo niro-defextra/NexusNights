@@ -25,6 +25,9 @@ export const getPlatform = (): string => Capacitor.getPlatform();
  * In native Android (Capacitor WebView), it returns the live backend server URL.
  */
 export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('.discordsays.com')) {
+    return '/.proxy';
+  }
   if (!isNative()) {
     return '';
   }

@@ -7,6 +7,7 @@ import express, { type Request, type Response } from 'express';
 import { Readable } from 'node:stream';
 import type { ProviderSource } from './types';
 import { getSegment, setSegment, SEGMENT_CACHE_MAX_ITEM_BYTES } from './segment-cache';
+import { isDiscordRequest } from './stream-proxy';
 
 export const providerStreamProxyRouter = express.Router();
 
@@ -64,10 +65,13 @@ function isPlaylistUrl(url: string): boolean {
  *   with 403, so a browser-side direct fetch never works. The proxy sets the
  *   provider's own Referer/Origin and makes 720p playback reliable.
  */
-function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string, serverOrigin = ''): string {
+function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string, serverOrigin = '', isDiscord = false): string {
   const lines = manifestText.split('\n');
   const rewrittenLines: string[] = [];
-  const prefix = serverOrigin ? `${serverOrigin}/api/provider-stream-proxy/segment` : '/api/provider-stream-proxy/segment';
+  const prefix = isDiscord
+    ? '/.proxy/api/provider-stream-proxy/segment'
+    : (serverOrigin ? `${serverOrigin}/api/provider-stream-proxy/segment` : '/api/provider-stream-proxy/segment');
+  const discordQuery = isDiscord ? '&discord=1' : '';
 
   for (let line of lines) {
     const trimmed = line.trim();
@@ -78,7 +82,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string
         try {
           const absoluteUrl = new URL(uri, baseUrl).href;
           // URI in tags are always playlists or keys → always proxy
-          const proxiedUrl = `${prefix}?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
+          const proxiedUrl = `${prefix}?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}${discordQuery}`;
           return `URI="${proxiedUrl}"`;
         } catch {
           return `URI="${uri}"`;
@@ -97,7 +101,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, sourceId: string
     // Non-comment lines: sub-playlists or media segments
     try {
       const absoluteUrl = new URL(trimmed, baseUrl).href;
-      const proxiedUrl = `${prefix}?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}`;
+      const proxiedUrl = `${prefix}?id=${sourceId}&url=${encodeURIComponent(absoluteUrl)}${discordQuery}`;
       rewrittenLines.push(proxiedUrl);
     } catch {
       rewrittenLines.push(line);
@@ -143,11 +147,12 @@ providerStreamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Resp
     }
     console.log(`[ProviderStreamProxy] Master playlist fetched: ${manifestText.length} bytes`);
     
+    const isDiscord = isDiscordRequest(req);
     const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
     const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
     const serverOrigin = `${protoHeader}://${hostHeader}`;
     const baseUrl = source.url;
-    const rewritten = rewriteManifest(manifestText, baseUrl, id, serverOrigin);
+    const rewritten = rewriteManifest(manifestText, baseUrl, id, serverOrigin, isDiscord);
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -224,11 +229,12 @@ providerStreamProxyRouter.get('/segment', async (req: Request, res: Response) =>
 
       // Verify it's actually an HLS playlist (stream.php may return different content types)
       if (manifestText.includes('#EXTM3U')) {
+        const isDiscord = isDiscordRequest(req);
         const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
         const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
         const serverOrigin = `${protoHeader}://${hostHeader}`;
         const baseUrl = url;
-        const rewritten = rewriteManifest(manifestText, baseUrl, id, serverOrigin);
+        const rewritten = rewriteManifest(manifestText, baseUrl, id, serverOrigin, isDiscord);
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Cache-Control', 'no-cache');

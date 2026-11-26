@@ -365,7 +365,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           if (dead) return;
         }
         setPhase('loading');
-        const url = u(`/api/hls/${media.id}/master.m3u8`);
+        const isDc = typeof window !== 'undefined' && window.location.hostname.endsWith('.discordsays.com');
+        const url = (u(`/api/hls/${media.id}/master.m3u8`) || `/api/hls/${media.id}/master.m3u8`) + (isDc ? '?discord=1' : '');
 
         if (Hls.isSupported()) {
           hls = new Hls({
@@ -454,6 +455,9 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
 
       setPhase('loading');
       let url = u(source.url) || source.url;
+      if (typeof window !== 'undefined' && window.location.hostname.endsWith('.discordsays.com')) {
+        url += (url.includes('?') ? '&' : '?') + 'discord=1';
+      }
 
       // On-demand native sniffer resolution
       if (url.includes('/api/streaming/resolve-native')) {
@@ -480,6 +484,9 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
             throw new Error(data.message || 'Sniffer resolution failed');
           }
           url = u(data.streamUrl) || data.streamUrl;
+          if (typeof window !== 'undefined' && window.location.hostname.endsWith('.discordsays.com')) {
+            url += (url.includes('?') ? '&' : '?') + 'discord=1';
+          }
           setPhase('loading');
           setFailoverMessage(null);
         } catch (err: any) {
@@ -1388,8 +1395,21 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
     onUserPlay?.(v.currentTime);
     doFlash('play');
   };
-  const userPause = () => { const v = videoRef.current!; if (!controlled) v.pause(); onUserPause?.(v.currentTime); doFlash('pause'); };
-  const togglePlay = () => ((intentPlaying ?? !videoRef.current!.paused) ? userPause() : userPlay());
+  const userPause = () => {
+    const v = videoRef.current!;
+    v.pause();
+    onUserPause?.(v.currentTime);
+    doFlash('pause');
+  };
+  const togglePlay = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      userPlay();
+    } else {
+      userPause();
+    }
+  };
   const userSeek = (tt: number) => {
     const x = clamp(tt, 0, Math.max(0, maxSeek()));
     if (!controlled) seekTo(x);
@@ -1488,8 +1508,17 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(props, ref
           // Fallback to muted playback on iframe autoplay restrictions
           v.muted = true;
           setMuted(true);
-          await v.play().catch(() => {});
+          try {
+            await v.play();
+          } catch {
+            throw err;
+          }
+        } else {
+          throw err;
         }
+      }
+      if (v.paused) {
+        throw new Error('playback_prevented');
       }
     },
     pause: () => { if (videoRef.current) videoRef.current.pause(); },

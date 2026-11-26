@@ -311,6 +311,14 @@ export class Room {
   }
 
   private recomputeHold(now: number): boolean {
+    if (this.id.startsWith('dc-')) {
+      // In Discord Activities, never freeze the whole room on hold
+      if (this.state.hold) {
+        this.state = { ...this.state, hold: false, at: now, version: this.state.version + 1 };
+        return true;
+      }
+      return false;
+    }
     const any = [...this.members.values()].some((m) => m.sockets.size > 0 && (m.awaitingLoad || m.stalled));
     const s = this.state;
     const should = s.playing && any;

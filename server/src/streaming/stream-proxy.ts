@@ -15,10 +15,30 @@ import { getSegment, setSegment, SEGMENT_CACHE_MAX_ITEM_BYTES } from './segment-
 
 export const streamProxyRouter = express.Router();
 
-function rewriteManifest(manifestText: string, baseUrl: string, streamId: string, serverOrigin = ''): string {
+export function isDiscordRequest(req: Request): boolean {
+  if (req.query.discord === '1') return true;
+  const referer = req.get('referer') || '';
+  const origin = req.get('origin') || '';
+  const xForwardedHost = req.get('x-forwarded-host') || '';
+  const xForwardedUri = (req.headers['x-forwarded-uri'] as string) || '';
+  const originalUrl = req.originalUrl || req.url || '';
+
+  return (
+    originalUrl.startsWith('/.proxy/') ||
+    xForwardedUri.startsWith('/.proxy/') ||
+    referer.includes('discordsays.com') ||
+    origin.includes('discordsays.com') ||
+    xForwardedHost.includes('discordsays.com')
+  );
+}
+
+function rewriteManifest(manifestText: string, baseUrl: string, streamId: string, serverOrigin = '', isDiscord = false): string {
   const lines = manifestText.split('\n');
   const rewrittenLines: string[] = [];
-  const prefix = serverOrigin ? `${serverOrigin}/api/stream-proxy/segment` : '/api/stream-proxy/segment';
+  const prefix = isDiscord
+    ? '/.proxy/api/stream-proxy/segment'
+    : (serverOrigin ? `${serverOrigin}/api/stream-proxy/segment` : '/api/stream-proxy/segment');
+  const discordQuery = isDiscord ? '&discord=1' : '';
 
   for (let line of lines) {
     const trimmed = line.trim();
@@ -28,7 +48,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, streamId: string
       const rewrittenTag = trimmed.replace(/URI="([^"]+)"/g, (_match, uri) => {
         try {
           const absoluteUrl = new URL(uri, baseUrl).href;
-          const proxiedUrl = `${prefix}?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}`;
+          const proxiedUrl = `${prefix}?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}${discordQuery}`;
           return `URI="${proxiedUrl}"`;
         } catch {
           return `URI="${uri}"`;
@@ -47,7 +67,7 @@ function rewriteManifest(manifestText: string, baseUrl: string, streamId: string
     // Rewrite media segment or sub-playlist URL
     try {
       const absoluteUrl = new URL(trimmed, baseUrl).href;
-      const proxiedUrl = `${prefix}?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}`;
+      const proxiedUrl = `${prefix}?id=${streamId}&url=${encodeURIComponent(absoluteUrl)}${discordQuery}`;
       rewrittenLines.push(proxiedUrl);
     } catch {
       rewrittenLines.push(line);
@@ -111,9 +131,11 @@ export function clearStreamProxyCache(): void {
  */
 streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) => {
   const { id } = req.params;
+  const isDiscord = isDiscordRequest(req);
+  const cacheKey = `${id}:${isDiscord ? 'discord' : 'normal'}`;
 
   // Check micro-cache first
-  const cached = masterPlaylistCache.get(id);
+  const cached = masterPlaylistCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) {
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -151,7 +173,10 @@ streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) =>
           const freshStream = await streamResolver.reResolveById(id);
           if (freshStream && freshStream.id !== id) {
             // Redirect to the new stream master
-            res.redirect(302, `/api/stream-proxy/master/${freshStream.id}.m3u8`);
+            const redirectUrl = isDiscord 
+              ? `/.proxy/api/stream-proxy/master/${freshStream.id}.m3u8?discord=1`
+              : `/api/stream-proxy/master/${freshStream.id}.m3u8`;
+            res.redirect(302, redirectUrl);
           } else if (freshStream) {
             // Same ID but refreshed — serve immediately
             const freshUpstream = await fetch(freshStream.playlistUrl, {
@@ -163,7 +188,7 @@ streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) =>
               return;
             }
             const manifestText = await freshUpstream.text();
-            const rewritten = rewriteManifest(manifestText, freshStream.playlistUrl, freshStream.id, serverOrigin);
+            const rewritten = rewriteManifest(manifestText, freshStream.playlistUrl, freshStream.id, serverOrigin, isDiscord);
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -193,7 +218,7 @@ streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) =>
           });
           const freshText = await freshUpstream.text();
           if (freshText.includes('#EXTM3U')) {
-            const rewritten = rewriteManifest(freshText, freshStream.playlistUrl, freshStream.id, serverOrigin);
+            const rewritten = rewriteManifest(freshText, freshStream.playlistUrl, freshStream.id, serverOrigin, isDiscord);
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -207,8 +232,8 @@ streamProxyRouter.get('/master/:id.m3u8', async (req: Request, res: Response) =>
       res.status(502).send('Upstream playlist returned invalid content or error page.');
       return;
     }
-    const rewritten = rewriteManifest(manifestText, stream.playlistUrl, stream.id, serverOrigin);
-    masterPlaylistCache.set(id, { text: rewritten, expiresAt: Date.now() + 3000 });
+    const rewritten = rewriteManifest(manifestText, stream.playlistUrl, stream.id, serverOrigin, isDiscord);
+    masterPlaylistCache.set(cacheKey, { text: rewritten, expiresAt: Date.now() + 3000 });
 
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -309,10 +334,11 @@ streamProxyRouter.get('/segment', async (req: Request, res: Response) => {
         const manifestText = await upstream.text();
         // If it has #EXTM3U, rewrite it
         if (manifestText.includes('#EXTM3U')) {
+          const isDiscord = isDiscordRequest(req);
           const hostHeader = req.get('x-forwarded-host') || req.get('host');
           const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
           const serverOrigin = hostHeader ? `${protoHeader}://${hostHeader}` : '';
-          const rewritten = rewriteManifest(manifestText, url, stream.id, serverOrigin);
+          const rewritten = rewriteManifest(manifestText, url, stream.id, serverOrigin, isDiscord);
           res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.setHeader('Cache-Control', 'no-cache');

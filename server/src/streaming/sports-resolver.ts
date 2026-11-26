@@ -21,6 +21,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { getSportsFixtures } from './sports-fixtures';
+import { isDiscordRequest } from './stream-proxy';
 
 interface CachedStream {
   streamUrl: string;
@@ -463,10 +464,15 @@ sportsRouter.get('/stream/:channelKey/manifest.m3u8', async (req: Request, res: 
   }
 
   try {
-    // Rewrite sub-playlist URLs to fully-qualified absolute URLs for TV and AVPlay players
+    // Rewrite sub-playlist URLs to fully-qualified absolute URLs for TV and AVPlay players, or /.proxy for Discord
+    const isDiscord = isDiscordRequest(req);
     const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
     const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
     const serverOrigin = `${protoHeader}://${hostHeader}`;
+    const prefix = isDiscord
+      ? `/.proxy/api/sports/stream/${encodeURIComponent(channelKey)}`
+      : `${serverOrigin}/api/sports/stream/${encodeURIComponent(channelKey)}`;
+    const discordQuery = isDiscord ? '&discord=1' : '';
 
     const lines = manifestText.split('\n');
     const rewrittenLines: string[] = [];
@@ -480,7 +486,7 @@ sportsRouter.get('/stream/:channelKey/manifest.m3u8', async (req: Request, res: 
 
       try {
         const absoluteUrl = new URL(trimmed, baseUrl).href;
-        const proxiedSubUrl = `${serverOrigin}/api/sports/stream/${encodeURIComponent(channelKey)}/sub-playlist.m3u8?url=${encodeURIComponent(absoluteUrl)}`;
+        const proxiedSubUrl = `${prefix}/sub-playlist.m3u8?url=${encodeURIComponent(absoluteUrl)}${discordQuery}`;
         rewrittenLines.push(proxiedSubUrl);
       } catch {
         rewrittenLines.push(line);
@@ -523,9 +529,14 @@ sportsRouter.get('/stream/:channelKey/sub-playlist.m3u8', async (req: Request, r
       return res.status(upstreamRes.status).send(`Upstream sub-playlist returned ${upstreamRes.status}`);
     }
 
+    const isDiscord = isDiscordRequest(req);
     const hostHeader = req.get('x-forwarded-host') || req.get('host') || 'nexusunights.tech';
     const protoHeader = req.get('x-forwarded-proto') || req.protocol || 'https';
     const serverOrigin = `${protoHeader}://${hostHeader}`;
+    const prefix = isDiscord
+      ? `/.proxy/api/sports/stream/${encodeURIComponent(channelKey)}`
+      : `${serverOrigin}/api/sports/stream/${encodeURIComponent(channelKey)}`;
+    const discordQuery = isDiscord ? '&discord=1' : '';
 
     const playlistText = await upstreamRes.text();
     const lines = playlistText.split('\n');
@@ -539,7 +550,7 @@ sportsRouter.get('/stream/:channelKey/sub-playlist.m3u8', async (req: Request, r
           const rewrittenTag = trimmed.replace(/URI="([^"]+)"/g, (_match, uri) => {
             try {
               const absKeyUrl = new URL(uri, targetUrl).href;
-              return `URI="${serverOrigin}/api/sports/stream/${encodeURIComponent(channelKey)}/segment.ts?url=${encodeURIComponent(absKeyUrl)}"`;
+              return `URI="${prefix}/segment.ts?url=${encodeURIComponent(absKeyUrl)}${discordQuery}"`;
             } catch {
               return `URI="${uri}"`;
             }
@@ -553,7 +564,7 @@ sportsRouter.get('/stream/:channelKey/sub-playlist.m3u8', async (req: Request, r
 
       try {
         const absoluteSegUrl = new URL(trimmed, targetUrl).href;
-        const proxiedSegUrl = `${serverOrigin}/api/sports/stream/${encodeURIComponent(channelKey)}/segment.ts?url=${encodeURIComponent(absoluteSegUrl)}`;
+        const proxiedSegUrl = `${prefix}/segment.ts?url=${encodeURIComponent(absoluteSegUrl)}${discordQuery}`;
         rewrittenLines.push(proxiedSegUrl);
       } catch {
         rewrittenLines.push(line);

@@ -11,6 +11,7 @@
  */
 
 import { DiscordSDK, DiscordSDKMock } from '@discord/embedded-app-sdk';
+import { u } from '../api';
 
 // ── Discord environment detection ───────────────────────────────────────────
 // Discord Activities run inside `*.discordsays.com` iframes, with a `frame_id`
@@ -88,7 +89,8 @@ export async function initializeDiscordSDK(): Promise<void> {
       // ── 2. Exchange code for access_token (via our backend) ───────────
       if (isRealSDK) {
         try {
-          const tokenRes = await fetch('/api/token', {
+          const tokenUrl = u('/api/token') || '/api/token';
+          const tokenRes = await fetch(tokenUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ code }),

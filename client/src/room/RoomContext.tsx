@@ -193,7 +193,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
     if (!roomAuth) { setConnection('off'); return; }
     setConnection('connecting');
     const s = io(BASE || undefined, { 
-      path: '/socket.io', 
+      path: BASE ? `${BASE.replace(/\/+$/, '')}/socket.io` : '/socket.io', 
       auth: roomAuth, 
       reconnectionDelayMax: 4000,
       transports: ['websocket', 'polling'],

@@ -26,22 +26,20 @@ export function DiscordActivity() {
   const room = useRoom();
   const auth = useAuth();
   const discord = useDiscord();
+  const roomRef = useRef(room);
+  roomRef.current = room;
 
   // ── Auto-join Discord voice channel room ──────────────────────────────────
-  // When inside Discord, map the voice channel to a NexusNight room so all
-  // users in the same voice channel land in the same watch-party room.
+  // Always assign a room param in the hash so Socket.IO connection is initialized
   useEffect(() => {
-    if (!discord.isReady || !discord.channelId) return;
-    if (room.active && room.roomId) return;
-
-    const roomId = `dc-${discord.channelId}`;
     const hash = window.location.hash;
     if (!hash.includes('room=')) {
+      const channelRoom = discord.channelId ? `dc-${discord.channelId}` : 'dc-voice';
       const separator = hash.includes('?') ? '&' : '?';
-      window.location.hash = `${hash}${separator}room=${encodeURIComponent(roomId)}`;
-      console.log('[DiscordActivity] Auto-joined voice channel room:', roomId);
+      window.location.hash = `${hash}${separator}room=${encodeURIComponent(channelRoom)}`;
+      console.log('[DiscordActivity] Auto-joined voice channel room:', channelRoom);
     }
-  }, [discord.isReady, discord.channelId, room.active, room.roomId]);
+  }, [discord.channelId]);
 
   const [activeTab, setActiveTab] = useState<'watch' | 'browse' | 'members'>('browse');
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,8 +62,10 @@ export function DiscordActivity() {
   const [seasonData, setSeasonData] = useState<GlobalSeason | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
 
-  // Playback state for active room media
-  const activeMediaId = room.state?.mediaId ?? null;
+  // Playback state: driven by room sync or immediate local selection
+  const [localMediaId, setLocalMediaId] = useState<string | null>(null);
+  const activeMediaId = room.state?.mediaId || localMediaId;
+
   const [mediaDetail, setMediaDetail] = useState<EpisodeDetail | null>(null);
   const [streamingConfig, setStreamingConfig] = useState<PlaybackConfigPublic | null>(null);
   const [skipTimings, setSkipTimings] = useState<AniSkipTimingsPublic | null>(null);
@@ -84,9 +84,25 @@ export function DiscordActivity() {
   const canControlPlayback = useMemo(() => {
     if (!room.active) return true;
     if (room.isHost) return true;
+    if (room.canControl) return true;
     if (room.room?.mode === 'everyone') return true;
-    return room.canControl;
-  }, [room.active, room.isHost, room.room?.mode, room.canControl]);
+    if ((room.room?.members?.length ?? 0) <= 1) return true;
+    return false;
+  }, [room.active, room.isHost, room.canControl, room.room?.mode, room.room?.members?.length]);
+
+  // Keep localMediaId synchronized when room state changes
+  useEffect(() => {
+    if (room.state?.mediaId) {
+      setLocalMediaId(room.state.mediaId);
+    }
+  }, [room.state?.mediaId]);
+
+  // If local media was selected before room connected, sync it once connected
+  useEffect(() => {
+    if (room.active && localMediaId && room.state?.mediaId !== localMediaId) {
+      void room.send({ type: 'select', mediaId: localMediaId, position: 0 });
+    }
+  }, [room.active, localMediaId, room.state?.mediaId]);
 
   // ── Room ↔ Player sync (keeps player in step with room state) ─────────────
   useRoomSync({
@@ -103,7 +119,7 @@ export function DiscordActivity() {
     setNeedsGesture(false);
   }, [activeMediaId]);
 
-  // ── Auto switch to watch tab when media is selected in room ───────────────
+  // ── Auto switch to watch tab when media is selected ───────────────────────
   useEffect(() => {
     if (activeMediaId) {
       setActiveTab('watch');
@@ -213,7 +229,7 @@ export function DiscordActivity() {
     return () => { cancel = true; };
   }, [selectedShow, selectedSeasonNum, lang]);
 
-  // ── Fetch active media details when room.state.mediaId changes ────────────
+  // ── Fetch active media details when activeMediaId changes ─────────────────
   useEffect(() => {
     if (!activeMediaId) {
       setMediaDetail(null);
@@ -336,43 +352,38 @@ export function DiscordActivity() {
   };
 
   const playMediaInVoice = async (mediaId: string) => {
-    if (room.active) {
-      if (!canControlPlayback) {
-        room.toast(t('onlyHost'));
-        return;
-      }
-      setPlaybackLoading(true);
-      setPlaybackError(null);
-      setMediaDetail(null);
-      setStreamingConfig(null);
-      setSkipTimings(null);
+    setLocalMediaId(mediaId);
+    setPlaybackLoading(true);
+    setPlaybackError(null);
+    setMediaDetail(null);
+    setStreamingConfig(null);
+    setSkipTimings(null);
+    setActiveTab('watch');
+    setSelectedShow(null);
 
-      const res = await room.send({ type: 'select', mediaId, position: 0 });
+    const r = roomRef.current;
+    if (r.active) {
+      const res = await r.send({ type: 'select', mediaId, position: 0 });
       if (!res.ok) {
-        console.error('[DiscordActivity] Failed to select media in room:', res.error);
-        room.toast(res.error === 'forbidden' ? t('onlyHost') : t('playbackErrorHint'));
-        setPlaybackLoading(false);
-        return;
+        console.warn('[DiscordActivity] select media in room response:', res.error);
       }
     } else {
-      const channelRoom = discord.channelId ? `dc-${discord.channelId}` : `dc-voice`;
+      const channelRoom = discord.channelId ? `dc-${discord.channelId}` : 'dc-voice';
       const currentHash = window.location.hash.replace(/[?&]room=[^&]*/g, '');
       const sep = currentHash.includes('?') ? '&' : '?';
       window.location.hash = `${currentHash}${sep}room=${encodeURIComponent(channelRoom)}`;
-
-      const waitAndSelect = () => {
-        const check = setInterval(() => {
-          if (room.active) {
-            clearInterval(check);
-            void room.send({ type: 'select', mediaId, position: 0 });
-          }
-        }, 200);
-        setTimeout(() => clearInterval(check), 10_000);
-      };
-      waitAndSelect();
     }
-    setActiveTab('watch');
-    setSelectedShow(null);
+  };
+
+  const handleStopPlayback = () => {
+    const r = roomRef.current;
+    if (r.active) {
+      void r.send({ type: 'clear' });
+    }
+    setLocalMediaId(null);
+    setMediaDetail(null);
+    setStreamingConfig(null);
+    setActiveTab('browse');
   };
 
   const handleCopyLink = () => {
@@ -610,7 +621,7 @@ export function DiscordActivity() {
                   embedded={true}
                   controlled={room.active}
                   canControl={canControlPlayback}
-                  intentPlaying={!!room.state?.playing}
+                  intentPlaying={room.active ? !!room.state?.playing : true}
                   holdLabel={room.active && room.state?.hold && room.waitingFor.length
                     ? (() => {
                         const myName = room.me?.name || auth.user?.username;
@@ -630,12 +641,7 @@ export function DiscordActivity() {
                   onAudioChange={(trackIdx) => canControlPlayback && void room.send({ type: 'audio', audioTrack: trackIdx })}
                   onSpeedChange={(rate) => canControlPlayback && void room.send({ type: 'speed', playbackRate: rate })}
                   hasNext={false}
-                  onBack={() => {
-                    if (room.isHost || canControlPlayback) {
-                      void room.send({ type: 'clear' });
-                    }
-                    setActiveTab('browse');
-                  }}
+                  onBack={handleStopPlayback}
                   onNext={() => {}}
                 />
 
@@ -716,10 +722,7 @@ export function DiscordActivity() {
                 {/* Stop playback button for host/controller */}
                 {canControlPlayback && (
                   <button
-                    onClick={() => {
-                      void room.send({ type: 'clear' });
-                      setActiveTab('browse');
-                    }}
+                    onClick={handleStopPlayback}
                     className="flex items-center gap-1.5 rounded-xl border border-blood/40 bg-blood/10 px-3 py-1.5 text-xs font-semibold text-blood-hot hover:bg-blood/20 transition active:scale-95"
                     title={lang === 'ar' ? 'إنهاء العرض الحالي وخروج الجميع إلى القائمة' : 'Stop current playback and return everyone to browse'}
                   >
